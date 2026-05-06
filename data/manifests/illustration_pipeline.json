@@ -1,0 +1,1020 @@
+{
+  "source_manifest": "data\\manifests\\sundays_liturgy.json",
+  "upload_note": "Uploader une image vers gcs_path_primary (ou alternate) pour affichage automatique sur « La Lumière du Dimanche ».",
+  "targets": [
+    {
+      "date": "2026-01-04",
+      "zone": "france",
+      "temps_liturgique": "noel",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-01-04.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-01-04.png",
+        "Images/illustrations/2026/2026-01-04.jpg"
+      ],
+      "keywords": [
+        "noel",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: noel, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-01-11",
+      "zone": "france",
+      "temps_liturgique": "noel",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-01-11.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-01-11.png",
+        "Images/illustrations/2026/2026-01-11.jpg"
+      ],
+      "keywords": [
+        "noel",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: noel, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-01-18",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-01-18.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-01-18.png",
+        "Images/illustrations/2026/2026-01-18.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-01-25",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-01-25.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-01-25.png",
+        "Images/illustrations/2026/2026-01-25.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-02-01",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-02-01.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-02-01.png",
+        "Images/illustrations/2026/2026-02-01.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-02-08",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-02-08.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-02-08.png",
+        "Images/illustrations/2026/2026-02-08.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-02-15",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-02-15.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-02-15.png",
+        "Images/illustrations/2026/2026-02-15.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-02-22",
+      "zone": "france",
+      "temps_liturgique": "careme",
+      "couleur": "violet",
+      "gcs_path_primary": "Images/illustrations/2026/2026-02-22.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-02-22.png",
+        "Images/illustrations/2026/2026-02-22.jpg"
+      ],
+      "keywords": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: careme, violet, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-03-01",
+      "zone": "france",
+      "temps_liturgique": "careme",
+      "couleur": "violet",
+      "gcs_path_primary": "Images/illustrations/2026/2026-03-01.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-03-01.png",
+        "Images/illustrations/2026/2026-03-01.jpg"
+      ],
+      "keywords": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: careme, violet, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-03-08",
+      "zone": "france",
+      "temps_liturgique": "careme",
+      "couleur": "violet",
+      "gcs_path_primary": "Images/illustrations/2026/2026-03-08.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-03-08.png",
+        "Images/illustrations/2026/2026-03-08.jpg"
+      ],
+      "keywords": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: careme, violet, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-03-15",
+      "zone": "france",
+      "temps_liturgique": "careme",
+      "couleur": "rose",
+      "gcs_path_primary": "Images/illustrations/2026/2026-03-15.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-03-15.png",
+        "Images/illustrations/2026/2026-03-15.jpg"
+      ],
+      "keywords": [
+        "careme",
+        "rose",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: careme, rose, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-03-22",
+      "zone": "france",
+      "temps_liturgique": "careme",
+      "couleur": "violet",
+      "gcs_path_primary": "Images/illustrations/2026/2026-03-22.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-03-22.png",
+        "Images/illustrations/2026/2026-03-22.jpg"
+      ],
+      "keywords": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: careme, violet, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-03-29",
+      "zone": "france",
+      "temps_liturgique": "careme",
+      "couleur": "rouge",
+      "gcs_path_primary": "Images/illustrations/2026/2026-03-29.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-03-29.png",
+        "Images/illustrations/2026/2026-03-29.jpg"
+      ],
+      "keywords": [
+        "careme",
+        "rouge",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: careme, rouge, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-04-05",
+      "zone": "france",
+      "temps_liturgique": "triduum",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-04-05.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-04-05.png",
+        "Images/illustrations/2026/2026-04-05.jpg"
+      ],
+      "keywords": [
+        "triduum",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: triduum, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-04-12",
+      "zone": "france",
+      "temps_liturgique": "pascal",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-04-12.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-04-12.png",
+        "Images/illustrations/2026/2026-04-12.jpg"
+      ],
+      "keywords": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: pascal, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-04-19",
+      "zone": "france",
+      "temps_liturgique": "pascal",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-04-19.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-04-19.png",
+        "Images/illustrations/2026/2026-04-19.jpg"
+      ],
+      "keywords": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: pascal, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-04-26",
+      "zone": "france",
+      "temps_liturgique": "pascal",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-04-26.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-04-26.png",
+        "Images/illustrations/2026/2026-04-26.jpg"
+      ],
+      "keywords": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: pascal, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-05-03",
+      "zone": "france",
+      "temps_liturgique": "pascal",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-05-03.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-05-03.png",
+        "Images/illustrations/2026/2026-05-03.jpg"
+      ],
+      "keywords": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: pascal, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-05-10",
+      "zone": "france",
+      "temps_liturgique": "pascal",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-05-10.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-05-10.png",
+        "Images/illustrations/2026/2026-05-10.jpg"
+      ],
+      "keywords": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: pascal, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-05-17",
+      "zone": "france",
+      "temps_liturgique": "pascal",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-05-17.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-05-17.png",
+        "Images/illustrations/2026/2026-05-17.jpg"
+      ],
+      "keywords": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: pascal, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-05-24",
+      "zone": "france",
+      "temps_liturgique": "pascal",
+      "couleur": "rouge",
+      "gcs_path_primary": "Images/illustrations/2026/2026-05-24.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-05-24.png",
+        "Images/illustrations/2026/2026-05-24.jpg"
+      ],
+      "keywords": [
+        "pascal",
+        "rouge",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: pascal, rouge, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-05-31",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-05-31.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-05-31.png",
+        "Images/illustrations/2026/2026-05-31.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-06-07",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-06-07.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-06-07.png",
+        "Images/illustrations/2026/2026-06-07.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-06-14",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-06-14.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-06-14.png",
+        "Images/illustrations/2026/2026-06-14.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-06-21",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-06-21.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-06-21.png",
+        "Images/illustrations/2026/2026-06-21.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-06-28",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-06-28.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-06-28.png",
+        "Images/illustrations/2026/2026-06-28.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-07-05",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-07-05.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-07-05.png",
+        "Images/illustrations/2026/2026-07-05.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-07-12",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-07-12.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-07-12.png",
+        "Images/illustrations/2026/2026-07-12.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-07-19",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-07-19.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-07-19.png",
+        "Images/illustrations/2026/2026-07-19.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-07-26",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-07-26.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-07-26.png",
+        "Images/illustrations/2026/2026-07-26.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-08-02",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-08-02.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-08-02.png",
+        "Images/illustrations/2026/2026-08-02.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-08-09",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-08-09.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-08-09.png",
+        "Images/illustrations/2026/2026-08-09.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-08-16",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-08-16.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-08-16.png",
+        "Images/illustrations/2026/2026-08-16.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-08-23",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-08-23.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-08-23.png",
+        "Images/illustrations/2026/2026-08-23.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-08-30",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-08-30.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-08-30.png",
+        "Images/illustrations/2026/2026-08-30.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-09-06",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-09-06.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-09-06.png",
+        "Images/illustrations/2026/2026-09-06.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-09-13",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-09-13.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-09-13.png",
+        "Images/illustrations/2026/2026-09-13.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-09-20",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-09-20.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-09-20.png",
+        "Images/illustrations/2026/2026-09-20.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-09-27",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-09-27.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-09-27.png",
+        "Images/illustrations/2026/2026-09-27.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-10-04",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-10-04.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-10-04.png",
+        "Images/illustrations/2026/2026-10-04.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-10-11",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-10-11.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-10-11.png",
+        "Images/illustrations/2026/2026-10-11.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-10-18",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-10-18.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-10-18.png",
+        "Images/illustrations/2026/2026-10-18.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-10-25",
+      "zone": "france",
+      "temps_liturgique": null,
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-10-25.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-10-25.png",
+        "Images/illustrations/2026/2026-10-25.jpg"
+      ],
+      "keywords": [
+        "blanc",
+        "Liturgie",
+        "Dimanche"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: blanc, Liturgie, Dimanche"
+    },
+    {
+      "date": "2026-11-01",
+      "zone": "france",
+      "temps_liturgique": null,
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-11-01.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-11-01.png",
+        "Images/illustrations/2026/2026-11-01.jpg"
+      ],
+      "keywords": [
+        "blanc",
+        "Liturgie",
+        "Dimanche"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: blanc, Liturgie, Dimanche"
+    },
+    {
+      "date": "2026-11-08",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-11-08.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-11-08.png",
+        "Images/illustrations/2026/2026-11-08.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-11-15",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "vert",
+      "gcs_path_primary": "Images/illustrations/2026/2026-11-15.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-11-15.png",
+        "Images/illustrations/2026/2026-11-15.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, vert, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-11-22",
+      "zone": "france",
+      "temps_liturgique": "ordinaire",
+      "couleur": "blanc",
+      "gcs_path_primary": "Images/illustrations/2026/2026-11-22.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-11-22.png",
+        "Images/illustrations/2026/2026-11-22.jpg"
+      ],
+      "keywords": [
+        "ordinaire",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: ordinaire, blanc, Matthieu, Royaume des cieux, Unité, Disciples"
+    },
+    {
+      "date": "2026-11-29",
+      "zone": "france",
+      "temps_liturgique": "avent",
+      "couleur": "violet",
+      "gcs_path_primary": "Images/illustrations/2026/2026-11-29.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-11-29.png",
+        "Images/illustrations/2026/2026-11-29.jpg"
+      ],
+      "keywords": [
+        "avent",
+        "violet",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: avent, violet, Marc, Mission, Conversion, Chemin"
+    },
+    {
+      "date": "2026-12-06",
+      "zone": "france",
+      "temps_liturgique": "avent",
+      "couleur": "violet",
+      "gcs_path_primary": "Images/illustrations/2026/2026-12-06.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-12-06.png",
+        "Images/illustrations/2026/2026-12-06.jpg"
+      ],
+      "keywords": [
+        "avent",
+        "violet",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: avent, violet, Marc, Mission, Conversion, Chemin"
+    },
+    {
+      "date": "2026-12-13",
+      "zone": "france",
+      "temps_liturgique": "avent",
+      "couleur": "rose",
+      "gcs_path_primary": "Images/illustrations/2026/2026-12-13.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-12-13.png",
+        "Images/illustrations/2026/2026-12-13.jpg"
+      ],
+      "keywords": [
+        "avent",
+        "rose",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: avent, rose, Marc, Mission, Conversion, Chemin"
+    },
+    {
+      "date": "2026-12-20",
+      "zone": "france",
+      "temps_liturgique": "avent",
+      "couleur": "violet",
+      "gcs_path_primary": "Images/illustrations/2026/2026-12-20.webp",
+      "alternates": [
+        "Images/illustrations/2026/2026-12-20.png",
+        "Images/illustrations/2026/2026-12-20.jpg"
+      ],
+      "keywords": [
+        "avent",
+        "violet",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ],
+      "prompt_midjourney_style": "Minimalist Catholic liturgical illustration, woodcut-inspired line art, gold accent #D4AF37 on cream, serene, no text, theme: avent, violet, Marc, Mission, Conversion, Chemin"
+    }
+  ]
+}

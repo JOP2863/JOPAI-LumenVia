@@ -1,0 +1,2 @@
+"""Noyau applicatif JOPAI LumenVia."""
+

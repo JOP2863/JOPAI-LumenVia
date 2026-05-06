@@ -1,0 +1,9 @@
+# Charte LumenVia — aligne les widgets natifs (radio, slider, accents) sur l’or liturgique
+# et le texte sur brun lisible (évite rouge / bleu système par défaut).
+
+[theme]
+primaryColor = "#D4AF37"
+backgroundColor = "#FDFBF7"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#342E29"
+font = "serif"

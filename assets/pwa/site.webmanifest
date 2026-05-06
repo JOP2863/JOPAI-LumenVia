@@ -1,0 +1,10 @@
+{
+  "name": "JOPAI LumenVia",
+  "short_name": "LumenVia",
+  "description": "Préparation dominicale — lectures AELF et synthèse",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#FDFBF7",
+  "theme_color": "#D4AF37",
+  "icons": []
+}

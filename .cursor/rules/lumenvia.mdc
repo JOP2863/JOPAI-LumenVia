@@ -1,0 +1,46 @@
+---
+description: Règles projet JOPAI LumenVia (Streamlit + AELF + GCP)
+---
+
+## Principes
+- Application **Streamlit mobile-first**.
+- Navigation Streamlit gauche **désactivée** ; navigation custom via **4 boutons en haut**.
+- Source liturgique **canonique**: AELF (`https://api.aelf.org/`), zone **`france`** par défaut (extensible).
+- IA: **anti-hallucination stricte**. Aucun ajout de faits non présents dans les textes AELF. Interprétation permise uniquement comme mise en perspective.
+- Données “DB” dans **Google Sheets**: **append-only / immuabilité**.
+
+## Données (Google Sheets, immutabilité)
+Pour chaque table:
+- Colonnes obligatoires: `row_id`, `entity_id`, `version`, `status`, `created_at`
+- Colonne obligatoire: `concat` = concaténation de toutes les colonnes précédentes (optimisation recherche)
+- Aucun “update destructeur”: tout changement = **nouvelle ligne** (nouvelle version, `status` adapté).
+
+## Secrets
+- Ne jamais commiter `.streamlit/secrets.toml`.
+- Toujours charger via `st.secrets` en app, ou via lecture toml outillée en scripts.
+
+## Stockage GCS (structure)
+- `Images/illustrations/`
+- `Images/logos/`
+- `Fascicules/`
+- `Audio/`
+
+## Style visuel
+Respecter la charte CSS liturgique fournie dans le cahier des charges (or, crème, typo serif, accent par saison).
+
+Assets marque : répertoire `assets/branding/` (`logo_mark.svg`, optionnel `favicon.png` pour `page_icon`).
+
+## UX — traitements serveur (overlay)
+- Toute action utilisateur qui déclenche un **traitement serveur long** (Sheets, GCS, Vertex/Gemini, préchargement lourd) doit afficher un **calque plein écran** via `loading_overlay()` dans `app.py` (style glassmorphism, message clair du type « LumenVia … »), puis **`empty()` dans un `finally`** pour le retirer.
+- S’inspirer du pattern Memoria (`loading_glass` / overlay fixe, `st.empty()` pour lever le calque).
+- Préférer ce calque **en plus** d’un `st.spinner` local lorsque l’opération couvre tout le flux visible.
+
+## Produit — protocole d’évolution (référence)
+- **Étape 2 (livré)** : script `tools/sunday_calendar_manifest.py` → manifeste JSON des dimanches + métadonnées AELF + mots-clés cycle (`data/manifests/`).
+- **Étape 3 (livré)** : script `tools/step3_illustration_pipeline.py` → `data/manifests/illustration_pipeline.json` (chemins GCS `Images/illustrations/{année}/{date}.webp` + prompt type Midjourney). L’app affiche l’image si l’objet existe dans le bucket (voir `app.py`, `_try_show_liturgy_illustration`).
+- **Miroir de l’autel (couleur → `--liturgie-accent`)** : couleur AELF mappée vers une couleur hex lisible ; injection CSS dynamique sur la page « La Lumière du Dimanche » (`app.py`).
+- **Lectionnaire de poche** : cache disque des lectures via `core/local_aelf_cache.py` (`.cache/lumenvia/`) + message hors-ligne si l’API échoue. *(À étendre : cache de la dernière synthèse / audio.)*
+- **PWA** : fichier `assets/pwa/site.webmanifest` ; une installation complète « Add to Home Screen » dépend du **reverse-proxy / hébergeur** (en-têtes, HTTPS, chemin manifest). Streamlit seul n’injecte pas le manifest dans `<head>` sans couche externe.
+- **Typologie biblique / Psaume « Ma réponse »** : consignes dans `data/instructions_ia.md` ; pas de sources hors AELF.
+- **Mémo « Graine de Parole »** : bouton d’inspiration (point « À retenir »), champ `resolution` (Sheets + corps Markdown GCS). **PDF mensuel** : prévoir un encart doré fin de document pour les résolutions (quand le générateur PDF sera branché).
+

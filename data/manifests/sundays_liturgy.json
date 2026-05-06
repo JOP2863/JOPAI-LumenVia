@@ -1,0 +1,873 @@
+{
+  "year": 2026,
+  "zone": "france",
+  "source_liturgy": "AELF API /v1/informations",
+  "entries": [
+    {
+      "date": "2026-01-04",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "noel",
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "L'Épiphanie du Seigneur",
+      "keywords_illustration": [
+        "noel",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-01-11",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "noel",
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "Le Baptême du Seigneur",
+      "keywords_illustration": [
+        "noel",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-01-18",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "2ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "2ème dimanche du Temps Ordinaire (semaine II du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-01-25",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "3ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "3ème dimanche du Temps Ordinaire (semaine III du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-02-01",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "4ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "4ème dimanche du Temps Ordinaire (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-02-08",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "5ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "5ème dimanche du Temps Ordinaire (semaine I du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-02-15",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "6ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "6ème dimanche du Temps Ordinaire (semaine II du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-02-22",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "careme",
+      "semaine": "1ère Semaine de Carême",
+      "couleur": "violet",
+      "jour_liturgique_nom": "1er Dimanche de Carême (semaine I du Psautier)",
+      "keywords_illustration": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-03-01",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "careme",
+      "semaine": "2ème Semaine de Carême",
+      "couleur": "violet",
+      "jour_liturgique_nom": "2ème Dimanche de Carême (semaine II du Psautier)",
+      "keywords_illustration": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-03-08",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "careme",
+      "semaine": "3ème Semaine de Carême",
+      "couleur": "violet",
+      "jour_liturgique_nom": "3ème Dimanche de Carême (semaine III du Psautier)",
+      "keywords_illustration": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-03-15",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "careme",
+      "semaine": "4ème Semaine de Carême",
+      "couleur": "rose",
+      "jour_liturgique_nom": "4ème Dimanche de Carême, de Lætare (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "careme",
+        "rose",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-03-22",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "careme",
+      "semaine": "5ème Semaine de Carême",
+      "couleur": "violet",
+      "jour_liturgique_nom": "5ème Dimanche de Carême (semaine I du Psautier)",
+      "keywords_illustration": [
+        "careme",
+        "violet",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-03-29",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "careme",
+      "semaine": null,
+      "couleur": "rouge",
+      "jour_liturgique_nom": "Dimanche des Rameaux et de la Passion du Seigneur (semaine II du Psautier)",
+      "keywords_illustration": [
+        "careme",
+        "rouge",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-04-05",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "triduum",
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "Résurrection du Seigneur [Psautier semaine propre]",
+      "keywords_illustration": [
+        "triduum",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-04-12",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "pascal",
+      "semaine": "2ème Semaine du Temps Pascal",
+      "couleur": "blanc",
+      "jour_liturgique_nom": "2ème Dimanche de Pâques ou de la Divine Miséricorde (semaine II du Psautier)",
+      "keywords_illustration": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-04-19",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "pascal",
+      "semaine": "3ème Semaine du Temps Pascal",
+      "couleur": "blanc",
+      "jour_liturgique_nom": "3ème Dimanche de Pâques (semaine III du Psautier)",
+      "keywords_illustration": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-04-26",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "pascal",
+      "semaine": "4ème Semaine du Temps Pascal",
+      "couleur": "blanc",
+      "jour_liturgique_nom": "4ème Dimanche de Pâques (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-05-03",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "pascal",
+      "semaine": "5ème Semaine du Temps Pascal",
+      "couleur": "blanc",
+      "jour_liturgique_nom": "5ème Dimanche de Pâques (semaine I du Psautier)",
+      "keywords_illustration": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-05-10",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "pascal",
+      "semaine": "6ème Semaine du Temps Pascal",
+      "couleur": "blanc",
+      "jour_liturgique_nom": "6ème Dimanche de Pâques (semaine II du Psautier)",
+      "keywords_illustration": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-05-17",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "pascal",
+      "semaine": "7ème Semaine du Temps Pascal",
+      "couleur": "blanc",
+      "jour_liturgique_nom": "7ème Dimanche de Pâques (semaine III du Psautier)",
+      "keywords_illustration": [
+        "pascal",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-05-24",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "pascal",
+      "semaine": null,
+      "couleur": "rouge",
+      "jour_liturgique_nom": "Pentecôte",
+      "keywords_illustration": [
+        "pascal",
+        "rouge",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-05-31",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "Sainte Trinité",
+      "keywords_illustration": [
+        "ordinaire",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-06-07",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "Le Saint Sacrement du corps et du sang du Christ",
+      "keywords_illustration": [
+        "ordinaire",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-06-14",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "11ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "11ème dimanche du Temps Ordinaire (semaine III du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-06-21",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "12ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "12ème dimanche du Temps Ordinaire (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-06-28",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "13ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "13ème dimanche du Temps Ordinaire (semaine I du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-07-05",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "14ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "14ème dimanche du Temps Ordinaire (semaine II du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-07-12",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "15ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "15ème dimanche du Temps Ordinaire (semaine III du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-07-19",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "16ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "16ème dimanche du Temps Ordinaire (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-07-26",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "17ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "17ème dimanche du Temps Ordinaire (semaine I du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-08-02",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "18ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "18ème dimanche du Temps Ordinaire (semaine II du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-08-09",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "19ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "19ème dimanche du Temps Ordinaire (semaine III du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-08-16",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "20ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "20ème dimanche du Temps Ordinaire (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-08-23",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "21ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "21ème dimanche du Temps Ordinaire (semaine I du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-08-30",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "22ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "22ème dimanche du Temps Ordinaire (semaine II du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-09-06",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "23ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "23ème dimanche du Temps Ordinaire (semaine III du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-09-13",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "24ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "24ème dimanche du Temps Ordinaire (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-09-20",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "25ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "25ème dimanche du Temps Ordinaire (semaine I du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-09-27",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "26ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "26ème dimanche du Temps Ordinaire (semaine II du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-10-04",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "27ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "27ème dimanche du Temps Ordinaire (semaine III du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-10-11",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "28ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "28ème dimanche du Temps Ordinaire (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-10-18",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "29ème Semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "29ème dimanche du Temps Ordinaire (semaine I du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-10-25",
+      "zone": "france",
+      "cycle": null,
+      "temps_liturgique": null,
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "DÉDICACE DES ÉGLISES consacrées dont on ne connaît pas la date de consécration - France",
+      "keywords_illustration": [
+        "blanc",
+        "Liturgie",
+        "Dimanche"
+      ]
+    },
+    {
+      "date": "2026-11-01",
+      "zone": "france",
+      "cycle": null,
+      "temps_liturgique": null,
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "Tous les Saints (dimanche)",
+      "keywords_illustration": [
+        "blanc",
+        "Liturgie",
+        "Dimanche"
+      ]
+    },
+    {
+      "date": "2026-11-08",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "32ème semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "32ème dimanche du Temps Ordinaire (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-11-15",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": "33ème semaine du Temps Ordinaire",
+      "couleur": "vert",
+      "jour_liturgique_nom": "33ème dimanche du Temps Ordinaire (semaine I du Psautier)",
+      "keywords_illustration": [
+        "ordinaire",
+        "vert",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-11-22",
+      "zone": "france",
+      "cycle": "A",
+      "temps_liturgique": "ordinaire",
+      "semaine": null,
+      "couleur": "blanc",
+      "jour_liturgique_nom": "Notre Seigneur Jésus Christ Roi de l'Univers",
+      "keywords_illustration": [
+        "ordinaire",
+        "blanc",
+        "Matthieu",
+        "Royaume des cieux",
+        "Unité",
+        "Disciples"
+      ]
+    },
+    {
+      "date": "2026-11-29",
+      "zone": "france",
+      "cycle": "B",
+      "temps_liturgique": "avent",
+      "semaine": "1ère Semaine de l'Avent",
+      "couleur": "violet",
+      "jour_liturgique_nom": "1er Dimanche de l'Avent (semaine I du Psautier)",
+      "keywords_illustration": [
+        "avent",
+        "violet",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ]
+    },
+    {
+      "date": "2026-12-06",
+      "zone": "france",
+      "cycle": "B",
+      "temps_liturgique": "avent",
+      "semaine": "2ème Semaine de l'Avent",
+      "couleur": "violet",
+      "jour_liturgique_nom": "2ème Dimanche de l'Avent (semaine II du Psautier)",
+      "keywords_illustration": [
+        "avent",
+        "violet",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ]
+    },
+    {
+      "date": "2026-12-13",
+      "zone": "france",
+      "cycle": "B",
+      "temps_liturgique": "avent",
+      "semaine": "3ème Semaine de l'Avent",
+      "couleur": "rose",
+      "jour_liturgique_nom": "3ème Dimanche de l'Avent, de Gaudete (semaine III du Psautier)",
+      "keywords_illustration": [
+        "avent",
+        "rose",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ]
+    },
+    {
+      "date": "2026-12-20",
+      "zone": "france",
+      "cycle": "B",
+      "temps_liturgique": "avent",
+      "semaine": "4ème Semaine de l'Avent",
+      "couleur": "violet",
+      "jour_liturgique_nom": "4ème Dimanche de l'Avent (semaine IV du Psautier)",
+      "keywords_illustration": [
+        "avent",
+        "violet",
+        "Marc",
+        "Mission",
+        "Conversion",
+        "Chemin"
+      ]
+    },
+    {
+      "date": "2026-12-27",
+      "zone": "france",
+      "error": "404 Client Error: Not Found for url: https://api.aelf.org/v1/informations/2026-12-27/france"
+    }
+  ]
+}
