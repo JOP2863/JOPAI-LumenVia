@@ -1,4 +1,12 @@
 .streamlit/secrets.toml
+.streamlit/secrets*.toml
+.env
+.env.*
+*.pem
+*.key
+*service*account*.json
+*credential*.json
+credentials*.json
 *.docx.txt
 __pycache__/
 *.pyc
