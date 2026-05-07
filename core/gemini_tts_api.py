@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,7 @@ class GeminiTtsApiClient:
         model: str,
         text: str,
         voice_name: str = "Kore",
+        max_retries: int = 6,
     ) -> GeminiTtsResult:
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -46,13 +48,31 @@ class GeminiTtsApiClient:
                 },
             },
         }
-        r = self._session.post(url, json=payload, timeout=90)
-        if r.status_code >= 400:
-            raise RuntimeError(f"Gemini API TTS error {r.status_code}: {r.text}")
-        raw: dict[str, Any] = r.json()
-        b64, mime = _extract_inline_audio(raw)
-        audio = base64.b64decode(b64) if b64 else b""
-        return GeminiTtsResult(model=model, audio_bytes=audio, mime_type=mime or "audio/wav", raw=raw)
+        last_err: str | None = None
+        for attempt in range(max(1, int(max_retries))):
+            r = self._session.post(url, json=payload, timeout=90)
+            if r.status_code < 400:
+                raw: dict[str, Any] = r.json()
+                b64, mime = _extract_inline_audio(raw)
+                audio = base64.b64decode(b64) if b64 else b""
+                return GeminiTtsResult(model=model, audio_bytes=audio, mime_type=mime or "audio/wav", raw=raw)
+
+            # Quotas / surcharge : réessais avec backoff.
+            last_err = f"{r.status_code}: {r.text}"
+            if r.status_code in (429, 500, 502, 503, 504):
+                if attempt < max_retries - 1:
+                    ra = (r.headers or {}).get("Retry-After")
+                    try:
+                        wait_s = float(ra) if ra else 0.0
+                    except Exception:
+                        wait_s = 0.0
+                    if wait_s <= 0:
+                        wait_s = min(2.0 * (2**attempt), 60.0)
+                    time.sleep(wait_s)
+                    continue
+            break
+
+        raise RuntimeError(f"Gemini API TTS error: {last_err or 'inconnue'}")
 
 
 def _extract_inline_audio(raw: dict[str, Any]) -> tuple[str | None, str | None]:

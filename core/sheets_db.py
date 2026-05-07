@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import time
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
@@ -139,6 +140,76 @@ def default_tables() -> list[TableSpec]:
                 ]
             ),
         ),
+        TableSpec(
+            name="vision_text_audit",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "run_id",
+                    "date",
+                    "gcs_path",
+                    "min_chars",
+                    "detected_text",
+                    "detected_text_chars",
+                    "detected_text_alpha_chars",
+                    "has_meaningful_text",
+                    "error",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="vision_text_corrections",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "audit_entity_id",
+                    "run_id",
+                    "date",
+                    "gcs_path",
+                    "replace_from",
+                    "replace_to",
+                    "status_detail",
+                    "vertex_model",
+                    "result_mime",
+                    "result_gcs_path",
+                    "thumb_gcs_path",
+                    "error",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="vision_text_whitelist",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "date",
+                    "gcs_path",
+                    "reason",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="readings_cache",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "date",
+                    "zone",
+                    "periode",
+                    "semaine",
+                    "annee",
+                    "couleur",
+                    "fete",
+                    "jour_liturgique_nom",
+                    "premiere_lecture",
+                    "psaume",
+                    "deuxieme_lecture",
+                    "evangile",
+                    "source",
+                    "error",
+                ]
+            ),
+        ),
     ]
 
 
@@ -165,6 +236,21 @@ def ensure_database(
     for t in tables:
         ws = existing.get(t.name) or sh.add_worksheet(title=t.name, rows=2000, cols=max(10, len(t.columns) + 2))
         _ensure_header(ws, t.columns)
+
+
+def ensure_table(
+    *,
+    gspread_client: gspread.Client,
+    spreadsheet_id: str,
+    table: TableSpec,
+) -> None:
+    """Crée l'onglet si absent et pose le header. Utile en runtime (admin) sans relancer init_sheets_db."""
+    sh = gspread_client.open_by_key(spreadsheet_id)
+    try:
+        ws = sh.worksheet(table.name)
+    except Exception:
+        ws = sh.add_worksheet(title=table.name, rows=2000, cols=max(10, len(table.columns) + 2))
+    _ensure_header(ws, table.columns)
 
 
 def _ensure_header(ws: gspread.Worksheet, header: list[str]) -> None:
@@ -231,8 +317,69 @@ def append_immutable_row(
     row["concat"] = compute_concat(row, header=header)
 
     ordered = [row.get(c, "") for c in header]
-    ws.append_row(ordered, value_input_option="RAW")
+    _append_rows_with_retry(ws, [ordered])
     return row
+
+
+def _append_rows_with_retry(
+    ws: gspread.Worksheet,
+    rows: list[list[Any]],
+    *,
+    max_retries: int = 6,
+    base_sleep_s: float = 1.2,
+) -> None:
+    """
+    Limite Sheets : "Write requests per minute per user" → 429.
+    On groupe les écritures et on retry avec backoff.
+    """
+    last_ex: Exception | None = None
+    for i in range(max(1, int(max_retries))):
+        try:
+            ws.append_rows(rows, value_input_option="RAW")
+            return
+        except Exception as ex:
+            last_ex = ex
+            msg = str(ex)
+            if "429" not in msg and "Quota exceeded" not in msg:
+                raise
+            time.sleep(base_sleep_s * (2**i))
+    if last_ex:
+        raise last_ex
+
+
+def append_immutable_rows_bulk(
+    *,
+    gspread_client: gspread.Client,
+    spreadsheet_id: str,
+    table: str,
+    values_by_col_list: list[Mapping[str, Any]],
+    status: str = "active",
+    version: int = 1,
+    chunk_size: int = 120,
+) -> int:
+    """Append-only en lots : 1 requête / chunk (évite les quotas). Retourne le nombre de lignes ajoutées."""
+    if not values_by_col_list:
+        return 0
+    sh = gspread_client.open_by_key(spreadsheet_id)
+    ws = sh.worksheet(table)
+    header = ws.row_values(1)
+    if not header:
+        raise RuntimeError(f"Table '{table}' non initialisée (header vide).")
+
+    rows_payload: list[list[Any]] = []
+    for values_by_col in values_by_col_list:
+        row = make_row(values_by_col, status=status, version=version)
+        row = dict(row)
+        row["concat"] = compute_concat(row, header=header)
+        rows_payload.append([row.get(c, "") for c in header])
+
+    added = 0
+    step = max(1, int(chunk_size))
+    for i in range(0, len(rows_payload), step):
+        chunk = rows_payload[i : i + step]
+        _append_rows_with_retry(ws, chunk)
+        added += len(chunk)
+    return added
 
 
 def fetch_records(

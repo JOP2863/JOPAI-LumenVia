@@ -108,27 +108,33 @@ class VertexGeminiClient:
                 return m
         return None
 
-    def generate_text(self, *, model: str, prompt: str) -> VertexTextResult:
+    def generate_text(self, *, model: str, prompt: str, max_output_tokens: int = 2048) -> VertexTextResult:
         raw, used_location, used_model = self._generate_auto(
             preferred_models=[model],
             contents=[{"role": "user", "parts": [{"text": prompt}]}],
             generation_config={
                 "temperature": 0.3,
                 "topP": 0.9,
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": int(max_output_tokens),
             },
         )
         text = _extract_text(raw)
         return VertexTextResult(model=f"{used_location}:{used_model}", text=text, raw=raw)
 
-    def generate_text_auto(self, *, preferred_models: list[str], prompt: str) -> VertexTextResult:
+    def generate_text_auto(
+        self,
+        *,
+        preferred_models: list[str],
+        prompt: str,
+        max_output_tokens: int = 2048,
+    ) -> VertexTextResult:
         raw, used_location, used_model = self._generate_auto(
             preferred_models=preferred_models,
             contents=[{"role": "user", "parts": [{"text": prompt}]}],
             generation_config={
                 "temperature": 0.3,
                 "topP": 0.9,
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": int(max_output_tokens),
             },
         )
         text = _extract_text(raw)
@@ -201,11 +207,24 @@ class VertexGeminiClient:
         preferred_models: list[str],
         prompt: str,
         aspect_ratio: str = "4:3",
+        reference_image_bytes: bytes | None = None,
+        reference_image_mime_type: str | None = None,
     ) -> VertexImageResult:
         """Génération d’image (Gemini image / nano-banana) via responseModalities IMAGE."""
+        parts: list[dict[str, Any]] = []
+        if reference_image_bytes:
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": (reference_image_mime_type or "image/png"),
+                        "data": base64.b64encode(reference_image_bytes).decode("ascii"),
+                    }
+                }
+            )
+        parts.append({"text": prompt})
         raw, used_location, used_model = self._generate_auto(
             preferred_models=preferred_models,
-            contents=[{"role": "user", "parts": [{"text": prompt}]}],
+            contents=[{"role": "user", "parts": parts}],
             generation_config={
                 "responseModalities": ["TEXT", "IMAGE"],
                 "imageConfig": {"aspectRatio": aspect_ratio},

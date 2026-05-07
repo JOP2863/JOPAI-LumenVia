@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+from io import BytesIO
 import json
 from datetime import date, datetime, timedelta
 import re
@@ -26,7 +27,15 @@ from core.gcp_clients import build_gcs_client, build_vision_image_annotator_clie
 from core.audio_utils import normalize_audio_bytes, join_wav_bytes
 from core.auth import hash_password, verify_password
 from core.vertex_gemini import VertexGeminiClient
-from core.sheets_db import append_immutable_row, build_gspread_client, fetch_records, utc_now_iso
+from core.sheets_db import (
+    BASE_COLUMNS,
+    append_immutable_row,
+    append_immutable_rows_bulk,
+    build_gspread_client,
+    fetch_records,
+    utc_now_iso,
+    with_concat,
+)
 from core.storage import blob_exists, upload_text, upload_bytes, download_bytes
 from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
@@ -322,6 +331,10 @@ button[kind="secondary"] p {
   white-space: pre-line !important;
   text-align: center !important;
   line-height: 1.15 !important;
+  /* Empêche les retours à la ligne au milieu des mots */
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  hyphens: none !important;
 }
 
 button[kind="primary"]:hover {
@@ -600,8 +613,12 @@ label[data-testid="stWidgetLabel"] {
 @media (max-width: 520px) {
   button[kind="secondary"] {
     min-height: 56px !important;
-    font-size: 0.78rem !important;
+    font-size: 0.74rem !important;
     padding: 0.35rem 0.25rem !important;
+  }
+  button[kind="secondary"] p {
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
   }
 }
 </style>
@@ -656,7 +673,57 @@ def top_nav() -> str:
 
     admin_nav_bar()
 
+    # Styles des boutons “Déconnexion” / “Quitter administration” (couleurs distinctes si le DOM expose la clé).
+    if uid or st.session_state.get("admin_authenticated"):
+        _inject_admin_action_buttons_css()
+
     return st.session_state.route
+
+
+def _inject_admin_action_buttons_css() -> None:
+    """
+    Accentue deux actions sensibles (Déconnexion / Quitter administration) sans changer la grille.
+    Cible plusieurs versions Streamlit : `id`/data contenant la clé du widget lorsqu’elle est exposée.
+    """
+    st.markdown(
+        """
+<style>
+/* Déconnexion — ton pétrole (charte footer) */
+div[class*="st-key-auth_logout_nav"] button,
+div[class*="auth_logout_nav"] button,
+div[id*="auth_logout_nav"] button,
+div[data-anchor-streamlit*="auth_logout_nav"] button {
+  background-color: #145a72 !important;
+  color: #ffffff !important;
+  border-color: #0f4456 !important;
+}
+div[class*="st-key-auth_logout_nav"] button:hover,
+div[class*="auth_logout_nav"] button:hover,
+div[id*="auth_logout_nav"] button:hover,
+div[data-anchor-streamlit*="auth_logout_nav"] button:hover {
+  filter: brightness(1.06);
+}
+
+/* Quitter administration — doré/ocre */
+div[class*="st-key-adm_nav_logout"] button,
+div[class*="adm_nav_logout"] button,
+div[id*="adm_nav_logout"] button,
+div[data-anchor-streamlit*="adm_nav_logout"] button {
+  background-color: #8b6914 !important;
+  color: #ffffff !important;
+  border-color: #654d0f !important;
+}
+div[class*="st-key-adm_nav_logout"] button:hover,
+div[class*="adm_nav_logout"] button:hover,
+div[id*="adm_nav_logout"] button:hover,
+div[data-anchor-streamlit*="adm_nav_logout"] button:hover {
+  filter: brightness(1.06);
+}
+</style>
+
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _admin_login_and_password() -> tuple[str, str]:
@@ -676,29 +743,40 @@ def admin_nav_bar() -> None:
         return
     st.markdown("---")
     st.caption("Administration")
-    acols = st.columns([2, 2, 2, 2, 2, 1], gap="small")
-    with acols[0]:
-        if st.button("Visuels liturgiques", key="adm_nav_step3", use_container_width=True):
+    # 1) Deux rangées de 4 boutons (8 entrées) : plus lisible sur mobile/bureau
+    r1 = st.columns(4, gap="small")
+    with r1[0]:
+        if st.button("Visuels\nliturgiques", key="adm_nav_step3", use_container_width=True):
             st.session_state.route = "admin_step3"
             st.rerun()
-    with acols[1]:
-        if st.button("Vignettes GCS", key="adm_nav_thumbs", use_container_width=True):
+    with r1[1]:
+        if st.button("Vignettes\nCloud", key="adm_nav_thumbs", use_container_width=True):
             st.session_state.route = "admin_thumbs"
             st.rerun()
-    with acols[2]:
-        if st.button("Cahier des charges", key="adm_nav_cdc", use_container_width=True):
-            st.session_state.route = "admin_cdc"
+    with r1[2]:
+        if st.button("Texte\nimages", key="adm_nav_vision", use_container_width=True):
+            st.session_state.route = "admin_vision"
             st.rerun()
-    with acols[3]:
-        if st.button("Test ressources", key="adm_nav_res", use_container_width=True):
+    with r1[3]:
+        if st.button("Cache\nlectures", key="adm_nav_readings_cache", use_container_width=True):
+            st.session_state.route = "admin_readings_cache"
+            st.rerun()
+
+    r2 = st.columns(4, gap="small")
+    with r2[0]:
+        if st.button("Test\nressources", key="adm_nav_res", use_container_width=True):
             st.session_state.route = "admin_resources"
             st.rerun()
-    with acols[4]:
-        if st.button("Plan consolidé", key="adm_nav_plan", use_container_width=True):
+    with r2[1]:
+        if st.button("Cahier\ndes\ncharges", key="adm_nav_cdc", use_container_width=True):
+            st.session_state.route = "admin_cdc"
+            st.rerun()
+    with r2[2]:
+        if st.button("Plan\nconsolidé", key="adm_nav_plan", use_container_width=True):
             st.session_state.route = "admin_plan"
             st.rerun()
-    with acols[5]:
-        if st.button("Quitter session admin", key="adm_nav_logout", use_container_width=True):
+    with r2[3]:
+        if st.button("Quitter\nadministration", key="adm_nav_logout", use_container_width=True):
             st.session_state.pop("admin_authenticated", None)
             st.session_state.pop("admin_phone_preview", None)
             st.session_state.route = "about"
@@ -928,8 +1006,8 @@ def _fetch_existing_sunday_bundle(
     cfg: object,
     date_str: str,
     zone: str,
-) -> tuple[tuple[bytes, str] | None, str | None]:
-    """Dernière génération du jour : (audio bytes, mime) + texte synthèse GCS (même ligne generations)."""
+) -> tuple[tuple[bytes, str] | None, str | None, str | None]:
+    """Dernière génération du jour : (audio bytes, mime) + texte synthèse GCS + URL publique audio (si possible)."""
     try:
         gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=3000)
         gens_day = [
@@ -938,11 +1016,11 @@ def _fetch_existing_sunday_bundle(
             if str(g.get("date", "")).strip() == date_str and str(g.get("zone", "")).strip() == zone
         ]
         if not gens_day:
-            return None, None
+            return None, None, None
         latest = sorted(gens_day, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
         gen_eid = str(latest.get("entity_id") or "").strip()
         if not gen_eid:
-            return None, None
+            return None, None, None
 
         syn_text: str | None = None
         tp = str(latest.get("text_gcs_path") or "").strip()
@@ -957,17 +1035,18 @@ def _fetch_existing_sunday_bundle(
         audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=5000)
         aud_rows = [a for a in audios if str(a.get("gen_entity_id", "")).strip() == gen_eid]
         if not aud_rows:
-            return None, syn_text
+            return None, syn_text, None
         aud = sorted(aud_rows, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
         path = str(aud.get("gcs_path") or "").strip()
         if not path:
-            return None, syn_text
+            return None, syn_text, None
         raw = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
         mime_guess = "audio/wav" if path.lower().endswith(".wav") else "audio/mpeg"
         b, mime, _ = normalize_audio_bytes(audio_bytes=raw, mime_type=mime_guess)
-        return (b, mime), syn_text
+        # On renvoie le path GCS, le lien public éventuel sera construit côté UI si besoin.
+        return (b, mime), syn_text, path
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def _fetch_liturgy_illustration_display_bytes(*, gcs: object, cfg: object, date_str: str) -> bytes | None:
@@ -997,6 +1076,15 @@ def _fetch_liturgy_illustration_full_bytes(*, gcs: object, cfg: object, date_str
         except Exception:
             continue
     return None
+
+
+def _fetch_existing_fascicule_pdf_bytes(*, gcs: object, cfg: object, date_str: str) -> bytes | None:
+    """PDF déjà généré et stocké sous Fascicules/ (si présent)."""
+    path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+    try:
+        return download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
+    except Exception:
+        return None
 
 
 def _try_show_liturgy_illustration(*, gcs: object, cfg: object, date_str: str) -> None:
@@ -1051,16 +1139,9 @@ def cached_aelf(date_str: str, zone: str = "france", *, _identity_schema: int = 
     return identity, texts
 
 
-def render_about() -> None:
-    st.title("JOPAI LumenVia")
-    try:
-        st.image("Parole.jpg", use_container_width=True)
-    except Exception:
-        pass
-
-    st.markdown(
-        """
+_ABOUT_MARKDOWN = """
 « *Ta Parole est une lampe sur mes pas, une lumière sur mon sentier.* »
+
 
 JOPAI LumenVia est un compagnon spirituel conçu pour vous aider à franchir le seuil de la célébration avec un cœur ouvert et une intelligence éclairée.  
 Trop souvent, nous arrivons à la messe sans avoir eu le temps de déposer le bruit du monde. Ce site est une halte, un chemin de lumière (**LumenVia**) pour vous préparer à recevoir la Parole de Dieu.
@@ -1078,8 +1159,17 @@ Trop souvent, nous arrivons à la messe sans avoir eu le temps de déposer le br
 - **Nous rejoindre** : abonnez-vous pour recevoir chaque vendredi soir votre préparation dominicale directement par e-mail, ou par SMS.
 
 Puisse cet outil vous aider à transformer chaque messe en une rencontre plus profonde et plus consciente avec le Christ.
-        """.strip()
-    )
+""".strip()
+
+
+def render_about() -> None:
+    st.title("JOPAI LumenVia")
+    try:
+        st.image("Parole.jpg", use_container_width=True)
+    except Exception:
+        pass
+
+    st.markdown(_ABOUT_MARKDOWN)
     st.subheader("Référence")
     st.markdown(
         "Source liturgique : AELF (Association Épiscopale Liturgique pour les pays Francophones). "
@@ -1090,6 +1180,20 @@ Puisse cet outil vous aider à transformer chaque messe en une rencontre plus pr
 def render_sunday() -> None:
     st.title("La Lumière du Dimanche")
     zone = "france"
+    cfg = load_config()
+
+    def _normalize_aelf_text_for_cache(s: str | None) -> str:
+        """
+        Normalise les textes AELF pour le stockage en Sheets.
+
+        Mode “extrême” : on supprime TOUS les retours chariot et on stocke un seul bloc.
+        Le rendu (PDF / UI) se chargera ensuite du wrap et de la mise en forme.
+        """
+        raw = (s or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not raw:
+            return ""
+        # Remplace tout whitespace (incluant \n) par des espaces, puis compacte.
+        return re.sub(r"\s+", " ", raw).strip()
 
     default = next_sunday(date.today())
     if "_lumenvia_sunday_qs" in st.session_state:
@@ -1100,37 +1204,134 @@ def render_sunday() -> None:
     chosen = st.date_input("Choisir le dimanche", value=default)
     date_str = chosen.isoformat()
 
+    # Lectures : on utilise d'abord un cache Sheets (si configuré), sinon AELF, sinon cache local disque.
     offline = False
     cached_at = ""
-    with st.spinner("Récupération des lectures (AELF)…"):
-        try:
-            identity, texts = cached_aelf(date_str, zone=zone, _identity_schema=4)
-            persist_aelf_snapshot(date_str, zone, identity, texts)
-        except Exception:
-            snap = load_aelf_snapshot(date_str, zone)
-            if not snap:
-                st.error(
-                    "Impossible de joindre l’API AELF pour ce jour, et aucune copie locale n’est encore disponible. "
-                    "Réessaie avec du réseau, ou choisis une date déjà consultée récemment sur cet appareil."
+    with st.spinner("Récupération des lectures…"):
+        identity = None
+        texts = None
+        # 1) Cache Sheets (si disponible)
+        if cfg.gcp_service_account and cfg.gsheet_id:
+            try:
+                from core.sheets_db import TableSpec, ensure_table
+
+                gs = build_gspread_client(cfg.gcp_service_account)
+                ensure_table(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table=TableSpec(
+                        name="readings_cache",
+                        columns=with_concat(
+                            [
+                                *BASE_COLUMNS,
+                                "date",
+                                "zone",
+                                "periode",
+                                "semaine",
+                                "annee",
+                                "couleur",
+                                "fete",
+                                "jour_liturgique_nom",
+                                "premiere_lecture",
+                                "psaume",
+                                "deuxieme_lecture",
+                                "evangile",
+                                "source",
+                                "error",
+                            ]
+                        ),
+                    ),
                 )
-                return
-            identity, texts, cached_at = snap
-            offline = True
+                rc = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=800)
+                hits = [
+                    r
+                    for r in rc
+                    if str(r.get("date") or "").strip() == date_str[:10]
+                    and str(r.get("zone") or "").strip() == zone
+                    and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                    and not str(r.get("error") or "").strip()
+                ]
+                if hits:
+                    best = sorted(hits, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
+                    from core.aelf import AelfDayIdentity, AelfTexts
+
+                    identity = AelfDayIdentity(
+                        date=str(best.get("date") or date_str[:10]),
+                        zone=str(best.get("zone") or zone),
+                        periode=str(best.get("periode") or "") or None,
+                        semaine=str(best.get("semaine") or "") or None,
+                        annee=str(best.get("annee") or "") or None,
+                        couleur=str(best.get("couleur") or "") or None,
+                        fete=str(best.get("fete") or "") or None,
+                        jour_liturgique_nom=str(best.get("jour_liturgique_nom") or "") or None,
+                    )
+                    texts = AelfTexts(
+                        premiere_lecture=_normalize_aelf_text_for_cache(str(best.get("premiere_lecture") or "")) or None,
+                        psaume=_normalize_aelf_text_for_cache(str(best.get("psaume") or "")) or None,
+                        deuxieme_lecture=_normalize_aelf_text_for_cache(str(best.get("deuxieme_lecture") or "")) or None,
+                        evangile=_normalize_aelf_text_for_cache(str(best.get("evangile") or "")) or None,
+                    )
+            except Exception:
+                pass
+
+        # 2) AELF API (cache streamlit) + snapshot disque
+        if identity is None or texts is None:
+            try:
+                identity, texts = cached_aelf(date_str, zone=zone, _identity_schema=4)
+                persist_aelf_snapshot(date_str, zone, identity, texts)
+                # Écrit dans Sheets (sans champs chiffrés) pour éviter les appels futurs.
+                if cfg.gcp_service_account and cfg.gsheet_id:
+                    try:
+                        gs2 = build_gspread_client(cfg.gcp_service_account)
+                        append_immutable_row(
+                            gspread_client=gs2,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="readings_cache",
+                            values_by_col={
+                                "entity_id": sha256(f"read|{date_str[:10]}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                                "date": date_str[:10],
+                                "zone": zone,
+                                "periode": getattr(identity, "periode", None) or "",
+                                "semaine": getattr(identity, "semaine", None) or "",
+                                "annee": getattr(identity, "annee", None) or "",
+                                "couleur": getattr(identity, "couleur", None) or "",
+                                "fete": getattr(identity, "fete", None) or "",
+                                "jour_liturgique_nom": getattr(identity, "jour_liturgique_nom", None) or "",
+                                "premiere_lecture": _normalize_aelf_text_for_cache(texts.premiere_lecture),
+                                "psaume": _normalize_aelf_text_for_cache(texts.psaume),
+                                "deuxieme_lecture": _normalize_aelf_text_for_cache(texts.deuxieme_lecture),
+                                "evangile": _normalize_aelf_text_for_cache(texts.evangile),
+                                "source": "aelf_api",
+                                "error": "",
+                            },
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                snap = load_aelf_snapshot(date_str, zone)
+                if not snap:
+                    st.error(
+                        "Impossible de joindre l’API AELF pour ce jour, et aucune copie locale n’est encore disponible. "
+                        "Réessaie avec du réseau, ou choisis une date déjà consultée récemment sur cet appareil."
+                    )
+                    return
+                identity, texts, cached_at = snap
+                offline = True
 
     _inject_liturgical_accent_style(getattr(identity, "couleur", None))
     if offline:
         st.caption(_offline_cache_caption(cached_at))
 
-    cfg = load_config()
     bundle_audio: tuple[bytes, str] | None = None
     bundle_synth_text: str | None = None
+    bundle_audio_gcs_path: str | None = None
     bundle_from_disk = False
     gcs_top = None
     if cfg.gcp_service_account and cfg.gsheet_id and cfg.gcs_bucket_name:
         try:
             gs_top = build_gspread_client(cfg.gcp_service_account)
             gcs_top = build_gcs_client(cfg.gcp_service_account)
-            bundle_audio, bundle_synth_text = _fetch_existing_sunday_bundle(
+            bundle_audio, bundle_synth_text, bundle_audio_gcs_path = _fetch_existing_sunday_bundle(
                 gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
             )
             if bundle_audio or (bundle_synth_text or "").strip():
@@ -1142,7 +1343,7 @@ def render_sunday() -> None:
                     audio_mime=bundle_audio[1] if bundle_audio else None,
                 )
         except Exception:
-            bundle_audio, bundle_synth_text = None, None
+            bundle_audio, bundle_synth_text, bundle_audio_gcs_path = None, None, None
 
     if not bundle_audio and not (bundle_synth_text or "").strip():
         disk_bundle = load_sunday_bundle(date_str, zone)
@@ -1186,7 +1387,7 @@ def render_sunday() -> None:
                     st.markdown(bundle_synth_text)
                 else:
                     st.info(
-                        "Le texte de la synthèse n’est pas disponible (GCS ou cache local). "
+                        "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
                         "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
                     )
 
@@ -1213,25 +1414,89 @@ def render_sunday() -> None:
         prep_key = f"prep_liturgy_pdf_{date_str}"
         pdf_key = f"liturgy_sunday_pdf_{date_str}"
         pc1, pc2 = st.columns(2)
+        include_catechese_pdf = st.checkbox(
+            "Inclure la « Passerelle catéchèse — L’écho des paraboles » dans le PDF",
+            value=True,
+            key=f"pdf_catechese_{date_str}",
+            help="Si la synthèse contient cette section, elle sera incluse dans le PDF (coché par défaut).",
+        )
+        force_regen_pdf = st.checkbox(
+            "Régénérer le PDF (ignorer le PDF déjà stocké sur Cloud)",
+            value=False,
+            key=f"pdf_force_regen_{date_str}",
+        )
         with pc1:
             if st.button("Préparer le PDF du dimanche (complet)", key=prep_key):
                 ov_pdf = loading_overlay("Préparation du PDF (couverture + lectures + synthèse)…")
                 try:
+                    if not force_regen_pdf:
+                        cached_pdf = _fetch_existing_fascicule_pdf_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
+                        if cached_pdf:
+                            st.session_state[pdf_key] = cached_pdf
+                            st.info("PDF déjà généré — réutilisation depuis Cloud.")
+                            return
                     img_b = _fetch_liturgy_illustration_full_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
                     aud_url, aud_note = _public_app_listen_url(date_str=date_str)
+                    # Si l'audio existe sur Cloud mais n'est pas public, générer une URL signée pour le PDF.
+                    if bundle_audio_gcs_path:
+                        signed = _gcs_signed_url(
+                            gcs=gcs_top,
+                            bucket_name=str(cfg.gcs_bucket_name).strip(),
+                            path=bundle_audio_gcs_path,
+                        )
+                        if signed:
+                            aud_url = signed
+                    synth_for_pdf = bundle_synth_text
+                    if not include_catechese_pdf:
+                        synth_for_pdf = _strip_catechese_bridge(synth_for_pdf)
+                    # Dos (quatrième de couverture) : montage complet des vignettes de l’année.
+                    back_cover_b = None
+                    try:
+                        y = str(date_str)[:4]
+                        back_cover_b = download_bytes(
+                            gcs=gcs_top,
+                            bucket_name=str(cfg.gcs_bucket_name).strip(),
+                            path=f"Images/thumbs/montage_{y}.png",
+                        )
+                    except Exception:
+                        back_cover_b = None
                     pdf_b = build_liturgy_sunday_pdf_bytes(
                         image_bytes=img_b,
-                        week_title=_liturgy_cover_pdf_title(identity),
+                        week_title=_liturgy_display_label(
+                            (getattr(identity, "fete", None) or "").strip()
+                            or (_jour_liturgique(identity) or "").strip()
+                            or _liturgy_cover_pdf_title(identity)
+                        ),
                         date_line=_french_long_date_label(date_str),
+                        meta_line=(
+                            f"{_liturgy_display_label(getattr(identity, 'periode', None))} · "
+                            f"Cycle {_cycle_year_display(getattr(identity, 'annee', None))} · "
+                            f"{_liturgy_display_label(getattr(identity, 'couleur', None))}"
+                        ),
                         premiere_lecture=texts.premiere_lecture,
                         psaume=texts.psaume,
                         deuxieme_lecture=texts.deuxieme_lecture,
                         evangile=texts.evangile,
-                        synthesis_text=bundle_synth_text,
+                        synthesis_text=synth_for_pdf,
                         audio_listen_url=aud_url,
                         audio_listen_note=aud_note,
+                        about_markdown=_ABOUT_MARKDOWN,
+                        back_cover_image_bytes=back_cover_b,
                     )
                     st.session_state[pdf_key] = pdf_b
+                    # Stockage Cloud : un seul PDF par date, écrasement (pas de versioning).
+                    try:
+                        fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+                        upload_bytes(
+                            gcs=gcs_top,
+                            bucket_name=str(cfg.gcs_bucket_name).strip(),
+                            path=fasc_path,
+                            data=pdf_b,
+                            content_type="application/pdf",
+                        )
+                        st.success("PDF enregistré.")
+                    except Exception as ex:
+                        st.warning(f"Impossible d’enregistrer le PDF sur Cloud (Fascicules/) : {ex}")
                 finally:
                     ov_pdf.empty()
         with pc2:
@@ -1243,10 +1508,7 @@ def render_sunday() -> None:
                     mime="application/pdf",
                     key=f"dl_{pdf_key}",
                 )
-        st.caption(
-            "Le PDF inclut la couverture, les lectures AELF, la synthèse si elle existe, "
-            "et un lien vers l’audio lorsque `PUBLIC_APP_URL` est défini dans les secrets."
-        )
+        # Caption supprimée à la demande (éviter une redondance UX ici).
 
     st.divider()
     st.subheader("Synthèse (texte + audio)")
@@ -1258,6 +1520,11 @@ def render_sunday() -> None:
         format_func=lambda x: f"{x}%",
     )
     include_takeaways = st.checkbox("Inclure “À retenir” (3–5 points)", value=True)
+    include_catechese_bridge = st.checkbox(
+        "Inclure « Passerelle catéchèse — L’écho des paraboles » (Stone Card)",
+        value=True,
+        help="Ajoute un encart pédagogique structuré pour la transmission (jeunes / catéchèse).",
+    )
     debug = st.toggle("Mode debug", value=False)
 
     if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
@@ -1275,9 +1542,12 @@ def render_sunday() -> None:
                 total_words=total_words,
                 pct=int(pct or 20),
                 include_takeaways=bool(include_takeaways),
+                include_catechese_bridge=bool(include_catechese_bridge),
                 debug=bool(debug),
                 cfg=cfg,
             )
+            # Recharge l'état (dernier texte/audio) pour refléter les nouvelles versions stockées sur Cloud.
+            st.rerun()
         finally:
             overlay.empty()
 
@@ -1291,10 +1561,14 @@ def _run_generate_sunday_flow(
     total_words: int,
     pct: int,
     include_takeaways: bool,
+    include_catechese_bridge: bool,
     debug: bool,
     cfg: object,
 ) -> None:
     target_words = max(80, int(total_words * (pct / 100.0)))
+    # La Passerelle catéchèse ajoute un module structuré : on augmente le budget pour éviter qu’elle disparaisse.
+    if include_catechese_bridge:
+        target_words += 180
     instructions = Path("data/instructions_ia.md").read_text(encoding="utf-8")
     liturgical_context = "\n".join(
         [
@@ -1307,6 +1581,7 @@ def _run_generate_sunday_flow(
         instructions=instructions,
         length_words=int(target_words),
         include_takeaways=bool(include_takeaways),
+        include_catechese_bridge=bool(include_catechese_bridge),
         identity={
             "date": identity.date,
             "zone": identity.zone,
@@ -1336,6 +1611,9 @@ def _run_generate_sunday_flow(
     with st.spinner("Génération IA (Gemini)…"):
         t0 = time.perf_counter()
         try:
+            # Évite les synthèses tronquées : 2048 tokens est souvent trop court pour une synthèse “longue”.
+            # Heuristique simple (français) : ~2.2 tokens / mot avec marge.
+            max_out = min(8192, max(2048, int(target_words * 2.2)))
             gen = vx.generate_text_auto(
                 preferred_models=[
                     "gemini-2.5-flash",
@@ -1344,6 +1622,7 @@ def _run_generate_sunday_flow(
                     "gemini-flash-latest",
                 ],
                 prompt=prompt,
+                max_output_tokens=max_out,
             )
         except Exception as e:
             if debug:
@@ -1353,6 +1632,58 @@ def _run_generate_sunday_flow(
             return
         t1 = time.perf_counter()
         perf["vertex_text_s"] = round(t1 - t0, 3)
+
+    # Fiabilisation : si la sortie est tronquée, on retente automatiquement une fois
+    # avec un modèle moins “pensant” et un budget de sortie maximal.
+    cand0 = ((gen.raw or {}).get("candidates") or [{}])[0]
+    fr = str(cand0.get("finishReason") or "").strip().upper()
+    words_out = len((gen.text or "").split())
+    has_citations = bool((cand0.get("citationMetadata") or {}).get("citations")) if isinstance(cand0, dict) else False
+    looks_truncated = (fr in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (words_out < int(target_words * 0.85))
+    if looks_truncated or has_citations:
+        # Prompt “durci” : aucune URL / aucune citation / uniquement textes fournis.
+        hardened = (
+            "IMPORTANT — SOURCES: ne cite aucune source externe, aucune URL, aucun site web. "
+            "Utilise exclusivement les textes AELF fournis ci-dessous. "
+            "IMPORTANT — FORMAT: réponds uniquement avec la synthèse, sans préambule technique.\n\n"
+            + prompt
+        )
+        try:
+            t0b = time.perf_counter()
+            gen2 = vx.generate_text_auto(
+                preferred_models=["gemini-2.0-flash", "gemini-2.5-flash"],
+                prompt=hardened,
+                max_output_tokens=8192,
+            )
+            perf["vertex_text_retry_s"] = round(time.perf_counter() - t0b, 3)
+            cand0b = ((gen2.raw or {}).get("candidates") or [{}])[0]
+            fr2 = str(cand0b.get("finishReason") or "").strip().upper()
+            words2 = len((gen2.text or "").split())
+            cites2 = bool((cand0b.get("citationMetadata") or {}).get("citations")) if isinstance(cand0b, dict) else False
+            if (fr2 in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (words2 < int(target_words * 0.85)) or cites2:
+                st.error(
+                    "Synthèse incomplète malgré une relance automatique (MAX_TOKENS ou contenu trop court / citations). "
+                    "Réessaie plus tard, ou réduis le % demandé."
+                )
+                if debug:
+                    st.write(
+                        {
+                            "finishReason_1": fr,
+                            "words_1": words_out,
+                            "finishReason_2": fr2,
+                            "words_2": words2,
+                            "has_citations_1": has_citations,
+                            "has_citations_2": cites2,
+                        }
+                    )
+                return
+            gen = gen2
+        except Exception as e:
+            if debug:
+                st.exception(e)
+            else:
+                st.error("Relance automatique impossible (quota/erreur). Réessaie dans quelques minutes.")
+            return
 
     if debug:
         usage = (gen.raw or {}).get("usageMetadata") or {}
@@ -1368,8 +1699,19 @@ def _run_generate_sunday_flow(
                 "totalTokenCount": usage.get("totalTokenCount"),
                 "text_chars": len(gen.text or ""),
                 "text_words": len((gen.text or "").split()),
+                "target_words": int(target_words),
+                "maxOutputTokens": int(max_out),
             }
         )
+        with st.expander("Prompt envoyé à Gemini (debug)", expanded=False):
+            st.text_area("Prompt complet", value=prompt, height=320)
+        with st.expander("Réponse brute Vertex (debug)", expanded=False):
+            st.write(gen.raw)
+        if str(cand0.get("finishReason") or "").strip().upper() in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH"):
+            st.warning(
+                "La synthèse semble tronquée (finishReason = MAX_TOKENS). "
+                "Augmenter encore `maxOutputTokens` ou réduire le % demandé."
+            )
 
     if not gen.text.strip():
         st.error("Réponse IA vide.")
@@ -1418,36 +1760,56 @@ def _run_generate_sunday_flow(
                 voice_name="Kore",
             )
             perf["audio_vertex_s"] = round(time.perf_counter() - at0, 3)
-        except RuntimeError as e:
-            # Cas courant: pas allowlist AUDIO sur Vertex.
-            if "not allowlisted" in str(e).lower() or "allowlisted" in str(e).lower():
-                if not cfg.gemini_api_key:
-                    st.error(
-                        "Audio indisponible via Vertex AI (compte non allowlist AUDIO). "
-                        "Ajoute/valide GEMINI_API_KEY pour activer le fallback Gemini API TTS."
-                    )
-                    st.stop()
-                # Fallback silencieux: Gemini API TTS (souvent limité par requête -> on chunk).
+        except Exception as e:
+            # Fallback si Vertex refuse AUDIO (allowlist) OU si erreur transitoire/quota.
+            msg = str(e).lower()
+            allowlist = ("not allowlisted" in msg) or ("allowlisted" in msg)
+            transient = ("429" in msg) or ("quota" in msg) or ("rate" in msg) or ("tempor" in msg) or ("503" in msg)
+            if (allowlist or transient) and cfg.gemini_api_key:
                 audio_route = "gemini_api_chunked"
                 ft0 = time.perf_counter()
                 tts_api = GeminiTtsApiClient(api_key=cfg.gemini_api_key)
-                chunks = _chunk_text_for_tts(gen.text, max_chars=900)
+                chunks = _chunk_text_for_tts(gen.text, max_chars=1400)
                 perf["tts_chunks"] = len(chunks)
-                wav_parts: list[bytes] = []
+                wav_parts_by_i: dict[int, bytes] = {}
                 tts_chunk_total_s = 0.0
-                for ch in chunks:
+                tts_errors: list[str] = []
+
+                def _tts_job(i: int, ch: str) -> tuple[int, bytes, float]:
                     ct0 = time.perf_counter()
                     tts_audio = tts_api.generate_audio(
                         model="gemini-2.5-flash-preview-tts",
                         text=ch,
                         voice_name="Kore",
                     )
-                    tts_chunk_total_s += time.perf_counter() - ct0
+                    elapsed = time.perf_counter() - ct0
                     b, mt, _ = normalize_audio_bytes(audio_bytes=tts_audio.audio_bytes, mime_type=tts_audio.mime_type)
-                    # Normalise en wav (join_wav_bytes attend du wav)
                     if mt != "audio/wav":
                         b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
-                    wav_parts.append(b)
+                    return i, b, elapsed
+
+                # Quotas Gemini API : réduire le parallélisme limite les 429.
+                workers = max(1, min(2, len(chunks)))
+                with ThreadPoolExecutor(max_workers=workers) as ex2:
+                    futs = [ex2.submit(_tts_job, i, ch) for i, ch in enumerate(chunks)]
+                    for fut in as_completed(futs):
+                        try:
+                            i, b, elapsed = fut.result()
+                            wav_parts_by_i[i] = b
+                            tts_chunk_total_s += float(elapsed)
+                        except Exception as ex:
+                            tts_errors.append(str(ex))
+
+                if tts_errors or len(wav_parts_by_i) != len(chunks):
+                    st.error(
+                        "Audio incomplet : certains morceaux TTS ont échoué (quota/erreur). "
+                        "Réessaie dans quelques minutes."
+                    )
+                    if debug and tts_errors:
+                        st.write({"tts_errors": tts_errors[:6], "chunks_ok": len(wav_parts_by_i), "chunks_total": len(chunks)})
+                    st.stop()
+
+                wav_parts = [wav_parts_by_i[i] for i in range(len(chunks)) if i in wav_parts_by_i]
                 joined = join_wav_bytes(wav_parts)
                 perf["audio_fallback_s"] = round(time.perf_counter() - ft0, 3)
                 perf["tts_chunk_total_s"] = round(tts_chunk_total_s, 3)
@@ -1456,6 +1818,13 @@ def _run_generate_sunday_flow(
                 audio.mime_type = "audio/wav"
                 audio.model = "gemini-api-tts:chunked"
             else:
+                # Pas de clé Gemini : on remonte l'erreur.
+                if allowlist and not cfg.gemini_api_key:
+                    st.error(
+                        "Audio indisponible via Vertex AI (compte non allowlist AUDIO). "
+                        "Ajoute/valide GEMINI_API_KEY pour activer le fallback TTS."
+                    )
+                    st.stop()
                 raise
 
         if not getattr(audio, "audio_bytes", b""):
@@ -1506,7 +1875,7 @@ def _run_generate_sunday_flow(
         txt = txt_bytes.decode("utf-8", errors="replace")
         perf["download_text_verify_s"] = round(time.perf_counter() - dt0, 3)
     except Exception as e:
-        txt = f"[Erreur lecture GCS texte] {e}"
+        txt = f"[Erreur lecture Cloud texte] {e}"
     st.text_area("Synthèse", value=txt, height=320)
 
     try:
@@ -1517,7 +1886,7 @@ def _run_generate_sunday_flow(
         st.subheader("Écouter le résumé")
         st.audio(aud_play, format=aud_mime_play)
     except Exception as e:
-        st.error(f"Erreur lecture/lecture audio GCS: {e}")
+        st.error(f"Erreur lecture/lecture audio Cloud: {e}")
     if debug:
         total_keys = (
             "vertex_text_s",
@@ -1739,9 +2108,9 @@ def render_memo() -> None:
                         "utf-8", errors="replace"
                     )
                 except Exception as e:
-                    content = f"[Erreur lecture GCS] {e}"
+                    content = f"[Erreur lecture Cloud] {e}"
                 st.text_area("Contenu", value=content, height=260)
-                st.caption(f"GCS: `{path}`")
+                st.caption(f"Cloud: `{path}`")
 
     st.divider()
     st.subheader("Créer un nouveau mémo")
@@ -1877,7 +2246,7 @@ def render_memo() -> None:
     st.divider()
     st.subheader("Export PDF — Graine de Parole")
     st.caption(
-        "Source des mémos : lignes **memos** (Sheets) + fichier Markdown sur GCS ; les **résolutions** viennent du champ "
+        "Source des mémos : lignes **memos** (Sheets) + fichier Markdown sur Cloud ; les **résolutions** viennent du champ "
         "« Ma résolution » pour chaque ligne du mois."
     )
     today = date.today()
@@ -1913,7 +2282,7 @@ def render_memo() -> None:
                             "utf-8", errors="replace"
                         )
                     except Exception as ex:
-                        body_raw = f"[Erreur lecture GCS] {ex}"
+                        body_raw = f"[Erreur lecture Cloud] {ex}"
                 items.append(
                     {
                         "title": title,
@@ -2048,7 +2417,13 @@ def _admin_target_has_illustration(*, gcs: object, bucket_name: str, target: dic
     return _admin_first_existing_blob_path(gcs=gcs, bucket_name=bucket_name, target=target) is not None
 
 
-def _admin_first_existing_blob_path(*, gcs: object, bucket_name: str, target: dict) -> str | None:
+def _admin_first_existing_blob_path(
+    *,
+    gcs: object,
+    bucket_name: str,
+    target: dict,
+    errors: list[str] | None = None,
+) -> str | None:
     cand: list[str] = []
     p0 = str(target.get("gcs_path_primary") or "").strip()
     if p0:
@@ -2061,7 +2436,9 @@ def _admin_first_existing_blob_path(*, gcs: object, bucket_name: str, target: di
         try:
             if blob_exists(gcs=gcs, bucket_name=bucket_name, path=path):
                 return path
-        except Exception:
+        except Exception as ex:
+            if errors is not None and len(errors) < 6:
+                errors.append(f"{path} — {ex}")
             continue
     return None
 
@@ -2178,7 +2555,7 @@ def _admin_finish_generation_log(lines: list[str], *, dry_run: bool) -> None:
             "Au moins une image est enregistrée sur le bucket. Cherche les lignes **OK … → `gs://`** ci-dessus."
         )
     elif dry_run and lines:
-        st.warning("Mode **aperçu seulement** : aucun fichier n’a été envoyé sur GCS.")
+        st.warning("Mode **aperçu seulement** : aucun fichier n’a été envoyé sur Cloud.")
 
 
 def _augment_vertex_illustration_prompt(base: str) -> str:
@@ -2217,9 +2594,9 @@ def _admin_pick_gcs_path_for_upload(target: dict, mime_type: str) -> str:
 
 
 def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> None:
-    st.subheader("Génération Vertex AI → bucket GCS")
+    st.subheader("Génération Vertex AI → bucket Cloud")
     st.info(
-        "**Stockage GCS** : pour que l’image soit **envoyée sur le bucket**, laisse la case "
+        "**Stockage Cloud** : pour que l’image soit **envoyée sur le bucket**, laisse la case "
         "« Aperçu seulement… » **décochée**. Si elle est cochée, tu vois l’image à l’écran mais "
         "**rien n’est enregistré** dans Google Cloud Storage."
     )
@@ -2237,12 +2614,23 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
         st.warning("Aucune cible dans le manifeste.")
         return
 
-    gcs = build_gcs_client(cfg.gcp_service_account)
-    bucket_name = str(cfg.gcs_bucket_name).strip()
-    sorted_targets = _admin_sort_targets_by_date(targets_all)
-    has_map = [
-        _admin_target_has_illustration(gcs=gcs, bucket_name=bucket_name, target=t) for t in sorted_targets
-    ]
+    # Chargement Cloud (peut prendre un peu de temps) : overlay systématique.
+    ov_load = loading_overlay("Chargement du calendrier d’illustrations depuis Cloud…")
+    try:
+        gcs = build_gcs_client(cfg.gcp_service_account)
+        bucket_name = str(cfg.gcs_bucket_name).strip()
+        sorted_targets = _admin_sort_targets_by_date(targets_all)
+        # Diagnostic Cloud : en cas de droits/projet/bucket erroné, `blob.exists()` peut lever (403) et on verrait tout "manquant".
+        # On remonte quelques erreurs d’exemple au lieu de les masquer silencieusement.
+        err_samples: list[str] = []
+        first_paths: list[str | None] = []
+        has_map: list[bool] = []
+        for t in sorted_targets:
+            p = _admin_first_existing_blob_path(gcs=gcs, bucket_name=bucket_name, target=t, errors=err_samples)
+            first_paths.append(p)
+            has_map.append(p is not None)
+    finally:
+        ov_load.empty()
     n_missing = sum(1 for h in has_map if not h)
 
     COLS, ROWS = 10, 6
@@ -2285,7 +2673,7 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
     preferred_models = [x.strip() for x in models_line.split(",") if x.strip()]
 
     dry_run = st.checkbox(
-        "Aperçu seulement — ne pas envoyer sur GCS (aucun fichier dans le bucket)",
+        "Aperçu seulement — ne pas envoyer sur Cloud (aucun fichier dans le bucket)",
         value=False,
         key="adm_img_dry",
     )
@@ -2294,9 +2682,16 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
     st.divider()
     st.subheader("Calendrier des illustrations")
     st.caption(
-        f"**{n_missing}** dimanche(s) sans fichier sur GCS sur **{len(sorted_targets)}** — "
+        f"**{n_missing}** dimanche(s) sans fichier sur Cloud sur **{len(sorted_targets)}** — "
         f"manifeste `{manifest_path.as_posix()}`. Semaine = **numéro ISO** (semaine civile du dimanche)."
     )
+    if err_samples:
+        st.error(
+            "Accès Cloud en erreur : l’app n’arrive pas à vérifier l’existence des objets "
+            "(souvent bucket incorrect, projet/credentials incorrects, ou droits IAM insuffisants)."
+        )
+        with st.expander("Exemples d’erreurs (vérification d’existence sur Cloud)"):
+            st.code("\n".join(err_samples[:6]))
 
     page_ix = st.number_input(
         "Page grille (60 cases)",
@@ -2313,9 +2708,19 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
     for gi in range(slice_start, min(slice_start + per_page, n_targets)):
         if not has_map[gi]:
             continue
-        bp = _admin_best_display_blob_path(gcs=gcs, bucket_name=bucket_name, target=sorted_targets[gi])
-        if bp:
-            to_fetch.append((gi, bp))
+        full = first_paths[gi]
+        if not full:
+            continue
+        # Préférer la vignette si présente.
+        bp = full
+        tp = gcs_thumb_path_from_source_blob(full)
+        try:
+            if blob_exists(gcs=gcs, bucket_name=bucket_name, path=tp):
+                bp = tp
+        except Exception as ex:
+            if len(err_samples) < 6:
+                err_samples.append(f"{tp} — {ex}")
+        to_fetch.append((gi, bp))
 
     if to_fetch:
         with ThreadPoolExecutor(max_workers=12) as ex:
@@ -2354,7 +2759,7 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
                     if tb:
                         st.image(io.BytesIO(tb), use_container_width=True)
                     else:
-                        st.caption("✓ GCS")
+                        st.caption("✓ Cloud")
                 else:
                     st.checkbox(
                         "Manquant",
@@ -2433,49 +2838,145 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
             )
             _admin_finish_generation_log(lines, dry_run=dry_run)
 
+
+def render_admin_vision_text() -> None:
+    st.title("Admin — Détection de texte (Vision)")
+
+    manifest_path = Path("data/manifests/illustration_pipeline.json")
+    if not manifest_path.is_file():
+        st.error(f"Manifest introuvable : `{manifest_path}`.")
+        return
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        st.error(f"Lecture JSON impossible : {e}")
+        return
+
+    cfg = load_config()
+    if not cfg.gcp_service_account:
+        st.error("Configure `gcp_service_account` dans `.streamlit/secrets.toml`.")
+        return
+    if not str(cfg.gcs_bucket_name or "").strip():
+        st.error("Configure `gcs_bucket_name`.")
+        return
+
+    targets_all = list(data.get("targets") or [])
+    if not targets_all:
+        st.warning("Aucune cible dans le manifeste.")
+        return
+
+    ov_load = loading_overlay("Chargement des cibles Vision…")
+    try:
+        gcs = build_gcs_client(cfg.gcp_service_account)
+        bucket_name = str(cfg.gcs_bucket_name).strip()
+        sorted_targets = _admin_sort_targets_by_date(targets_all)
+    finally:
+        ov_load.empty()
+
+    # Filtre année (par défaut : année courante).
+    years = sorted(
+        {str(t.get("date") or "")[:4] for t in sorted_targets if str(t.get("date") or "")[:4].isdigit()}
+    )
+    y_now = str(date.today().year)
+    y_default = y_now if y_now in years else (years[-1] if years else y_now)
+    year = st.selectbox("Année", options=years or [y_default], index=(years.index(y_default) if y_default in years else 0))
+    targets_year = [t for t in sorted_targets if str(t.get("date") or "").startswith(str(year))]
+    if not targets_year:
+        st.warning("Aucune cible pour cette année dans le manifeste.")
+        return
+
+    # Mode “échantillon” : 60 premières entrées de l’année (utile pour tester vite sans UI de pagination).
+    per_page = 60
+    slice_start = 0
+
     st.divider()
     st.subheader("Détection de texte dans les images")
-    st.caption(
-        "Google **Cloud Vision** (`TEXT_DETECTION`) sur les fichiers déjà sur le bucket — pour repérer les visuels "
-        "avec glyphes à retoucher. Active l’API **Cloud Vision** sur le projet GCP et vérifie la facturation."
+    st.write(
+        "Cette page va lancer une détection des textes dans les images générées par l'intelligence artificielle. "
+        "Elle va détecter s'il y a des anomalies dans les orthographes et identifier un fichier d'exception à régénérer."
     )
-    ta_scope = st.radio(
-        "Portée du scan",
-        options=("manifeste_complet", "page_grille"),
-        format_func=lambda x: (
-            "Toutes les dates du manifeste (si fichier sur GCS)"
-            if x == "manifeste_complet"
-            else "Uniquement la page grille courante (60 cases)"
-        ),
-        horizontal=True,
-        key="adm_text_audit_scope",
-    )
-    ta_min = st.number_input(
-        "Longueur minimale du texte détecté (caractères non blancs)",
-        min_value=1,
-        max_value=80,
-        value=2,
-        step=1,
-        key="adm_text_audit_min_chars",
-        help="Augmente si Vision remonte trop de faux positifs (bruit).",
-    )
-    ta_workers = st.slider(
-        "Parallélisme (téléchargement + Vision)",
-        min_value=1,
-        max_value=16,
-        value=8,
-        key="adm_text_audit_workers",
-    )
-    if st.button("Analyser les images (détection de texte)", key="adm_text_audit_run"):
-        overlay = loading_overlay("Analyse Vision des illustrations sur GCS…")
+
+    # Valeurs par défaut validées (UX perf) : pas de sélecteurs.
+    ta_min = 2
+    ta_workers = 8
+
+    # Calcule le nombre d’images concernées (cibles de l’année qui existent sur le Cloud).
+    cache_key = f"_adm_vision_existing_set_{year}"
+    set_existing: set[str] | None = st.session_state.get(cache_key)
+    if set_existing is None:
         try:
-            scan_targets = (
-                sorted_targets
-                if ta_scope == "manifeste_complet"
-                else sorted_targets[slice_start : slice_start + per_page]
-            )
+            # Listing par préfixe : beaucoup plus rapide qu'un blob_exists() par cible.
+            pref = f"Images/illustrations/{year}/"
+            bucket = gcs.bucket(bucket_name)
+            set_existing = {b.name for b in gcs.list_blobs(bucket, prefix=pref)}
+        except Exception:
+            set_existing = set()
+        st.session_state[cache_key] = set_existing
+
+    def _targets_with_existing_blob(targets: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for t in targets:
+            cand: list[str] = []
+            p0 = str(t.get("gcs_path_primary") or "").strip()
+            if p0:
+                cand.append(p0)
+            for a in t.get("alternates") or []:
+                s = str(a or "").strip()
+                if s:
+                    cand.append(s)
+            if any((c in (set_existing or set())) for c in cand):
+                out.append(t)
+        return out
+
+    eligible = _targets_with_existing_blob(targets_year)
+    st.metric("Images concernées (sur Cloud)", len(eligible))
+    st.caption(
+        "Méthode : Vision détecte des fragments qui *ressemblent* à du texte, puis on compare les mots à un dictionnaire FR. "
+        "Les exceptions sont des mots inconnus / sans signification (ex. suites de lettres) ou manifestement mal orthographiés."
+    )
+
+    # Traitement par lots si le volume est important.
+    batch_size = 120
+    st.caption(f"Traitement par lots : {batch_size} images maximum par lancement.")
+    _audit_key = "adm_text_audit_last_rows"
+    # Queue persistante par année : permet d'enchaîner les lots sans UI complexe.
+    q_key = f"_adm_text_audit_queue_{year}"
+    done_key = f"_adm_text_audit_done_{year}"
+    init_key = f"_adm_text_audit_inited_{year}"
+    if q_key not in st.session_state:
+        st.session_state[q_key] = list(eligible)
+        st.session_state[done_key] = 0
+        st.session_state[init_key] = True
+        # Nouvelle analyse (année) : on repart de zéro pour éviter l'accumulation et les incohérences de compteurs.
+        st.session_state[_audit_key] = []
+
+    remaining = len(st.session_state.get(q_key) or [])
+    done_n = int(st.session_state.get(done_key) or 0)
+    if remaining > 0:
+        st.info(f"Lot prêt : {min(batch_size, remaining)} image(s) à analyser (restant : {remaining} / total : {done_n + remaining}).")
+    else:
+        if done_n:
+            st.success(f"Analyse terminée pour {year} ({done_n} image(s)). Relance une analyse pour recalculer si besoin.")
+            if st.button("Relancer l’analyse (recalculer depuis zéro)", key="adm_text_audit_reset"):
+                # Réinitialise la file et les résultats pour cette année.
+                st.session_state[q_key] = list(eligible)
+                st.session_state[done_key] = 0
+                st.session_state[_audit_key] = []
+                # Force un rerun immédiat pour réactiver le bouton "lot suivant".
+                st.rerun()
+
+    if st.button(
+        "Lancer l’analyse (lot suivant)",
+        key="adm_text_audit_run",
+        type="primary",
+        disabled=(len(eligible) == 0 or remaining == 0),
+    ):
+        overlay = loading_overlay("Analyse Vision des illustrations sur Cloud…")
+        try:
+            queue: list[dict] = list(st.session_state.get(q_key) or [])
+            scan_targets = queue[:batch_size]
             vc = build_vision_image_annotator_client(cfg.gcp_service_account)
-            rows = audit_targets_for_text(
+            rows_new = audit_targets_for_text(
                 gcs=gcs,
                 bucket_name=bucket_name,
                 targets=scan_targets,
@@ -2483,65 +2984,106 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
                 max_workers=int(ta_workers),
                 min_chars=int(ta_min),
             )
-            flagged = filter_rows_with_text(rows)
-            errs = [r for r in rows if r.get("error")]
-            scanned_n = len(rows)
-            st.metric("Fichiers analysés", scanned_n)
-            if errs:
-                if all_errors_are_vision_service_disabled(rows):
-                    ex0 = str(errs[0].get("error") or "")
-                    sa_project_id = str(cfg.gcp_service_account.get("project_id") or "").strip()
-                    sa_quota_project_id = str(
-                        cfg.gcp_service_account.get("quota_project_id") or cfg.gcp_service_account.get("project_id") or ""
-                    ).strip()
-                    pid_from_err = extract_gcp_project_id_from_error(ex0)
-                    act_url = extract_console_url_from_error(ex0) or vision_console_activation_url(
-                        pid_from_err or sa_quota_project_id or sa_project_id
+            prev = list(st.session_state.get(_audit_key) or [])
+            st.session_state[_audit_key] = [*prev, *rows_new]
+            # Avance la queue
+            st.session_state[q_key] = queue[len(scan_targets) :]
+            st.session_state[done_key] = int(st.session_state.get(done_key) or 0) + len(scan_targets)
+        except Exception as ex:
+            st.exception(ex)
+        finally:
+            overlay.empty()
+
+    rows = list(st.session_state.get(_audit_key) or [])
+    if rows:
+        # Whitelist : permet de confirmer qu'une image est "bonne" même si Vision détecte du bruit.
+        whitelist: set[str] = set()
+        if cfg.gsheet_id and cfg.gcp_service_account:
+            wl_key = f"_adm_vision_whitelist_{year}"
+            if wl_key not in st.session_state:
+                try:
+                    gs_wl = build_gspread_client(cfg.gcp_service_account)
+                    wl_rows = fetch_records(
+                        gspread_client=gs_wl,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="vision_text_whitelist",
+                        limit=2000,
                     )
-                    st.error(
-                        "L’API **Google Cloud Vision** n’est pas activée pour ce projet GCP "
-                        "(ou la propagation des droits est encore en cours — attends quelques minutes après activation)."
-                    )
-                    if sa_project_id or sa_quota_project_id or pid_from_err:
-                        st.info(
-                            "Projet ciblé par la config / credentials : "
-                            f"`project_id={sa_project_id or '—'}` · "
-                            f"`quota_project_id={sa_quota_project_id or '—'}` · "
-                            f"`projet détecté dans l’erreur={pid_from_err or '—'}`"
-                        )
-                    st.markdown(f"[Ouvrir la console Google Cloud — activer Cloud Vision API]({act_url})")
-                else:
-                    st.warning(f"{len(errs)} erreur(s) Vision ou téléchargement — voir le détail ci-dessous.")
-            if flagged:
-                st.error(
-                    f"{len(flagged)} image(s) avec texte détecté (≥ {int(ta_min)} caractères) — candidats au post-traitement."
+                    whitelist = {
+                        str(r.get("gcs_path") or "").strip()
+                        for r in wl_rows
+                        if str(r.get("gcs_path") or "").strip().startswith(f"Images/illustrations/{year}/")
+                        and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                    }
+                except Exception:
+                    whitelist = set()
+                st.session_state[wl_key] = whitelist
+            else:
+                whitelist = set(st.session_state.get(wl_key) or set())
+
+        flagged = [r for r in filter_rows_with_text(rows) if str(r.get("gcs_path") or "").strip() not in whitelist]
+        errs = [r for r in rows if r.get("error")]
+        scanned_unique = len({str(r.get("gcs_path") or "").strip() for r in rows if str(r.get("gcs_path") or "").strip()})
+        st.metric("Images analysées (Vision)", scanned_unique)
+
+        if errs:
+            if all_errors_are_vision_service_disabled(rows) and len(errs) >= max(1, scanned_unique):
+                ex0 = str(errs[0].get("error") or "")
+                sa_project_id = str(cfg.gcp_service_account.get("project_id") or "").strip()
+                sa_quota_project_id = str(
+                    cfg.gcp_service_account.get("quota_project_id") or cfg.gcp_service_account.get("project_id") or ""
+                ).strip()
+                pid_from_err = extract_gcp_project_id_from_error(ex0)
+                act_url = extract_console_url_from_error(ex0) or vision_console_activation_url(
+                    pid_from_err or sa_quota_project_id or sa_project_id
                 )
-                show_tbl = [
+                st.error(
+                    "L’API **Google Cloud Vision** n’est pas activée pour ce projet GCP "
+                    "(ou la propagation des droits est encore en cours — attends quelques minutes après activation)."
+                )
+                if sa_project_id or sa_quota_project_id or pid_from_err:
+                    st.info(
+                        "Projet ciblé par la config / credentials : "
+                        f"`project_id={sa_project_id or '—'}` · "
+                        f"`quota_project_id={sa_quota_project_id or '—'}` · "
+                        f"`projet détecté dans l’erreur={pid_from_err or '—'}`"
+                    )
+                st.markdown(f"[Ouvrir la console Google Cloud — activer Cloud Vision API]({act_url})")
+                pid_for_links = (pid_from_err or sa_quota_project_id or sa_project_id or "").strip()
+                if pid_for_links:
+                    billing_url = f"https://console.cloud.google.com/billing?project={pid_for_links}"
+                    st.markdown(
+                        f"[Vérifier la facturation du projet (souvent la cause si l’API semble « activée »)]({billing_url})"
+                    )
+            elif all_errors_are_vision_service_disabled(rows):
+                st.warning(
+                    "Certaines images n’ont pas pu être analysées par Vision (403 service disabled) "
+                    "mais d’autres ont réussi. Si l’API vient d’être activée, attends la propagation puis relance."
+                )
+            else:
+                st.warning(f"{len(errs)} erreur(s) Vision ou téléchargement — voir le détail ci-dessous.")
+
+        if flagged:
+            st.error(
+                f"{len(flagged)} image(s) avec texte détecté (≥ {int(ta_min)} caractères) — candidats au post-traitement."
+            )
+            buf = StringIO()
+            w = csv.DictWriter(
+                buf,
+                fieldnames=["date", "gcs_path", "gs_uri", "detected_text"],
+                extrasaction="ignore",
+            )
+            w.writeheader()
+            for r in flagged:
+                w.writerow(
                     {
                         "date": r["date"],
-                        "chemin GCS": r["gcs_path"],
-                        "URI gs://": f"gs://{bucket_name}/{r['gcs_path']}",
-                        "extrait": (r.get("detected_text") or "")[:800],
+                        "gcs_path": r["gcs_path"],
+                        "gs_uri": f"gs://{bucket_name}/{r['gcs_path']}",
+                        "detected_text": r.get("detected_text") or "",
                     }
-                    for r in flagged
-                ]
-                st.dataframe(show_tbl, use_container_width=True, hide_index=True)
-                buf = StringIO()
-                w = csv.DictWriter(
-                    buf,
-                    fieldnames=["date", "gcs_path", "gs_uri", "detected_text"],
-                    extrasaction="ignore",
                 )
-                w.writeheader()
-                for r in flagged:
-                    w.writerow(
-                        {
-                            "date": r["date"],
-                            "gcs_path": r["gcs_path"],
-                            "gs_uri": f"gs://{bucket_name}/{r['gcs_path']}",
-                            "detected_text": r.get("detected_text") or "",
-                        }
-                    )
+            if not bool(st.session_state.get("_adm_text_audit_hide_csv")):
                 st.download_button(
                     "Télécharger la liste (CSV)",
                     data=buf.getvalue().encode("utf-8-sig"),
@@ -2549,33 +3091,425 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
                     mime="text/csv; charset=utf-8",
                     key="adm_text_audit_csv",
                 )
-            else:
-                if scanned_n == 0:
-                    st.info("Aucun fichier sur GCS dans la portée choisie.")
-                elif errs and len(errs) >= scanned_n and scanned_n > 0:
-                    st.warning(
-                        "Aucune analyse réussie : tous les appels Vision ont échoué. "
-                        "Corrige la configuration (API activée, facturation, droits du compte de service) puis réessaie."
+            try:
+                from openpyxl import Workbook
+
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "images_avec_texte"
+                ws.append(["date", "gcs_path", "gs_uri", "detected_text"])
+                for r in flagged:
+                    ws.append(
+                        [
+                            r.get("date"),
+                            r.get("gcs_path"),
+                            f"gs://{bucket_name}/{r.get('gcs_path')}",
+                            (r.get("detected_text") or ""),
+                        ]
                     )
+                xbuf = BytesIO()
+                wb.save(xbuf)
+                st.download_button(
+                    "Télécharger la liste (Excel)",
+                    data=xbuf.getvalue(),
+                    file_name="lumenvia_images_avec_texte.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="adm_text_audit_xlsx",
+                )
+                st.session_state["_adm_text_audit_hide_csv"] = True
+            except Exception as ex:
+                st.warning(
+                    "Export Excel indisponible (dépendance manquante). Installe `openpyxl` puis relance l’app. "
+                    f"Détail: {ex}"
+                )
+
+            st.divider()
+            st.subheader("Corrections (remplacer → régénérer → écraser sur Cloud)")
+            st.caption(
+                "Flux économe : on journalise l’audit et les corrections dans Google Sheets (append-only), "
+                "puis on régénère l’image via Vertex en prenant l’image actuelle comme référence."
+            )
+
+            can_sheets = bool(cfg.gsheet_id and cfg.gcp_service_account)
+            if not can_sheets:
+                st.info("Configure `gsheet_id` (Sheets) pour activer le journal audit/corrections.")
+
+            run_id = sha256(f"vision_audit|{utc_now_iso()}|{bucket_name}".encode("utf-8")).hexdigest()[:12]
+
+            if can_sheets and st.button("Enregistrer cet audit dans Google Sheets", key="adm_vision_audit_save_sheets"):
+                ov = loading_overlay("Enregistrement audit Vision dans Sheets…")
+                try:
+                    from core.sheets_db import TableSpec, ensure_table
+
+                    gs = build_gspread_client(cfg.gcp_service_account)
+                    ensure_table(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table=TableSpec(
+                            name="vision_text_audit",
+                            columns=with_concat(
+                                [
+                                    *BASE_COLUMNS,
+                                    "run_id",
+                                    "date",
+                                    "gcs_path",
+                                    "min_chars",
+                                    "detected_text",
+                                    "detected_text_chars",
+                                    "detected_text_alpha_chars",
+                                    "has_meaningful_text",
+                                    "error",
+                                ]
+                            ),
+                        ),
+                    )
+
+                    # Économise le quota : on journalise par défaut uniquement les exceptions (texte détecté ou erreur).
+                    to_save = [r for r in rows if str(r.get("detected_text") or "").strip() or str(r.get("error") or "").strip()]
+                    payload: list[dict] = []
+                    for r in to_save:
+                        dt = str(r.get("detected_text") or "")
+                        dt_norm = " ".join(dt.split()).strip()
+                        alpha_n = sum(1 for ch in dt_norm if ch.isalpha())
+                        ent = sha256(
+                            f"audit|{run_id}|{r.get('date')}|{r.get('gcs_path')}|{sha256(dt_norm.encode('utf-8')).hexdigest()}".encode(
+                                "utf-8"
+                            )
+                        ).hexdigest()[:24]
+                        payload.append(
+                            {
+                                "entity_id": ent,
+                                "run_id": run_id,
+                                "date": r.get("date"),
+                                "gcs_path": r.get("gcs_path"),
+                                "min_chars": int(ta_min),
+                                "detected_text": dt_norm,
+                                "detected_text_chars": len(dt_norm),
+                                "detected_text_alpha_chars": int(alpha_n),
+                                "has_meaningful_text": "true" if bool(r.get("has_text")) else "false",
+                                "error": str(r.get("error") or ""),
+                            }
+                        )
+                    saved = append_immutable_rows_bulk(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="vision_text_audit",
+                        values_by_col_list=payload,
+                        chunk_size=120,
+                    )
+                    st.success(f"Audit enregistré ({saved} ligne(s) — exceptions uniquement). run_id={run_id}")
+                finally:
+                    ov.empty()
+
+            flagged_sorted = sorted(flagged, key=lambda r: str(r.get("date") or ""))
+            options = [
+                f"{r.get('date')} — {str(r.get('gcs_path') or '').split('/')[-1]}".strip()
+                for r in flagged_sorted
+            ]
+
+            def _sync_vision_pick() -> None:
+                sel = str(st.session_state.get("adm_vision_pick_flagged") or "")
+                ii = options.index(sel) if sel in options else 0
+                pp = flagged_sorted[ii] if flagged_sorted else {}
+                txt = str(pp.get("detected_text") or "").strip()
+                st.session_state["adm_vision_detected_preview"] = txt[:1200]
+                st.session_state["adm_vision_replace_from"] = (txt[:120] if txt else "")
+                st.session_state["adm_vision_replace_to"] = ""
+
+            # Post-correction (st.rerun) : la sélection peut changer car la liste "flagged" change,
+            # sans déclencher on_change. On force donc la resync si la sélection effective diffère.
+            cur = str(st.session_state.get("adm_vision_pick_flagged") or "")
+            if options and cur not in options:
+                st.session_state["adm_vision_pick_flagged"] = options[0]
+                cur = options[0]
+            last = str(st.session_state.get("_adm_vision_pick_last") or "")
+            if options and cur and cur != last:
+                _sync_vision_pick()
+                st.session_state["_adm_vision_pick_last"] = cur
+
+            pick = st.selectbox(
+                "Image à corriger",
+                options=options,
+                index=0,
+                key="adm_vision_pick_flagged",
+                on_change=_sync_vision_pick,
+            )
+            idx = options.index(pick) if pick in options else 0
+            picked = flagged_sorted[idx] if flagged_sorted else {}
+            picked_text = str(picked.get("detected_text") or "").strip()
+            picked_date = str(picked.get("date") or "").strip()
+            picked_path = str(picked.get("gcs_path") or "").strip()
+
+            st.write(f"Chemin : `gs://{bucket_name}/{picked_path}`")
+            # Aperçu image (utile pour confirmer qu'il n'y a pas de texte humain).
+            try:
+                if picked_path:
+                    img_prev = download_bytes(gcs=gcs, bucket_name=bucket_name, path=picked_path)
+                    if img_prev:
+                        st.image(img_prev, caption="Aperçu de l’image (Cloud)", use_container_width=True)
+            except Exception:
+                pass
+
+            # Bouton "confirmer OK" : ajoute à la whitelist (persistante) pour ne plus remonter.
+            if can_sheets and picked_path:
+                if st.button("Confirmer : image OK (whitelist)", key="adm_vision_whitelist_add"):
+                    ovw = loading_overlay("Ajout à la whitelist (Sheets)…")
+                    try:
+                        from core.sheets_db import TableSpec, ensure_table
+
+                        gs_w = build_gspread_client(cfg.gcp_service_account)
+                        ensure_table(
+                            gspread_client=gs_w,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table=TableSpec(
+                                name="vision_text_whitelist",
+                                columns=with_concat([*BASE_COLUMNS, "date", "gcs_path", "reason"]),
+                            ),
+                        )
+                        ent = sha256(f"wl|{picked_date}|{picked_path}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+                        append_immutable_row(
+                            gspread_client=gs_w,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="vision_text_whitelist",
+                            values_by_col={
+                                "entity_id": ent,
+                                "date": picked_date,
+                                "gcs_path": picked_path,
+                                "reason": "confirmé OK (pas de texte humain)",
+                            },
+                        )
+                        # Met à jour cache whitelist et retire de la liste courante.
+                        wl_key2 = f"_adm_vision_whitelist_{year}"
+                        cur_wl = set(st.session_state.get(wl_key2) or set())
+                        cur_wl.add(picked_path)
+                        st.session_state[wl_key2] = cur_wl
+                        try:
+                            prev_rows = list(st.session_state.get(_audit_key) or [])
+                            for rr in prev_rows:
+                                if str(rr.get("gcs_path") or "").strip() == picked_path:
+                                    rr["has_text"] = False
+                                    rr["detected_text"] = ""
+                            st.session_state[_audit_key] = prev_rows
+                        except Exception:
+                            pass
+                        st.success("Ajouté à la whitelist : l’image ne remontera plus aux prochaines analyses.")
+                        st.rerun()
+                    finally:
+                        ovw.empty()
+            if "adm_vision_detected_preview" not in st.session_state:
+                st.session_state["adm_vision_detected_preview"] = picked_text[:1200]
+            if "adm_vision_replace_from" not in st.session_state:
+                st.session_state["adm_vision_replace_from"] = (picked_text[:120] if picked_text else "")
+            if "adm_vision_replace_to" not in st.session_state:
+                st.session_state["adm_vision_replace_to"] = ""
+
+            if st.session_state.get("adm_vision_detected_preview"):
+                st.text_area(
+                    "Texte détecté (extrait)",
+                    value=str(st.session_state.get("adm_vision_detected_preview") or ""),
+                    height=140,
+                    key="adm_vision_detected_preview",
+                )
+
+            cfa, cfb = st.columns(2)
+            with cfa:
+                replace_from = st.text_input("Remplacer (from)", key="adm_vision_replace_from")
+            with cfb:
+                replace_to = st.text_input("Par (to) — vide = suppression", key="adm_vision_replace_to")
+
+            if st.button(
+                "Soumettre la correction + régénérer + écraser (illustration + vignette)",
+                type="primary",
+                disabled=not bool(picked_path),
+                key="adm_vision_do_correction",
+            ):
+                overlay = loading_overlay("Correction en cours (Vertex → Cloud)…")
+                try:
+                    corr_entity = sha256(f"corr|{picked_date}|{picked_path}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+                    gs = build_gspread_client(cfg.gcp_service_account) if can_sheets else None
+                    if gs and cfg.gsheet_id:
+                        from core.sheets_db import TableSpec, ensure_table
+
+                        ensure_table(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table=TableSpec(
+                                name="vision_text_corrections",
+                                columns=with_concat(
+                                    [
+                                        *BASE_COLUMNS,
+                                        "audit_entity_id",
+                                        "run_id",
+                                        "date",
+                                        "gcs_path",
+                                        "replace_from",
+                                        "replace_to",
+                                        "status_detail",
+                                        "vertex_model",
+                                        "result_mime",
+                                        "result_gcs_path",
+                                        "thumb_gcs_path",
+                                        "error",
+                                    ]
+                                ),
+                            ),
+                        )
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="vision_text_corrections",
+                            values_by_col={
+                                "entity_id": corr_entity,
+                                "audit_entity_id": "",
+                                "run_id": run_id,
+                                "date": picked_date,
+                                "gcs_path": picked_path,
+                                "replace_from": replace_from.strip(),
+                                "replace_to": replace_to.strip(),
+                                "status_detail": "requested",
+                            },
+                        )
+
+                    src_bytes = download_bytes(gcs=gcs, bucket_name=bucket_name, path=picked_path)
+                    vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
+                    rep_from = (replace_from or "").strip()
+                    rep_to = (replace_to or "").strip()
+                    rep_to_disp = rep_to if rep_to else "(remove)"
+                    prompt_edit = (
+                        "You are editing the provided reference image.\n"
+                        "Task: replace the exact visible text substring delimited by:\n"
+                        f"FROM: {rep_from!r}\n"
+                        f"TO: {rep_to_disp!r}\n\n"
+                        "Constraints:\n"
+                        "- Keep the same illustration style, framing, composition, colors.\n"
+                        "- Do NOT add any new text anywhere.\n"
+                        "- If TO is (remove), remove the text completely.\n"
+                        "- Do not introduce any other glyphs, letters, numbers, or watermarks.\n"
+                        "- Return only the edited image.\n"
+                    )
+                    img_res = vx.generate_image_auto(
+                        preferred_models=["gemini-2.5-flash-image", "gemini-3-pro-image-preview"],
+                        prompt=prompt_edit,
+                        aspect_ratio="4:3",
+                        reference_image_bytes=src_bytes,
+                        reference_image_mime_type="image/png",
+                    )
+
+                    ct = img_res.mime_type if (img_res.mime_type or "").startswith("image/") else "image/png"
+                    upload_bytes(
+                        gcs=gcs,
+                        bucket_name=bucket_name,
+                        path=picked_path,
+                        data=img_res.image_bytes,
+                        content_type=ct,
+                    )
+                    thumb_path = generate_thumb_from_source_and_upload(
+                        gcs=gcs,
+                        bucket_name=bucket_name,
+                        source_blob_path=picked_path,
+                        download_bytes_fn=download_bytes,
+                        upload_bytes_fn=upload_bytes,
+                        max_side=420,
+                    )
+
+                    if gs and cfg.gsheet_id:
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="vision_text_corrections",
+                            values_by_col={
+                                "entity_id": corr_entity,
+                                "audit_entity_id": "",
+                                "run_id": run_id,
+                                "date": picked_date,
+                                "gcs_path": picked_path,
+                                "replace_from": rep_from,
+                                "replace_to": rep_to,
+                                "status_detail": "done",
+                                "vertex_model": img_res.model,
+                                "result_mime": ct,
+                                "result_gcs_path": picked_path,
+                                "thumb_gcs_path": thumb_path,
+                                "error": "",
+                            },
+                        )
+                    try:
+                        prev_rows = list(st.session_state.get(_audit_key) or [])
+                        for rr in prev_rows:
+                            if str(rr.get("gcs_path") or "").strip() == picked_path:
+                                rr["has_text"] = False
+                                rr["detected_text"] = ""
+                        st.session_state[_audit_key] = prev_rows
+                    except Exception:
+                        pass
+                    st.success("Correction appliquée (illustration + vignette écrasées).")
+                    # Force la resync au prochain rerun (la liste et la sélection vont changer).
+                    for k in (
+                        "_adm_vision_pick_last",
+                        "adm_vision_detected_preview",
+                        "adm_vision_replace_from",
+                        "adm_vision_replace_to",
+                    ):
+                        if k in st.session_state:
+                            del st.session_state[k]
+                except Exception as ex:
+                    try:
+                        if can_sheets and cfg.gsheet_id and cfg.gcp_service_account:
+                            gs2 = build_gspread_client(cfg.gcp_service_account)
+                            append_immutable_row(
+                                gspread_client=gs2,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table="vision_text_corrections",
+                                values_by_col={
+                                    "entity_id": sha256(f"corr_err|{picked_path}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                                    "run_id": run_id,
+                                    "date": picked_date,
+                                    "gcs_path": picked_path,
+                                    "replace_from": (replace_from or "").strip(),
+                                    "replace_to": (replace_to or "").strip(),
+                                    "status_detail": "error",
+                                    "error": str(ex),
+                                },
+                            )
+                    except Exception:
+                        pass
+                    st.exception(ex)
+                finally:
+                    overlay.empty()
+                st.rerun()
+        else:
+            if scanned_unique == 0:
+                st.info("Aucun fichier sur Cloud dans la portée choisie.")
+            elif errs and len(errs) >= scanned_unique and scanned_unique > 0:
+                st.warning(
+                    "Aucune analyse réussie : tous les appels Vision ont échoué. "
+                    "Corrige la configuration (API activée, facturation, droits du compte de service) puis réessaie."
+                )
+            else:
+                st.success("Aucune image avec texte détecté selon ces réglages.")
+
+        if errs:
+            show_raw = st.checkbox("Afficher les erreurs brutes (debug)", value=False, key="adm_text_audit_show_raw")
+            with st.expander("Détail des erreurs", expanded=True):
+                if show_raw:
+                    err_tbl = [
+                        {
+                            "date": r.get("date"),
+                            "chemin": r.get("gcs_path"),
+                            "erreur": str(r.get("error") or ""),
+                        }
+                        for r in errs
+                    ]
                 else:
-                    st.success("Aucune image avec texte détecté selon ces réglages.")
-
-            if errs:
-                err_tbl = [
-                    {
-                        "date": r.get("date"),
-                        "chemin": r.get("gcs_path"),
-                        "erreur": shorten_audit_error_message(str(r.get("error") or "")),
-                    }
-                    for r in errs
-                ]
-                with st.expander("Détail des erreurs"):
-                    st.dataframe(err_tbl, use_container_width=True, hide_index=True)
-        except Exception as ex:
-            st.exception(ex)
-        finally:
-            overlay.empty()
-
+                    err_tbl = [
+                        {
+                            "date": r.get("date"),
+                            "chemin": r.get("gcs_path"),
+                            "erreur": shorten_audit_error_message(str(r.get("error") or "")),
+                        }
+                        for r in errs
+                    ]
+                st.write(f"{len(err_tbl)} erreur(s).")
 
 def render_admin_thumbs() -> None:
     st.title("Génération des vignettes")
@@ -2627,7 +3561,7 @@ def render_admin_thumbs_panel(*, data: dict) -> None:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("Images pleines sur GCS", n_src)
+        st.metric("Images pleines sur Cloud", n_src)
     with c2:
         st.metric("Vignettes présentes", n_thumb)
     with c3:
@@ -2635,12 +3569,149 @@ def render_admin_thumbs_panel(*, data: dict) -> None:
 
     mx = st.slider("Taille max. du côté (pixels)", min_value=280, max_value=720, value=420, step=20, key="adm_thumb_max")
 
+    st.divider()
+    st.subheader("Montage annuel (52 vignettes)")
+    years = sorted({str(t.get("date") or "")[:4] for t in sorted_targets if str(t.get("date") or "")[:4].isdigit()})
+    year = st.selectbox("Année", options=years or ["2026"], index=0, key="adm_thumb_montage_year")
+    montage_path = f"{THUMB_GCS_PREFIX}/montage_{year}.png"
+    montage_pastel_path = f"{THUMB_GCS_PREFIX}/montage_{year}_pastel.png"
+    montage_preview_path = f"{THUMB_GCS_PREFIX}/montage_{year}_preview.webp"
+    st.caption(f"Sortie : `gs://{bucket_name}/{montage_path}` et version pastel pour le dos du PDF.")
+    # Perf : ne pas retélécharger le montage à chaque rerun (ex: checkbox).
+    cache_key = f"_adm_montage_cache_{year}"
+    cache = dict(st.session_state.get(cache_key) or {})
+    montage_exists = bool(cache.get("exists")) if "exists" in cache else False
+
+    # Rafraîchir l'état (existence) à la demande seulement.
+    if st.button("Rafraîchir l’état du montage", key=f"adm_montage_refresh_{year}"):
+        overlay = loading_overlay("Vérification du montage sur Cloud…")
+        try:
+            montage_exists = blob_exists(gcs=gcs, bucket_name=bucket_name, path=montage_path)
+            cache = {"exists": montage_exists}
+            st.session_state[cache_key] = cache
+        finally:
+            overlay.empty()
+
+    # Si jamais pas encore vérifié, on fait une vérif légère (sans download).
+    if "exists" not in cache:
+        try:
+            montage_exists = blob_exists(gcs=gcs, bucket_name=bucket_name, path=montage_path)
+            st.session_state[cache_key] = {"exists": montage_exists}
+        except Exception:
+            montage_exists = False
+            st.session_state[cache_key] = {"exists": False}
+
+    if montage_exists:
+        st.info("Un montage existe déjà sur Cloud pour cette année.")
+        with st.expander("Afficher le montage existant", expanded=False):
+            if st.button("Charger l’aperçu (Cloud)", key=f"adm_montage_load_{year}"):
+                overlay = loading_overlay("Téléchargement de l’aperçu…")
+                try:
+                    # On charge une vignette (WebP) beaucoup plus légère que le PNG complet.
+                    montage_b = b""
+                    try:
+                        montage_b = download_bytes(gcs=gcs, bucket_name=bucket_name, path=montage_preview_path)
+                    except Exception:
+                        montage_b = b""
+                    if not montage_b:
+                        # Fallback si la vignette n'existe pas encore.
+                        montage_b = download_bytes(gcs=gcs, bucket_name=bucket_name, path=montage_path)
+                    cache2 = dict(st.session_state.get(cache_key) or {})
+                    cache2["bytes"] = montage_b
+                    st.session_state[cache_key] = cache2
+                finally:
+                    overlay.empty()
+            montage_b = (st.session_state.get(cache_key) or {}).get("bytes")
+            if montage_b:
+                st.image(montage_b, caption=f"Montage {year} (depuis Cloud)")
+
+    force_regen_montage = st.checkbox(
+        "Régénérer le montage même s’il existe déjà",
+        value=False,
+        key="adm_thumb_montage_force",
+    )
+
+    if st.button(
+        "Générer le montage (PNG) et l’enregistrer sur Cloud",
+        type="primary",
+        disabled=bool(montage_exists and not force_regen_montage),
+        key="adm_thumb_montage_btn",
+    ):
+        overlay = loading_overlay(f"Montage des vignettes {year}…")
+        try:
+            # Liste des thumbs dans l’ordre des dimanches
+            year_targets = [t for t in sorted_targets if str(t.get("date") or "").startswith(str(year))]
+            thumb_paths: list[str] = []
+            for t in year_targets:
+                src = existing_illustration_blob_path(gcs=gcs, bucket_name=bucket_name, target=t)
+                if not src:
+                    continue
+                thumb_paths.append(gcs_thumb_path_from_source_blob(src))
+
+            # Download en parallèle
+            from core.illustration_thumbs import build_thumbnail_webp, build_thumbs_montage_png, pastelize_png
+
+            thumbs_bytes: list[tuple[str, bytes]] = []
+            with ThreadPoolExecutor(max_workers=16) as ex:
+                futs = {ex.submit(download_bytes, gcs=gcs, bucket_name=bucket_name, path=p): p for p in thumb_paths}
+                for fut in as_completed(futs):
+                    p = futs[fut]
+                    try:
+                        b = fut.result()
+                        if b:
+                            thumbs_bytes.append((p, b))
+                    except Exception:
+                        continue
+
+            # Re-trier selon l’ordre initial (car as_completed)
+            idx = {p: i for i, p in enumerate(thumb_paths)}
+            thumbs_bytes.sort(key=lambda x: idx.get(x[0], 10**9))
+
+            # Montage portrait (A4) : 52 vignettes → 4 colonnes × 13 lignes.
+            montage_png = build_thumbs_montage_png(
+                thumbs_bytes,
+                cols=4,
+                rows=13,
+                cell=200,
+                pad=10,
+                title_cell_text=f"Le Chemin de l'Année\n{year}",
+            )
+            montage_pastel_png = pastelize_png(montage_png, alpha=0.55)
+            montage_preview_webp = build_thumbnail_webp(montage_png, max_side=1200, quality=80)
+            upload_bytes(
+                gcs=gcs,
+                bucket_name=bucket_name,
+                path=montage_path,
+                data=montage_png,
+                content_type="image/png",
+            )
+            upload_bytes(
+                gcs=gcs,
+                bucket_name=bucket_name,
+                path=montage_pastel_path,
+                data=montage_pastel_png,
+                content_type="image/png",
+            )
+            upload_bytes(
+                gcs=gcs,
+                bucket_name=bucket_name,
+                path=montage_preview_path,
+                data=montage_preview_webp,
+                content_type="image/webp",
+            )
+            st.success("Montage enregistré.")
+            st.image(montage_png, caption=f"Montage {year} (aperçu)")
+            # Met à jour le cache : existe désormais.
+            st.session_state[cache_key] = {"exists": True, "bytes": montage_preview_webp}
+        finally:
+            overlay.empty()
+
     if not missing_sources:
         st.success("Toutes les vignettes sont déjà générées pour les illustrations présentes sur le bucket.")
     else:
         n_missing = len(missing_sources)
         st.info(
-            f"**{n_missing}** vignette(s) manquante(s) sur **{n_src}** image(s) présentes sur GCS — "
+            f"**{n_missing}** vignette(s) manquante(s) sur **{n_src}** image(s) présentes sur Cloud — "
             "tu peux les générer avec le bouton ci-dessous."
         )
         if st.button(
@@ -2648,7 +3719,7 @@ def render_admin_thumbs_panel(*, data: dict) -> None:
             type="primary",
             key="adm_thumb_gen_missing",
         ):
-            overlay = loading_overlay("Génération des vignettes sur GCS…")
+            overlay = loading_overlay("Génération des vignettes sur Cloud…")
             prog = st.progress(0.0)
             ok = 0
             err_n = 0
@@ -2690,8 +3761,8 @@ def render_admin_plan_consolide() -> None:
     """Vue synthèse : protocole LumenVia + reste à faire (alignement retours Gemini)."""
     st.title("Plan consolidé")
     st.caption(
-        "Synthèse du protocole (`.cursor/rules/lumenvia.mdc`), de l’état du code et des chantiers à traiter — "
-        "dont les arbitrages issus des échanges avec **Gemini** (ligne dédiée ci-dessous, à compléter demain)."
+        "Synthèse du protocole (`.cursor/rules/lumenvia.mdc`), de l’état du code et des chantiers — "
+        "y compris les écarts repérés par rapport à ce qui est déjà documenté (cahier, règles, écran admin)."
     )
 
     plan_html = """
@@ -2721,7 +3792,7 @@ def render_admin_plan_consolide() -> None:
   </thead>
   <tbody>
     <tr>
-      <td>Manifestes étape 2–3 + illustrations GCS + grille Vertex admin</td>
+      <td>Manifestes étape 2–3 + illustrations Cloud + grille Vertex admin</td>
       <td><span class="lv-st-ok">Livré</span></td>
       <td>Bascule annuelle ; retouches unitaires si besoin (charte, date).</td>
     </tr>
@@ -2732,8 +3803,8 @@ def render_admin_plan_consolide() -> None:
     </tr>
     <tr>
       <td>Détection de texte dans les images (Cloud Vision)</td>
-      <td><span class="lv-st-partiel">Partiel</span></td>
-      <td>Confirmer stabilité GCP (projet, facturation, IAM) ; post-trait des visuels signalés si besoin.</td>
+      <td><span class="lv-st-ok">Livré</span></td>
+      <td>Page dédiée Vision + correction + whitelist + filtres anti-faux-positifs (dictionnaire FR + micro-bounding-boxes).</td>
     </tr>
     <tr>
       <td>Cache local lectures AELF + synthèse / audio</td>
@@ -2742,8 +3813,18 @@ def render_admin_plan_consolide() -> None:
     </tr>
     <tr>
       <td>PDF page de garde (dimanche) + PDF mensuel « Graine de Parole » (encart résolutions)</td>
-      <td><span class="lv-st-partiel">Livré v1</span></td>
-      <td>Finitions : mise en page longue, sommaire, branding newsletter / fascicule papier.</td>
+      <td><span class="lv-st-partiel">Livré v2</span></td>
+      <td>
+        Déjà en place : fusion couverture + corps, numérotation, chapitre synthèse, <strong>Passerelle catéchèse</strong> en chapitre séparé si présente, page « À propos » (citation centrée, phrase de clôture centrée, dos avec montage si disponible).
+        Reste : harmoniser encore la hiérarchie visuelle (H1/H2) avec l’écran « Lumière du Dimanche », et peaufiner le PDF mensuel (gabarit fascicule multi-pages si besoin produit).
+      </td>
+    </tr>
+    <tr>
+      <td>PDF — dos (montage annuel des vignettes)</td>
+      <td><span class="lv-st-ok">Livré</span></td>
+      <td>
+        Image Cloud <code>Images/thumbs/montage_{année}.png</code>, insertion avec garde-fous LayoutError ; affinements possibles (texte d’intro dos, taille image selon devices PDF).
+      </td>
     </tr>
     <tr>
       <td>PWA / installation « Ajouter à l’écran d’accueil »</td>
@@ -2756,9 +3837,12 @@ def render_admin_plan_consolide() -> None:
       <td>Pilotage éditorial continu ; pas de sources hors AELF.</td>
     </tr>
     <tr>
-      <td><strong>Suivi Gemini + toi</strong> (retours consolidation)</td>
-      <td><span class="lv-st-todo">À traiter demain</span></td>
-      <td>Consolider ici les décisions suite à la génération massive d’illustrations et aux échanges Gemini : arbitrages qualité, Vision, PDF, PWA, newsletter.</td>
+      <td><strong>Suivi Gemini + consolidation produit</strong></td>
+      <td><span class="lv-st-partiel">Itératif</span></td>
+      <td>
+        Arbitrages qualité illustrations / prompts ; aligner la doc longue (<code>data/cahier_des_charges.md</code>) avec les choix réels (overlay, PDF, mobile).
+        Tenir cette table à jour quand un chantier change de statut.
+      </td>
     </tr>
     <tr>
       <td>Cahier des charges — <strong>version générée automatiquement</strong>, consultation admin, export PDF</td>
@@ -2774,6 +3858,23 @@ def render_admin_plan_consolide() -> None:
       <td>
         Voir <strong>points chirurgicaux</strong> ci-dessous (référence). Déjà dans <code>app.py</code> : popover <code>Menu</code>, viewport,
         padding mémo + <code>:has(textarea:focus)</code>. Reste : extractions CSS dédiées, largeur max type « app » (~480–600&nbsp;px), simulateur admin, audit expander « Mes mémos ».
+      </td>
+    </tr>
+    <tr>
+      <td>UX — <strong>overlay systématique</strong> pendant tout traitement serveur perceptible</td>
+      <td><span class="lv-st-ok">Règle</span></td>
+      <td>
+        Dès qu’une action déclenche un traitement serveur (Sheets, Cloud, Vision, Vertex/Gemini, génération PDF, etc.),
+        afficher un <strong>calque plein écran</strong> (overlay) jusqu’à la fin du traitement, pour éviter l’impression que « rien ne se passe ».
+        Pattern : <code>overlay = loading_overlay(...)</code> puis <code>overlay.empty()</code> dans un <code>finally</code>.
+      </td>
+    </tr>
+    <tr>
+      <td>IA — « Passerelle catéchèse » (<strong>Stone Card</strong>) dans la synthèse + option PDF</td>
+      <td><span class="lv-st-partiel">Livré base</span></td>
+      <td>
+        Section dédiée dans la synthèse + chapitre PDF séparé ; option d’exclusion PDF côté UI.
+        Reste : enrichir le gabarit éditorial (validation rédactionnelle), affiner garde-fous si besoin terrain.
       </td>
     </tr>
     <tr>
@@ -2820,6 +3921,23 @@ def render_admin_plan_consolide() -> None:
   <dd>Stabiliser Vision sur le bon projet GCP et valider une analyse complète sans 403.</dd>
   <dd>Repasser sur le PDF mensuel et la couverture si tu veux un gabarit « fascicule » multi-pages.</dd>
   <dd>PWA : choix d’hébergement et socle technique pour exposer le manifest au navigateur.</dd>
+</dl>
+
+<dl class="lv-keylist">
+  <dt>Écart documentaire — déjà relevé dans le dépôt (à refléter progressivement dans le Markdown)</dt>
+  <dd>
+    <strong>Règle projet</strong> : le cahier dans <code>data/cahier_des_charges.md</code> est encore minimal alors que l’app embarque déjà overlay obligatoire, cache AELF, pipelines d’images, admin Vision/PDF, etc.
+    → soit export « snapshot » depuis l’admin (ligne tableau), soit enrichissement manuel du cahier.
+  </dd>
+  <dd>
+    <strong>Graine de Parole / PDF mensuel</strong> : la règle <code>lumenvia.mdc</code> mentionnait l’encart résolutions « quand le générateur PDF sera branché » — le générateur existe ; la formulation mérite mise à jour dans la règle pour éviter une fausse « dette ».
+  </dd>
+  <dd>
+    <strong>Newsletter / SMS</strong> : mentionnés dans la page « À propos » comme canaux ; vérifier pour chaque environnement ce qui est réellement câblé (Sheets, envoi, conformité) vs. pure intention produit.
+  </dd>
+  <dd>
+    <strong>Typo &amp; PDF</strong> : la page web et le PDF « À propos » partagent le même texte source ; les finitions PDF (centrages, sauts) sont dans <code>pdf_liturgy_sunday.py</code> — à garder synchronisés si le texte marketing change.
+  </dd>
 </dl>
 </div>
 """
@@ -2872,20 +3990,24 @@ def render_admin_cahier_charges() -> None:
         if not cfg.gcp_service_account or not cfg.gsheet_id:
             st.error("Configuration Google Sheets manquante (`gcp_service_account`, `gsheet_id`).")
         else:
+            ov = loading_overlay("Enregistrement dans le journal (Google Sheets)…")
             gs = build_gspread_client(cfg.gcp_service_account)
-            entry_id = sha256(f"adm|{title}|{detail}".encode("utf-8")).hexdigest()[:24]
-            append_immutable_row(
-                gspread_client=gs,
-                spreadsheet_id=cfg.gsheet_id,
-                table="admin_changelog",
-                values_by_col={
-                    "entity_id": entry_id,
-                    "title": title.strip(),
-                    "detail": detail.strip(),
-                },
-            )
-            st.success("Entrée ajoutée au journal.")
-            st.rerun()
+            try:
+                entry_id = sha256(f"adm|{title}|{detail}".encode("utf-8")).hexdigest()[:24]
+                append_immutable_row(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="admin_changelog",
+                    values_by_col={
+                        "entity_id": entry_id,
+                        "title": title.strip(),
+                        "detail": detail.strip(),
+                    },
+                )
+                st.success("Entrée ajoutée au journal.")
+                st.rerun()
+            finally:
+                ov.empty()
 
     if cfg.gsheet_id and cfg.gcp_service_account:
         try:
@@ -2949,14 +4071,14 @@ def render_admin_step3() -> None:
 ### À quoi servent ces illustrations
 
 - **Une image par dimanche** listée dans le manifeste : elle correspond à **la semaine liturgique** centrée sur ce dimanche.
-- **Dans l’app** : sur « La Lumière du Dimanche », l’image affichée est celle du **dimanche choisi** par l’utilisateur (fichier présent dans GCS au chemin du manifeste).
+- **Dans l’app** : sur « La Lumière du Dimanche », l’image affichée est celle du **dimanche choisi** par l’utilisateur (fichier présent dans le Cloud au chemin du manifeste).
 - **Communication** : la même illustration peut illustrer le **SMS**, l’**e-mail** ou la **newsletter** de la semaine pour laquelle tu fixes ce dimanche comme référence.
 
 **Autres usages possibles** : visuel pour **réseaux sociaux** ou **Open Graph** du lien du jour ; **PDF** ou fascicule mensuel ; **diaporama** ou fond d’écran en paroisse ; **carte de partage** (PWA / lien) ; **miniature** dans un récap hebdomadaire ; **kit presse** ou **affiche** locale pour une grande solennité.
 
 ### Fréquence de production
 
-Le manifeste est construit **pour une année civile** (script étape 2 avec `--year`). Une fois **toutes** les images générées et déposées sur GCS pour cette année, **tu n’as pas besoin d’y revenir** tant que tu restes sur cette même année — sauf **retouche ponctuelle**, **changement de charte**, ou passage à **l’année suivante** (nouveau manifeste + nouvelles images).
+Le manifeste est construit **pour une année civile** (script étape 2 avec `--year`). Une fois **toutes** les images générées et déposées sur le Cloud pour cette année, **tu n’as pas besoin d’y revenir** tant que tu restes sur cette même année — sauf **retouche ponctuelle**, **changement de charte**, ou passage à **l’année suivante** (nouveau manifeste + nouvelles images).
 
 {f"**Année couverte par ce fichier** : **{year_hint}** ({len(targets)} dimanches)." if year_hint else f"**Dimanches dans ce manifeste** : {len(targets)}."}
         """.strip()
@@ -2974,16 +4096,33 @@ def render_admin_test_resources() -> None:
         st.error("gcp_service_account manquant dans secrets.")
         return
 
+    st.subheader("Identité / projet (diagnostic)")
+    sa = dict(cfg.gcp_service_account or {})
+    sa_email = str(sa.get("client_email") or "").strip()
+    sa_project_id = str(sa.get("project_id") or "").strip()
+    sa_quota_project_id = str(sa.get("quota_project_id") or sa.get("project_id") or "").strip()
+    diag = {
+        "service_account": sa_email or "—",
+        "project_id": sa_project_id or "—",
+        "quota_project_id": sa_quota_project_id or "—",
+        "gcs_bucket_name": str(cfg.gcs_bucket_name or "").strip() or "—",
+        "gsheet_id_present": bool(str(cfg.gsheet_id or "").strip()),
+    }
+    st.code("\n".join([f"{k}: {v}" for k, v in diag.items()]))
+
     if cfg.gcs_bucket_name:
         try:
             gcs = build_gcs_client(cfg.gcp_service_account)
+            gcs_project = str(getattr(gcs, "project", "") or "").strip()
+            if gcs_project:
+                st.caption(f"Client Cloud — projet effectif : `{gcs_project}`")
             bucket = gcs.bucket(cfg.gcs_bucket_name)
             blobs = list(gcs.list_blobs(bucket, max_results=20, prefix="Images/"))
-            st.success(f"GCS OK — bucket `{cfg.gcs_bucket_name}` (exemples: {len(blobs)} objets sous Images/)")
+            st.success(f"Cloud OK — bucket `{cfg.gcs_bucket_name}` (exemples: {len(blobs)} objets sous Images/)")
             for b in blobs[:10]:
                 st.write(f"- {b.name}")
         except Exception as e:
-            st.error(f"GCS KO — {e}")
+            st.error(f"Cloud KO — {e}")
     else:
         st.warning("gcs_bucket_name manquant.")
 
@@ -2992,9 +4131,237 @@ def render_admin_test_resources() -> None:
     else:
         st.warning("gsheet_id manquant.")
 
+    st.divider()
+    st.subheader("Gemini API TTS (diagnostic)")
+    if not cfg.gemini_api_key:
+        st.warning("GEMINI_API_KEY manquante — fallback TTS via Gemini API indisponible.")
+    else:
+        if st.button("Tester Gemini TTS (court)", key="adm_test_gemini_tts"):
+            ov = loading_overlay("Test Gemini TTS…")
+            try:
+                from core.gemini_tts_api import GeminiTtsApiClient
+
+                t0 = time.perf_counter()
+                cli = GeminiTtsApiClient(api_key=cfg.gemini_api_key)
+                res = cli.generate_audio(
+                    model="gemini-2.5-flash-preview-tts",
+                    text="Test audio LumenVia. Un, deux, trois.",
+                    voice_name="Kore",
+                )
+                dt = time.perf_counter() - t0
+                st.success(f"TTS OK — {len(res.audio_bytes)} octets en {dt:.2f}s ({res.mime_type})")
+                st.audio(res.audio_bytes, format=res.mime_type or "audio/wav")
+            except Exception as e:
+                st.error(f"TTS KO — {e}")
+            finally:
+                ov.empty()
+
     st.caption(
         "Journal produit / décisions d’architecture : menu **Administration → Cahier des charges**."
     )
+
+    st.divider()
+    st.subheader("Instructions IA (viewer / édition)")
+    instr_path = Path("data/instructions_ia.md")
+    if not instr_path.is_file():
+        st.warning(f"Fichier introuvable : `{instr_path.as_posix()}`.")
+    else:
+        instr_txt = instr_path.read_text(encoding="utf-8")
+        st.caption("Aperçu : le prompt final = instructions ci-dessous + surcouches optionnelles (À retenir, Passerelle catéchèse).")
+        tab_a, tab_b = st.tabs(["Éditer le socle (`instructions_ia.md`)", "Aperçu des surcouches"])
+
+        with tab_a:
+            edited = st.text_area(
+                "Contenu (Markdown)",
+                value=instr_txt,
+                height=420,
+                key="adm_instr_editor",
+            )
+            if st.button("Enregistrer les instructions (sur le disque)", type="primary", key="adm_instr_save"):
+                ov = loading_overlay("Enregistrement des instructions IA…")
+                try:
+                    instr_path.write_text(edited, encoding="utf-8")
+                    st.success(f"Sauvegardé : `{instr_path.as_posix()}`.")
+                    st.rerun()
+                finally:
+                    ov.empty()
+
+        with tab_b:
+            st.markdown("**Surcouche — À retenir / Psaume : Ma réponse** (si option activée)")
+            st.code(
+                "\n".join(
+                    [
+                        "Inclure une sous-section titrée exactement « Le Psaume : Ma réponse » : uniquement à partir du texte du psaume fourni.",
+                        "Terminer par une section « À retenir » avec 3 à 5 puces commençant par un verbe.",
+                    ]
+                )
+            )
+            st.markdown("**Surcouche — Passerelle catéchèse — L’écho des paraboles** (si option activée)")
+            st.code(
+                "\n".join(
+                    [
+                        "Ajouter à la fin une section titrée exactement : « Passerelle catéchèse — L’écho des paraboles ».",
+                        "Stone Card en 5 sous-parties : L’Essentiel / La Scène Visuelle / Le Mot-Clé / L’Analogie du Quotidien / Le Pas de la Semaine.",
+                        "Garde-fous : ne pas inventer de paroles, ton d’accompagnement, renvoyer au catéchiste si complexe/controversé.",
+                    ]
+                )
+            )
+
+    st.divider()
+    st.subheader("Dépendances runtime (diagnostic)")
+    try:
+        import openpyxl  # type: ignore
+
+        st.success(f"openpyxl OK — version {getattr(openpyxl, '__version__', '?')} ({getattr(openpyxl, '__file__', '')})")
+    except Exception as e:
+        st.warning(f"openpyxl non importable dans CE runtime Streamlit : {e}")
+
+
+def render_admin_readings_cache() -> None:
+    st.title("Cache lectures (AELF → Sheets)")
+    st.caption(
+        "Cette page permet de précharger les lectures liturgiques (AELF) dans la table `readings_cache`, "
+        "sans doublons. Utile pour accélérer l’usage et stabiliser le rendu (web/PDF)."
+    )
+    cfg = load_config()
+    if not cfg.gcp_service_account or not cfg.gsheet_id:
+        st.error("Configure `gcp_service_account` et `gsheet_id` dans `.streamlit/secrets.toml`.")
+        return
+
+    zone = "france"
+    today = date.today()
+    year = st.number_input("Année", min_value=2020, max_value=2100, value=int(today.year), step=1)
+    month = st.selectbox(
+        "Mois (optionnel)",
+        options=[("all", "Toute l’année")] + [(f"{i:02d}", f"{i:02d}") for i in range(1, 13)],
+        format_func=lambda x: x[1],
+        index=0,
+        key="adm_readings_cache_month",
+    )[0]
+
+    def _normalize_aelf_text_for_cache_local(s: str | None) -> str:
+        raw = (s or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not raw:
+            return ""
+        return re.sub(r"\s+", " ", raw).strip()
+
+    def _sundays_in_year(y: int) -> list[date]:
+        d = date(int(y), 1, 1)
+        # weekday(): Monday=0 ... Sunday=6
+        days_to_sun = (6 - d.weekday()) % 7
+        d = d + timedelta(days=days_to_sun)
+        out: list[date] = []
+        while d.year == int(y):
+            out.append(d)
+            d = d + timedelta(days=7)
+        return out
+
+    def _sundays_in_month(y: int, m: int) -> list[date]:
+        out: list[date] = []
+        for d in _sundays_in_year(y):
+            if d.month == int(m):
+                out.append(d)
+        return out
+
+    targets = _sundays_in_year(year) if month == "all" else _sundays_in_month(year, int(month))
+    st.metric("Dimanches à vérifier", len(targets))
+
+    if st.button("Précharger dans `readings_cache`", type="primary", key="adm_readings_cache_run"):
+        ov = loading_overlay("Préchargement des lectures…")
+        try:
+            from core.sheets_db import TableSpec, ensure_table, fetch_records, append_immutable_rows_bulk
+            from core.aelf import AelfDayIdentity, AelfTexts
+
+            gs = build_gspread_client(cfg.gcp_service_account)
+            ensure_table(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table=TableSpec(
+                    name="readings_cache",
+                    columns=with_concat(
+                        [
+                            *BASE_COLUMNS,
+                            "date",
+                            "zone",
+                            "periode",
+                            "semaine",
+                            "annee",
+                            "couleur",
+                            "fete",
+                            "jour_liturgique_nom",
+                            "premiere_lecture",
+                            "psaume",
+                            "deuxieme_lecture",
+                            "evangile",
+                            "source",
+                            "error",
+                        ]
+                    ),
+                ),
+            )
+
+            existing = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=6000)
+            existing_dates = {
+                str(r.get("date") or "").strip()
+                for r in existing
+                if str(r.get("zone") or "").strip() == zone
+                and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                and not str(r.get("error") or "").strip()
+                and str(r.get("date") or "").strip().startswith(str(year))
+            }
+
+            to_fetch = [d for d in targets if d.isoformat() not in existing_dates]
+            st.write(f"À récupérer : **{len(to_fetch)}** dimanche(s).")
+            if not to_fetch:
+                st.success("Rien à faire : tout est déjà en base pour cette sélection.")
+                return
+
+            rows: list[dict[str, str]] = []
+            for d in to_fetch:
+                ds = d.isoformat()
+                try:
+                    identity, texts = cached_aelf(ds, zone=zone, _identity_schema=4)
+                    # Normalisation “bloc” pour stockage
+                    rows.append(
+                        {
+                            "entity_id": sha256(f"read|{ds}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                            "date": ds,
+                            "zone": zone,
+                            "periode": getattr(identity, "periode", None) or "",
+                            "semaine": getattr(identity, "semaine", None) or "",
+                            "annee": getattr(identity, "annee", None) or "",
+                            "couleur": getattr(identity, "couleur", None) or "",
+                            "fete": getattr(identity, "fete", None) or "",
+                            "jour_liturgique_nom": getattr(identity, "jour_liturgique_nom", None) or "",
+                            "premiere_lecture": _normalize_aelf_text_for_cache_local(getattr(texts, "premiere_lecture", None)),
+                            "psaume": _normalize_aelf_text_for_cache_local(getattr(texts, "psaume", None)),
+                            "deuxieme_lecture": _normalize_aelf_text_for_cache_local(getattr(texts, "deuxieme_lecture", None)),
+                            "evangile": _normalize_aelf_text_for_cache_local(getattr(texts, "evangile", None)),
+                            "source": "aelf_api_prefetch",
+                            "error": "",
+                        }
+                    )
+                except Exception as ex:
+                    rows.append(
+                        {
+                            "entity_id": sha256(f"read|{ds}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                            "date": ds,
+                            "zone": zone,
+                            "source": "aelf_api_prefetch",
+                            "error": str(ex)[:900],
+                        }
+                    )
+
+            added = append_immutable_rows_bulk(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="readings_cache",
+                values_by_col_list=rows,
+                chunk_size=120,
+            )
+            st.success(f"Préchargement terminé : **{added}** ligne(s) ajoutée(s).")
+        finally:
+            ov.empty()
 
 
 def _build_prompt(
@@ -3002,6 +4369,7 @@ def _build_prompt(
     instructions: str,
     length_words: int,
     include_takeaways: bool,
+    include_catechese_bridge: bool,
     identity: dict,
     readings: dict,
     liturgical_context: str | None = None,
@@ -3026,12 +4394,32 @@ def _build_prompt(
             "\nMettre en relief la promesse / préfiguration (Première lecture) et l’accomplissement (Évangile), strictement à partir des textes fournis.\n"
         )
 
+    catechese_block = ""
+    if include_catechese_bridge:
+        catechese_block = (
+            "\nAjouter à la fin une section titrée exactement : « Passerelle catéchèse — L’écho des paraboles ».\n"
+            "Cette section doit être une “Stone Card” structurée en 5 sous-parties (titres exacts) :\n"
+            "Important : ne mets pas de numérotation (pas de « 1) », « 2) », etc.).\n"
+            "Important : n'utilise aucun emoji, aucune puce décorative, aucun symbole (ni carrés, ni ronds), et aucun caractère isolé en préfixe.\n"
+            "Chaque sous-partie doit commencer par le TITRE SEUL sur une ligne (ex: « La Scène Visuelle »), puis le texte sur les lignes suivantes.\n"
+            "« L’Essentiel » : une seule phrase percutante (le cœur du message), fidèle aux textes.\n"
+            "« La Scène Visuelle » : décrire la scène comme un tableau vivant (sensoriel) sans inventer de paroles.\n"
+            "« Le Mot-Clé » : choisir 1 concept (ex. Grâce, Alliance…) et le définir simplement.\n"
+            "« L’Analogie du Quotidien » : une analogie moderne, digne, non trivialisante, qui éclaire le texte sans le remplacer.\n"
+            "« Le Pas de la Semaine » : un défi concret à vivre (école, famille, paroisse).\n"
+            "Garde-fous :\n"
+            "- Prudence interprétative : ne pas inventer de paroles du Christ ni changer le sens de l’Écriture.\n"
+            "- Ton d’accompagnement respectueux ; pas de langage culpabilisant.\n"
+            "- Si un point théologique est complexe/controversé, inviter à en parler avec un animateur/catéchiste.\n"
+        )
+
     return f"""
 {instructions}
 
 Paramètres:
 - length_words: {length_words}
 - include_takeaways: {takeaways}
+- include_catechese_bridge: {"true" if include_catechese_bridge else "false"}
 - style: simple
 - addressing: vous
 {ctx_block}
@@ -3045,6 +4433,7 @@ Tâche:
 Commence par un court paragraphe de mise en situation : comment la couleur liturgique, le temps liturgique et le cycle annoncés ci-dessus cadrent la lecture du jour (sans ajouter de faits non présents dans les textes).
 Ensuite, rédige la synthèse en français en respectant STRICTEMENT les contraintes (zéro invention).
 {psalm_block}
+{catechese_block}
 Contrainte de longueur: vise {length_words} mots (+/- 10%). Ne termine pas avant d'avoir atteint la longueur cible.
 """.strip()
 
@@ -3068,7 +4457,7 @@ def _ext_from_mime(mime: str | None) -> str:
     return "bin"
 
 
-def _chunk_text_for_tts(text: str, *, max_chars: int = 900) -> list[str]:
+def _chunk_text_for_tts(text: str, *, max_chars: int = 1400) -> list[str]:
     """
     Découpe en morceaux pour éviter les limites TTS (et éviter l'audio tronqué).
     Stratégie simple: découpe sur paragraphes puis sur phrases si besoin.
@@ -3103,6 +4492,47 @@ def _chunk_text_for_tts(text: str, *, max_chars: int = 900) -> list[str]:
             for i in range(0, len(c), max_chars):
                 final.append(c[i : i + max_chars])
     return final
+
+
+_CATECHESE_SECTION_TITLE = "Passerelle catéchèse — L’écho des paraboles"
+
+
+def _strip_catechese_bridge(text: str | None) -> str | None:
+    """Retire la section « Passerelle catéchèse… » du Markdown si présente (pour option PDF)."""
+    if not text:
+        return text
+    s = str(text)
+    # Retire depuis un titre Markdown contenant le libellé jusqu’à la fin ou jusqu’au prochain titre niveau 2/3.
+    # Supporte: "## Passerelle..." ou "**Passerelle..." (selon style modèle).
+    pat = re.compile(
+        r"(?is)\n{0,2}(?:#{2,3}\s*|\\*\\*\\s*)"
+        + re.escape(_CATECHESE_SECTION_TITLE)
+        + r".*?(?=(?:\n#{2,3}\s)|\\Z)"
+    )
+    out = re.sub(pat, "\n", s).strip()
+    return out
+
+
+def _gcs_signed_url(
+    *,
+    gcs: object,
+    bucket_name: str,
+    path: str,
+    expires_s: int = 7 * 24 * 3600,
+) -> str | None:
+    """URL signée (V4) pour accès anonyme temporaire à un objet privé."""
+    try:
+        bucket = gcs.bucket(bucket_name)
+        blob = bucket.blob(path)
+        if not blob.exists():
+            return None
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=int(expires_s),
+            method="GET",
+        )
+    except Exception:
+        return None
 
 
 def _inject_admin_phone_preview_css() -> None:
@@ -3249,6 +4679,22 @@ def main() -> None:
                 st.rerun()
         else:
             render_admin_cahier_charges()
+    elif route == "admin_vision":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_vision"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_vision_text()
+    elif route == "admin_readings_cache":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_readings_cache"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_readings_cache()
     else:
         render_about()
 

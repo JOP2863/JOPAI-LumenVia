@@ -93,6 +93,130 @@ def generate_thumb_from_source_and_upload(
     return dest
 
 
+def build_thumbs_montage_png(
+    thumbs: list[tuple[str, bytes]],
+    *,
+    cols: int = 4,
+    rows: int = 13,
+    cell: int = 200,
+    pad: int = 10,
+    bg: tuple[int, int, int] = (253, 251, 247),
+    title_cell_text: str | None = None,
+) -> bytes:
+    """Monte toutes les vignettes en grille dans un PNG (calendrier de l’année)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    # On conserve l’ordre d’entrée.
+    w = cols * cell + (cols + 1) * pad
+    h = rows * cell + (rows + 1) * pad
+    canvas = Image.new("RGB", (w, h), color=bg)
+
+    # Cellule titre (en haut à gauche) : décale le reste (51 -> 52).
+    start_i = 0
+    if title_cell_text:
+        x0 = pad
+        y0 = pad
+        draw = ImageDraw.Draw(canvas)
+        # Bordure or légère
+        draw.rectangle([x0, y0, x0 + cell, y0 + cell], outline=(212, 175, 55), width=3)
+        txt = str(title_cell_text).strip()
+
+        def _load_font(px: int):
+            try:
+                return ImageFont.truetype("arial.ttf", int(px))
+            except Exception:
+                return ImageFont.load_default()
+
+        def _wrap_lines(text: str, font, max_w: int) -> list[str]:
+            raw_lines = text.splitlines() if "\n" in text else [text]
+            out: list[str] = []
+            for raw in raw_lines:
+                words = [w for w in str(raw).split(" ") if w]
+                if not words:
+                    continue
+                cur = words[0]
+                for w in words[1:]:
+                    cand = f"{cur} {w}"
+                    bb = draw.textbbox((0, 0), cand, font=font)
+                    if (bb[2] - bb[0]) <= max_w:
+                        cur = cand
+                    else:
+                        out.append(cur)
+                        cur = w
+                out.append(cur)
+            return out
+
+        margin = 14
+        max_w = max(10, cell - 2 * margin)
+        max_h = max(10, cell - 2 * margin)
+        chosen_font = _load_font(26)
+        chosen_lines = _wrap_lines(txt, chosen_font, max_w)
+        chosen_line_h = 20
+
+        # Auto-fit : réduit la police jusqu’à ce que tout rentre (largeur + hauteur).
+        for px in (26, 24, 22, 20, 18, 17, 16, 15, 14, 13, 12):
+            font = _load_font(px)
+            lines = _wrap_lines(txt, font, max_w)
+            if not lines:
+                continue
+            bbs = [draw.textbbox((0, 0), ln, font=font) for ln in lines]
+            line_h = max((bb[3] - bb[1] for bb in bbs), default=px)
+            total_h = line_h * len(lines) + 6 * (len(lines) - 1)
+            if total_h <= max_h and all((bb[2] - bb[0]) <= max_w for bb in bbs):
+                chosen_font = font
+                chosen_lines = lines
+                chosen_line_h = line_h
+                break
+
+        # Centrage multi-ligne
+        total_h = chosen_line_h * len(chosen_lines) + 6 * (len(chosen_lines) - 1)
+        ty = y0 + (cell - total_h) // 2
+        for ln in chosen_lines:
+            bb = draw.textbbox((0, 0), ln, font=chosen_font)
+            tw = bb[2] - bb[0]
+            tx = x0 + (cell - tw) // 2
+            draw.text((tx, ty), ln, fill=(52, 46, 41), font=chosen_font)
+            ty += chosen_line_h + 6
+        start_i = 1
+
+    max_n = cols * rows
+    for j, (_name, b) in enumerate(thumbs[: max_n - start_i]):
+        i = j + start_i
+        try:
+            im = Image.open(io.BytesIO(b))
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGB")
+            # Fit dans la cellule.
+            im.thumbnail((cell, cell), Image.Resampling.LANCZOS)
+            x0 = pad + (i % cols) * (cell + pad) + (cell - im.size[0]) // 2
+            y0 = pad + (i // cols) * (cell + pad) + (cell - im.size[1]) // 2
+            if im.mode == "RGBA":
+                canvas.paste(im, (x0, y0), im)
+            else:
+                canvas.paste(im, (x0, y0))
+        except Exception:
+            continue
+
+    out = io.BytesIO()
+    canvas.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+def pastelize_png(png_bytes: bytes, *, alpha: float = 0.55) -> bytes:
+    """Version “pastel” : éclaircit + désature légèrement."""
+    from PIL import Image, ImageEnhance
+
+    im = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    im = ImageEnhance.Color(im).enhance(0.75)
+    im = ImageEnhance.Brightness(im).enhance(1.15)
+    # Voile crème
+    veil = Image.new("RGB", im.size, (253, 251, 247))
+    im = Image.blend(im, veil, float(min(0.9, max(0.0, alpha))))
+    out = io.BytesIO()
+    im.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
 _PROJECT_RE = re.compile(r"project[=/](\d+)", re.I)
 
 

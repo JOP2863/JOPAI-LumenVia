@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 
 import streamlit as st
 
@@ -53,6 +54,12 @@ def _to_paragraph_html(text: str) -> str:
         # Dans un paragraphe, on remplace les retours simples par des espaces.
         p = " ".join([ln.strip() for ln in p.split("\n") if ln.strip()])
         p = " ".join(p.split())
-        out.append(f"<p>{html.escape(p)}</p>")
+        # Règles de mise en forme “lectures” (lisibilité) :
+        # - Retours à la ligne après ponctuation forte ; : ! ? et après les points avant une majuscule.
+        # - Pas de paragraphes artificiels ici : uniquement des <br/> dans le <p>.
+        p = re.sub(r"([;:!?])\s+", r"\1\n", p)
+        p = re.sub(r"\.\s+(?=[A-ZÀ-ÖØ-Ý«“\"(])", ".\n", p)
+        escaped = html.escape(p)
+        out.append(f"<p>{escaped.replace(chr(10), '<br/>')}</p>")
     return "\n".join(out)
 
