@@ -366,17 +366,6 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
   }
 }
 
-/* Connexion étroite : texte à droite de la ligne logo */
-@media (max-width: 1024px) {
-  div[class*="st-key-lv_nav_header"]
-    div[data-testid="column"]:last-child [data-testid="stCaptionContainer"],
-  div[class*="st-key-lv_nav_header"]
-    div[data-testid="column"]:last-child {
-    align-items: flex-end !important;
-    text-align: right !important;
-  }
-}
-
 /* 2. Bouton Primaire (Le bouton "Générer") */
 button[kind="primary"] {
   background-color: var(--liturgie-gold) !important;
@@ -720,7 +709,7 @@ def _admin_do_logout_navigation() -> None:
 
 
 def render_admin_navigation_in_popover() -> None:
-    """Tuiles Administration dans le popover Menu (viewport ≤1024px : la grille bureau est masquée)."""
+    """Tuiles Administration dans le popover Menu (mobile CSS ≤1024px ou session iframe `lumenvia_narrow_nav`)."""
     if not st.session_state.get("admin_authenticated"):
         return
     st.divider()
@@ -743,24 +732,12 @@ def top_nav() -> str:
     uid = str(st.session_state.get("auth_user_entity_id") or "").strip()
     email = str(st.session_state.get("auth_email_lc") or "").strip()
     is_admin = bool(st.session_state.get("admin_authenticated"))
+    narrow_nav = bool(st.session_state.get("lumenvia_narrow_nav"))
 
-    with st.container(key="lv_nav_header"):
-        c_l, c_c, c_r = st.columns([1, 3, 1.45], gap="small")
-        with c_l:
-            st.empty()
-        with c_c:
-            if logo_path.is_file():
-                st.image(str(logo_path), width=56)
-        with c_r:
-            if uid:
-                st.caption(f"🟢 Connecté · {email or 'session active'}")
-                if st.button("Déconnexion", key="auth_logout_nav"):
-                    for k in ("auth_user_entity_id", "auth_email_lc"):
-                        if k in st.session_state:
-                            del st.session_state[k]
-                    st.session_state.pop("admin_authenticated", None)
-                    st.session_state.pop("admin_phone_preview", None)
-                    st.rerun()
+    if logo_path.is_file():
+        _, mid, _ = st.columns([1, 1, 1])
+        with mid:
+            st.image(str(logo_path), width=56)
 
     labels = [
         ("about", "JOPAI LumenVia :\nC’est quoi ?"),
@@ -769,19 +746,40 @@ def top_nav() -> str:
         ("join", "Nous\nrejoindre"),
     ]
 
-    cols = st.columns([1, 1, 1, 1, 1], gap="small")
-    with cols[0]:
-        with st.popover("Menu", use_container_width=True):
-            for route, label in labels:
-                short = label.replace("\n", " ")
-                if st.button(short, key=f"nav_m_{route}", use_container_width=True, type="secondary"):
-                    st.session_state.route = route
-            if is_admin:
-                render_admin_navigation_in_popover()
-    for i, (route, label) in enumerate(labels):
-        with cols[i + 1]:
-            if st.button(label, key=f"nav_d_{route}", use_container_width=True, type="secondary"):
+    def _nav_popover_body() -> None:
+        for route, label in labels:
+            short = label.replace("\n", " ")
+            if st.button(short, key=f"nav_m_{route}", use_container_width=True, type="secondary"):
                 st.session_state.route = route
+        if is_admin:
+            render_admin_navigation_in_popover()
+
+    if narrow_nav:
+        # Iframe simulateur : le viewport CSS suit souvent la fenêtre parente — pas de 2ᵉ rangée de tuiles.
+        with st.popover("Menu", use_container_width=True):
+            _nav_popover_body()
+    else:
+        cols = st.columns([1, 1, 1, 1, 1], gap="small")
+        with cols[0]:
+            with st.popover("Menu", use_container_width=True):
+                _nav_popover_body()
+        for i, (route, label) in enumerate(labels):
+            with cols[i + 1]:
+                if st.button(label, key=f"nav_d_{route}", use_container_width=True, type="secondary"):
+                    st.session_state.route = route
+
+    if uid:
+        b1, b2 = st.columns([4, 1], gap="small")
+        with b1:
+            st.caption(f"🟢 Connecté · {email or 'session active'}")
+        with b2:
+            if st.button("Déconnexion", key="auth_logout_nav"):
+                for k in ("auth_user_entity_id", "auth_email_lc"):
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.session_state.pop("admin_authenticated", None)
+                st.session_state.pop("admin_phone_preview", None)
+                st.rerun()
 
     admin_nav_bar()
 
@@ -871,10 +869,13 @@ def _admin_login_and_password() -> tuple[str, str]:
 def admin_nav_bar() -> None:
     """Menu complémentaire réservé à la session administrateur (après connexion).
 
-    Visible sur **grand écran** uniquement (`lv_admin_desktop_shell`) ; en ≤1024px le même contenu vit
-    sous le Menu dépliant (`render_admin_navigation_in_popover`) et ce bloc est masqué par CSS.
+    Masqué en session **iframe simulateur** (`lumenvia_narrow_nav`) : l’admin y est uniquement sous Menu.
+    Sur grand écran, visible dans `lv_admin_desktop_shell` ; en ≤1024px hors iframe, grille masquée par CSS
+    (entrées sous Menu).
     """
     if not st.session_state.get("admin_authenticated"):
+        return
+    if st.session_state.get("lumenvia_narrow_nav"):
         return
     with st.container(key="lv_admin_desktop_shell"):
         st.markdown("---")
@@ -4165,10 +4166,12 @@ def render_admin_plan_consolide() -> None:
 <dl class="lv-keylist">
   <dt>Trois points chirurgicaux UX mobile (référence verrouillée)</dt>
   <dd>
-    <strong>1 — Navigation.</strong> <strong>≥1025&nbsp;px&nbsp;</strong>&nbsp;: quatre tuiles Rubriques en ligne, colonne Menu masquée. <strong>≤1024&nbsp;px&nbsp;</strong>&nbsp;: uniquement
-    le déclencheur <strong>«&nbsp;Menu&nbsp;»</strong> — rubriques + (si session admin) entrées Administration dans le panneau ; pas de tuiles dupliquées sous l’en-tête.
-    Connexion / déconnexion dans la colonne droite de <code>lv_nav_header</code>. Grille admin bureau + toggle «&nbsp;Aperçu mobile&nbsp;» sont masqués en ≤1024&nbsp;px
-    (<code>lv_admin_desktop_shell</code>), car redondants sur un vrai téléphone.
+    <strong>1 — Navigation.</strong> <strong>≥1025&nbsp;px&nbsp;</strong>&nbsp;: quatre tuiles Rubriques en ligne, colonne Menu masquée.     <strong>≤1024&nbsp;px&nbsp;</strong>&nbsp;: uniquement le déclencheur <strong>«&nbsp;Menu&nbsp;»</strong> — rubriques + (si session admin)
+    dans le panneau ; pas de tuiles dupliquées sous le logo (<code>@media max-width:&nbsp;1024px</code>).
+    Pour l’<strong>iframe</strong> du simulateur, le viewport suit souvent le parent&nbsp;: ajouter <code>lumenvia_narrow_nav=1</code>
+    dans l’URL de l’iframe pour forcer ce layout sans second rang de boutons.
+    Connexion / déconnexion&nbsp;: ligne sous la barre de navigation (comme précédemment). Grille admin + «&nbsp;Aperçu mobile&nbsp;» masqués en ≤1024&nbsp;px,
+    ou entièrement sautés dans la session iframe compacte (<code>lumenvia_narrow_nav</code>).
   </dd>
   <dd>
     <strong>2 — Clavier vs saisie / expander.</strong> Ajouter un <code>padding-bottom</code> substantiel au conteneur principal lorsqu’un champ
@@ -5125,6 +5128,15 @@ section[data-testid="stMain"] .block-container {{
     )
 
 
+def _lumenvia_narrow_nav_from_query() -> bool:
+    """`?lumenvia_narrow_nav=1` : iframe où le viewport CSS ne reflète pas la largeur utile."""
+    try:
+        v = str(st.query_params.get("lumenvia_narrow_nav") or "").strip().lower()
+    except Exception:
+        v = ""
+    return v in ("1", "true", "yes", "on")
+
+
 def _lumenvia_app_origin_url() -> str | None:
     """Origine HTTPS de l'app pour iframe simulateur (`PUBLIC_APP_URL` ou URL courante Streamlit)."""
     try:
@@ -5235,7 +5247,9 @@ Le **clavier virtuel** réel du téléphone n’est pas reproductible ici ; pour
             "de déploiement (ex. ton app Streamlit Cloud). Sinon Streamlit doit exposer `st.context.url` sur ton hébergement."
         )
     else:
-        src = html_escape(origin.rstrip("/") + "/", quote=True)
+        base_src = origin.rstrip("/") + "/"
+        sep = "&" if "?" in base_src else "?"
+        src = html_escape(base_src + sep + "lumenvia_narrow_nav=1", quote=True)
         iw = max(280, min(560, int(st.session_state.get("admin_mobile_preview_width", 390) or 390)))
         iframe_html = f"""
 <div style="display:flex;justify-content:center;background:linear-gradient(165deg,#3a3a42,#121214);padding:1rem;border-radius:12px;">
@@ -5250,12 +5264,16 @@ Le **clavier virtuel** réel du téléphone n’est pas reproductible ici ; pour
 """
         components.html(iframe_html, height=840, scrolling=True)
         st.caption(
-            "L’iframe charge une nouvelle session : connexion utilisateur/admin non partagée avec cet onglet."
+            "L’iframe charge une nouvelle session : connexion utilisateur/admin non partagée avec cet onglet. "
+            "Le paramètre `lumenvia_narrow_nav=1` force le mode « Menu » seul (les media queries suivent souvent "
+            "la fenêtre parente, pas la largeur du cadre)."
         )
 
 
 def main() -> None:
     set_page_style()
+    if _lumenvia_narrow_nav_from_query():
+        st.session_state["lumenvia_narrow_nav"] = True
     # À appliquer avant tout widget lié à `admin_phone_preview` (ex. toggle admin + simulateur).
     if st.session_state.pop("_lumenvia_enable_phone_preview", False):
         st.session_state["admin_phone_preview"] = True
