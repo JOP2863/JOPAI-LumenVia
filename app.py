@@ -326,9 +326,10 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
 }
 
 /*
-  Navigation principale (top_nav) : une rangée à 5 colonnes — popover « Menu » (mobile) + 4 boutons (desktop).
-  Desktop (≥1025px) : masquer la colonne popover.
-  Mobile (≤1024px) : masquer les 4 boutons, empiler / pleine largeur pour le déclencheur menu.
+  Navigation (top_nav) : 5 colonnes = popover « Menu » + 4 boutons.
+  Desktop (≥1025px) : masquer le popover, afficher les 4 boutons.
+  Tablette (768–1024px) : popover seul (les liens sont dans le panneau).
+  Téléphone (≤767px) : masquer le popover — afficher les 4 boutons empilés (évite menu toujours ouvert qui mange l’écran).
 */
 @media (min-width: 1025px) {
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
@@ -337,7 +338,7 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
   }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1024px) and (min-width: 768px) {
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child) {
     flex-direction: column !important;
     align-items: stretch !important;
@@ -352,10 +353,33 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
     > div[data-testid="column"]:not(:first-child) {
     display: none !important;
   }
-  /* Boutons du menu dans le panneau popover (tactile) */
   div[data-testid="stPopoverBody"] button[kind="secondary"],
   [data-testid="stPopoverContent"] button[kind="secondary"],
   [data-baseweb="popover"] button[kind="secondary"] {
+    width: 100% !important;
+    min-height: 55px !important;
+    font-size: 1rem !important;
+  }
+}
+
+@media (max-width: 767.98px) {
+  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child) {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
+    > div[data-testid="column"]:first-child {
+    display: none !important;
+  }
+  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
+    > div[data-testid="column"]:not(:first-child) {
+    display: flex !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 auto !important;
+  }
+  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
+    > div[data-testid="column"]:not(:first-child) button[kind="secondary"] {
     width: 100% !important;
     min-height: 55px !important;
     font-size: 1rem !important;
@@ -678,12 +702,6 @@ label[data-testid="stWidgetLabel"] {
   }
 }
 
-/* Mobile / tablette : masquer uniquement la colonne du popover « Menu » (doublon avec les 4 boutons) */
-@media (max-width: 767.98px) {
-  div[data-testid="column"]:has([data-testid="stPopover"]) {
-    display: none !important;
-  }
-}
 </style>
         """,
         unsafe_allow_html=True,
@@ -1285,6 +1303,21 @@ def render_sunday() -> None:
         st.caption(f"Semaine sélectionnée → dimanche affiché : **{chosen.isoformat()}**")
     date_str = chosen.isoformat()
 
+    gcs_top: object | None = None
+    if cfg.gcp_service_account and cfg.gcs_bucket_name:
+        try:
+            gcs_top = build_gcs_client(cfg.gcp_service_account)
+        except Exception:
+            gcs_top = None
+
+    pdf_key = f"liturgy_sunday_pdf_{date_str}"
+    pdf_bytes_for_user: bytes | None = st.session_state.get(pdf_key)
+    if pdf_bytes_for_user is None and gcs_top and cfg.gcs_bucket_name:
+        try:
+            pdf_bytes_for_user = _fetch_existing_fascicule_pdf_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
+        except Exception:
+            pdf_bytes_for_user = None
+
     # Lectures : on utilise d'abord un cache Sheets (si configuré), sinon AELF, sinon cache local disque.
     offline = False
     cached_at = ""
@@ -1407,11 +1440,11 @@ def render_sunday() -> None:
     bundle_synth_text: str | None = None
     bundle_audio_gcs_path: str | None = None
     bundle_from_disk = False
-    gcs_top = None
     if cfg.gcp_service_account and cfg.gsheet_id and cfg.gcs_bucket_name:
         try:
             gs_top = build_gspread_client(cfg.gcp_service_account)
-            gcs_top = build_gcs_client(cfg.gcp_service_account)
+            if gcs_top is None:
+                gcs_top = build_gcs_client(cfg.gcp_service_account)
             bundle_audio, bundle_synth_text, bundle_audio_gcs_path = _fetch_existing_sunday_bundle(
                 gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
             )
@@ -1434,27 +1467,31 @@ def render_sunday() -> None:
             if aud_b and aud_mime:
                 bundle_audio = (aud_b, aud_mime)
 
+    is_admin_sunday = bool(st.session_state.get("admin_authenticated"))
+
+    total_words = _count_words(
+        (texts.premiere_lecture or "")
+        + "\n"
+        + (texts.psaume or "")
+        + "\n"
+        + (texts.deuxieme_lecture or "")
+        + "\n"
+        + (texts.evangile or "")
+    )
+
     st.subheader("Identité du jour")
-    col_id, col_aud = st.columns([3, 2], gap="medium")
-    with col_id:
-        fete_raw = (identity.fete or "").strip() or (_jour_liturgique(identity) or "").strip()
-        fete_line = _liturgy_display_label(fete_raw) if fete_raw else "—"
-        st.markdown(
-            f"<div style='font-size:0.95rem;line-height:1.45;color:var(--liturgie-text);'>"
-            f"<strong>{identity.date}</strong> · {_liturgy_display_label(identity.periode)} · "
-            f"Cycle {_cycle_year_display(identity.annee)} · {_liturgy_display_label(identity.couleur)}"
-            f"<br/><span style='opacity:0.9'>Fête / mémoire : {html_escape(fete_line)}</span>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        with st.expander("Détails sur le temps liturgique", expanded=True):
-            st.markdown(f"**Temps** : {_explain_liturgical_time(identity.periode)}")
-            st.markdown(f"**Cycle** : {_explain_liturgical_cycle(identity.annee)}")
-            couleur_nom = _liturgy_display_label(identity.couleur)
-            st.markdown(
-                f"**Couleur** : **{couleur_nom}** — {_explain_liturgical_color(identity.couleur)}"
+    with st.container():
+        # PDF du dimanche, synthèse audio, texte — puis sous-menu liturgique (hors bloc).
+        if pdf_bytes_for_user:
+            st.download_button(
+                label="Télécharger le PDF du dimanche",
+                data=pdf_bytes_for_user,
+                file_name=f"lumenvia_dimanche_{date_str}.pdf",
+                mime="application/pdf",
+                key=f"dl_sunday_top_{date_str}",
+                type="secondary",
+                use_container_width=False,
             )
-    with col_aud:
         if bundle_audio:
             st.caption(
                 "Synthèse en cache sur cet appareil"
@@ -1471,167 +1508,174 @@ def render_sunday() -> None:
                         "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
                         "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
                     )
+        elif not pdf_bytes_for_user and not bundle_audio and not (bundle_synth_text or "").strip():
+            _synth_na_msg = (
+                "Pour le moment, **seules les lectures** du dimanche sont disponibles sur cette page : "
+                "la synthèse (texte et audio) réalisée avec l’aide de l’IA n’a pas encore été publiée.\n\n"
+                "Si vous vous êtes **inscrit au service** depuis la rubrique **« Nous rejoindre »**, "
+                "vous recevrez une **notification automatique** lorsqu’elle sera prête — en général "
+                "**quelques jours avant** la célébration."
+            )
+            if is_admin_sunday:
+                _synth_na_msg += (
+                    "\n\n**Administrateur —** C’est le message vu par tous les visiteurs tant qu’il n’y a ni synthèse "
+                    "ni PDF. Tu peux **générer la synthèse et l’audio**, puis **préparer le fascicule PDF**, "
+                    "dans les blocs **Administration** affichés juste ci‑dessous."
+                )
+            st.info(_synth_na_msg, icon="📖")
+        if is_admin_sunday:
+            st.divider()
+            if gcs_top and cfg.gcs_bucket_name:
+                prep_key = f"prep_liturgy_pdf_{date_str}"
+                st.caption("Administration — fascicule PDF")
+                include_catechese_pdf = st.checkbox(
+                    "Inclure la « Passerelle catéchèse — L’écho des paraboles » dans le PDF",
+                    value=True,
+                    key=f"pdf_catechese_{date_str}",
+                    help="Si la synthèse contient cette section, elle sera incluse dans le PDF (coché par défaut).",
+                )
+                force_regen_pdf = st.checkbox(
+                    "Régénérer le PDF (ignorer le PDF déjà stocké sur Cloud)",
+                    value=False,
+                    key=f"pdf_force_regen_{date_str}",
+                )
+                if st.button("Préparer le PDF du dimanche (complet)", key=prep_key):
+                    ov_pdf = loading_overlay("Préparation du PDF (couverture + lectures + synthèse)…")
+                    try:
+                        if not force_regen_pdf:
+                            cached_pdf = _fetch_existing_fascicule_pdf_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
+                            if cached_pdf:
+                                st.session_state[pdf_key] = cached_pdf
+                                st.info("PDF déjà généré — réutilisation depuis Cloud.")
+                                cached_pdf = None
+                        img_b = _fetch_liturgy_illustration_full_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
+                        aud_url, aud_note = _public_app_listen_url(date_str=date_str)
+                        if bundle_audio_gcs_path:
+                            signed = _gcs_signed_url(
+                                gcs=gcs_top,
+                                bucket_name=str(cfg.gcs_bucket_name).strip(),
+                                path=bundle_audio_gcs_path,
+                            )
+                            if signed:
+                                aud_url = signed
+                        synth_for_pdf = bundle_synth_text
+                        if not include_catechese_pdf:
+                            synth_for_pdf = _strip_catechese_bridge(synth_for_pdf)
+                        back_cover_b = None
+                        try:
+                            y = str(date_str)[:4]
+                            back_cover_b = download_bytes(
+                                gcs=gcs_top,
+                                bucket_name=str(cfg.gcs_bucket_name).strip(),
+                                path=f"Images/thumbs/montage_{y}.png",
+                            )
+                        except Exception:
+                            back_cover_b = None
+                        pdf_b = build_liturgy_sunday_pdf_bytes(
+                            image_bytes=img_b,
+                            week_title=_liturgy_display_label(
+                                (getattr(identity, "fete", None) or "").strip()
+                                or (_jour_liturgique(identity) or "").strip()
+                                or _liturgy_cover_pdf_title(identity)
+                            ),
+                            date_line=_french_long_date_label(date_str),
+                            meta_line=(
+                                f"{_liturgy_display_label(getattr(identity, 'periode', None))} · "
+                                f"Cycle {_cycle_year_display(getattr(identity, 'annee', None))} · "
+                                f"{_liturgy_display_label(getattr(identity, 'couleur', None))}"
+                            ),
+                            premiere_lecture=texts.premiere_lecture,
+                            psaume=texts.psaume,
+                            deuxieme_lecture=texts.deuxieme_lecture,
+                            evangile=texts.evangile,
+                            synthesis_text=synth_for_pdf,
+                            audio_listen_url=aud_url,
+                            audio_listen_note=aud_note,
+                            about_markdown=_ABOUT_MARKDOWN,
+                            back_cover_image_bytes=back_cover_b,
+                        )
+                        st.session_state[pdf_key] = pdf_b
+                        try:
+                            fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+                            upload_bytes(
+                                gcs=gcs_top,
+                                bucket_name=str(cfg.gcs_bucket_name).strip(),
+                                path=fasc_path,
+                                data=pdf_b,
+                                content_type="application/pdf",
+                            )
+                            st.success("PDF enregistré.")
+                        except Exception as ex:
+                            st.warning(f"Impossible d’enregistrer le PDF sur Cloud (Fascicules/) : {ex}")
+                    finally:
+                        ov_pdf.empty()
+                st.divider()
+            st.caption("Administration — synthèse (texte + audio)")
+            pct = st.segmented_control(
+                "Longueur (en % du total des lectures)",
+                options=[10, 15, 20, 25, 30, 35, 40, 45, 50],
+                default=20,
+                format_func=lambda x: f"{x}%",
+                key=f"adm_sunday_pct_{date_str}",
+            )
+            include_takeaways = st.checkbox(
+                "Inclure “À retenir” (3–5 points)", value=True, key=f"adm_sunday_takeaways_{date_str}"
+            )
+            include_catechese_bridge_gen = st.checkbox(
+                "Inclure « Passerelle catéchèse — L’écho des paraboles » (Stone Card)",
+                value=True,
+                help="Ajoute un encart pédagogique structuré pour la transmission (jeunes / catéchèse).",
+                key=f"adm_sunday_catech_{date_str}",
+            )
+            debug = st.toggle("Mode debug", value=False, key=f"adm_sunday_debug_{date_str}")
+            if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
+                st.warning("Configuration incomplète (service account / gsheet_id / bucket). Synthèse indisponible.")
+            elif st.button("Générer la synthèse et l’audio", type="primary", key=f"adm_sunday_gen_{date_str}"):
+                overlay = loading_overlay("LumenVia prépare la synthèse et l’audio…")
+                try:
+                    _run_generate_sunday_flow(
+                        _overlay=overlay,
+                        identity=identity,
+                        texts=texts,
+                        zone=zone,
+                        total_words=total_words,
+                        pct=int(pct or 20),
+                        include_takeaways=bool(include_takeaways),
+                        include_catechese_bridge=bool(include_catechese_bridge_gen),
+                        debug=bool(debug),
+                        cfg=cfg,
+                    )
+                    st.rerun()
+                finally:
+                    overlay.empty()
+
+    fete_raw = (identity.fete or "").strip() or (_jour_liturgique(identity) or "").strip()
+    fete_line = _liturgy_display_label(fete_raw) if fete_raw else "—"
+    st.markdown(
+        f"<div style='font-size:0.95rem;line-height:1.45;color:var(--liturgie-text);'>"
+        f"<strong>{identity.date}</strong> · {_liturgy_display_label(identity.periode)} · "
+        f"Cycle {_cycle_year_display(identity.annee)} · {_liturgy_display_label(identity.couleur)}"
+        f"<br/><span style='opacity:0.9'>Fête / mémoire : {html_escape(fete_line)}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    with st.expander("Détails sur le temps liturgique", expanded=True):
+        st.markdown(f"**Temps** : {_explain_liturgical_time(identity.periode)}")
+        st.markdown(f"**Cycle** : {_explain_liturgical_cycle(identity.annee)}")
+        couleur_nom = _liturgy_display_label(identity.couleur)
+        st.markdown(
+            f"**Couleur** : **{couleur_nom}** — {_explain_liturgical_color(identity.couleur)}"
+        )
 
     if gcs_top and cfg.gcs_bucket_name:
         _try_show_liturgy_illustration(gcs=gcs_top, cfg=cfg, date_str=date_str)
 
     st.subheader("Lectures")
-    total_words = _count_words(
-        (texts.premiere_lecture or "")
-        + "\n"
-        + (texts.psaume or "")
-        + "\n"
-        + (texts.deuxieme_lecture or "")
-        + "\n"
-        + (texts.evangile or "")
-    )
     st.caption(f"Total lectures : **{total_words} mots** (AELF)")
     render_liturgy_block("Première lecture", texts.premiere_lecture)
     render_liturgy_block("Psaume", texts.psaume)
     render_liturgy_block("Deuxième lecture", texts.deuxieme_lecture)
     render_liturgy_block("Évangile", texts.evangile)
-
-    if gcs_top and cfg.gcs_bucket_name:
-        prep_key = f"prep_liturgy_pdf_{date_str}"
-        pdf_key = f"liturgy_sunday_pdf_{date_str}"
-        pc1, pc2 = st.columns(2)
-        include_catechese_pdf = st.checkbox(
-            "Inclure la « Passerelle catéchèse — L’écho des paraboles » dans le PDF",
-            value=True,
-            key=f"pdf_catechese_{date_str}",
-            help="Si la synthèse contient cette section, elle sera incluse dans le PDF (coché par défaut).",
-        )
-        force_regen_pdf = st.checkbox(
-            "Régénérer le PDF (ignorer le PDF déjà stocké sur Cloud)",
-            value=False,
-            key=f"pdf_force_regen_{date_str}",
-        )
-        with pc1:
-            if st.button("Préparer le PDF du dimanche (complet)", key=prep_key):
-                ov_pdf = loading_overlay("Préparation du PDF (couverture + lectures + synthèse)…")
-                try:
-                    if not force_regen_pdf:
-                        cached_pdf = _fetch_existing_fascicule_pdf_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
-                        if cached_pdf:
-                            st.session_state[pdf_key] = cached_pdf
-                            st.info("PDF déjà généré — réutilisation depuis Cloud.")
-                            # Ne pas quitter la fonction : on veut afficher le bouton de téléchargement (colonne de droite).
-                            cached_pdf = None
-                    img_b = _fetch_liturgy_illustration_full_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
-                    aud_url, aud_note = _public_app_listen_url(date_str=date_str)
-                    # Si l'audio existe sur Cloud mais n'est pas public, générer une URL signée pour le PDF.
-                    if bundle_audio_gcs_path:
-                        signed = _gcs_signed_url(
-                            gcs=gcs_top,
-                            bucket_name=str(cfg.gcs_bucket_name).strip(),
-                            path=bundle_audio_gcs_path,
-                        )
-                        if signed:
-                            aud_url = signed
-                    synth_for_pdf = bundle_synth_text
-                    if not include_catechese_pdf:
-                        synth_for_pdf = _strip_catechese_bridge(synth_for_pdf)
-                    # Dos (quatrième de couverture) : montage complet des vignettes de l’année.
-                    back_cover_b = None
-                    try:
-                        y = str(date_str)[:4]
-                        back_cover_b = download_bytes(
-                            gcs=gcs_top,
-                            bucket_name=str(cfg.gcs_bucket_name).strip(),
-                            path=f"Images/thumbs/montage_{y}.png",
-                        )
-                    except Exception:
-                        back_cover_b = None
-                    pdf_b = build_liturgy_sunday_pdf_bytes(
-                        image_bytes=img_b,
-                        week_title=_liturgy_display_label(
-                            (getattr(identity, "fete", None) or "").strip()
-                            or (_jour_liturgique(identity) or "").strip()
-                            or _liturgy_cover_pdf_title(identity)
-                        ),
-                        date_line=_french_long_date_label(date_str),
-                        meta_line=(
-                            f"{_liturgy_display_label(getattr(identity, 'periode', None))} · "
-                            f"Cycle {_cycle_year_display(getattr(identity, 'annee', None))} · "
-                            f"{_liturgy_display_label(getattr(identity, 'couleur', None))}"
-                        ),
-                        premiere_lecture=texts.premiere_lecture,
-                        psaume=texts.psaume,
-                        deuxieme_lecture=texts.deuxieme_lecture,
-                        evangile=texts.evangile,
-                        synthesis_text=synth_for_pdf,
-                        audio_listen_url=aud_url,
-                        audio_listen_note=aud_note,
-                        about_markdown=_ABOUT_MARKDOWN,
-                        back_cover_image_bytes=back_cover_b,
-                    )
-                    st.session_state[pdf_key] = pdf_b
-                    # Stockage Cloud : un seul PDF par date, écrasement (pas de versioning).
-                    try:
-                        fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
-                        upload_bytes(
-                            gcs=gcs_top,
-                            bucket_name=str(cfg.gcs_bucket_name).strip(),
-                            path=fasc_path,
-                            data=pdf_b,
-                            content_type="application/pdf",
-                        )
-                        st.success("PDF enregistré.")
-                    except Exception as ex:
-                        st.warning(f"Impossible d’enregistrer le PDF sur Cloud (Fascicules/) : {ex}")
-                finally:
-                    ov_pdf.empty()
-        with pc2:
-            if st.session_state.get(pdf_key):
-                st.download_button(
-                    label="Télécharger le PDF",
-                    data=st.session_state[pdf_key],
-                    file_name=f"lumenvia_dimanche_{date_str}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_{pdf_key}",
-                )
-        # Caption supprimée à la demande (éviter une redondance UX ici).
-
-    st.divider()
-    st.subheader("Synthèse (texte + audio)")
-
-    pct = st.segmented_control(
-        "Longueur (en % du total des lectures)",
-        options=[10, 15, 20, 25, 30, 35, 40, 45, 50],
-        default=20,
-        format_func=lambda x: f"{x}%",
-    )
-    include_takeaways = st.checkbox("Inclure “À retenir” (3–5 points)", value=True)
-    include_catechese_bridge = st.checkbox(
-        "Inclure « Passerelle catéchèse — L’écho des paraboles » (Stone Card)",
-        value=True,
-        help="Ajoute un encart pédagogique structuré pour la transmission (jeunes / catéchèse).",
-    )
-    debug = st.toggle("Mode debug", value=False)
-
-    if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
-        st.warning("Configuration incomplète (service account / gsheet_id / bucket).")
-        return
-
-    if st.button("Générer la synthèse et l’audio", type="primary"):
-        overlay = loading_overlay("LumenVia prépare la synthèse et l’audio…")
-        try:
-            _run_generate_sunday_flow(
-                _overlay=overlay,
-                identity=identity,
-                texts=texts,
-                zone=zone,
-                total_words=total_words,
-                pct=int(pct or 20),
-                include_takeaways=bool(include_takeaways),
-                include_catechese_bridge=bool(include_catechese_bridge),
-                debug=bool(debug),
-                cfg=cfg,
-            )
-            # Recharge l'état (dernier texte/audio) pour refléter les nouvelles versions stockées sur Cloud.
-            st.rerun()
-        finally:
-            overlay.empty()
 
 
 def _run_generate_sunday_flow(
@@ -4090,8 +4134,9 @@ def render_admin_plan_consolide() -> None:
 <dl class="lv-keylist">
   <dt>Trois points chirurgicaux UX mobile (référence verrouillée)</dt>
   <dd>
-    <strong>1 — Navigation.</strong> Sur grand écran, le popover <strong>« Menu »</strong> reste disponible en plus des quatre boutons ;
-    sur viewport <strong>&lt; ~768&nbsp;px</strong>, le popover est masqué (CSS) pour éviter le doublon&nbsp;: seuls les quatre accès directs restent visibles.
+    <strong>1 — Navigation.</strong> Grand écran&nbsp;: quatre boutons, popover masqué. Intervalle <strong>768–1024&nbsp;px</strong>&nbsp;: popover
+    <strong>«&nbsp;Menu&nbsp;»</strong> seul avec liens tactiles dans le panneau. <strong>≤767&nbsp;px</strong>&nbsp;: popover masqué, quatre boutons
+    empilés pleine largeur pour libérer la zone centrale et éviter le bloc menu toujours visible par erreur CSS.
   </dd>
   <dd>
     <strong>2 — Clavier vs saisie / expander.</strong> Ajouter un <code>padding-bottom</code> substantiel au conteneur principal lorsqu’un champ
