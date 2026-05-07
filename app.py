@@ -331,6 +331,16 @@ header[data-testid="stHeader"] {
 section[data-testid="stMain"] .block-container {
   padding-top: max(0.45rem, calc(0.2rem + env(safe-area-inset-top, 0px))) !important;
 }
+/* Bureau / large fenêtre : marge haute un peu plus généreuse (logo + menu ne doivent pas toucher / être coupés par la chrome). */
+@media (min-width: 1025px) {
+  header[data-testid="stHeader"] {
+    padding-top: max(1.05rem, env(safe-area-inset-top, 0px)) !important;
+    padding-bottom: 0.52rem !important;
+  }
+  section[data-testid="stMain"] .block-container {
+    padding-top: max(1.75rem, calc(1.2rem + env(safe-area-inset-top, 0px))) !important;
+  }
+}
 @media (max-width: 1024px) {
   header[data-testid="stHeader"] {
     padding-top: max(0.42rem, env(safe-area-inset-top, 0px)) !important;
@@ -740,24 +750,6 @@ _ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _lumenvia_route_breadcrumb_label(route: str) -> str:
-    """Libellé lisible sous le Menu compact (après rerun, le popover est fermé par Streamlit)."""
-    r = (route or "about").strip()
-    extras: dict[str, str] = {
-        "about": "JOPAI LumenVia — C’est quoi ?",
-        "sunday": "La Lumière du Dimanche",
-        "memo": "Mon Aide-Mémoire",
-        "join": "Nous rejoindre",
-        "admin_login": "Connexion administration",
-    }
-    if r in extras:
-        return extras[r]
-    for _slug, label, rte in _ADMIN_PAGES:
-        if rte == r:
-            return label.replace("\n", " ").strip()
-    return r.replace("_", " ").strip().title()
-
-
 def _admin_do_logout_navigation() -> None:
     """Sortie administration : même effet depuis la grille bureau ou depuis le Menu mobile."""
     st.session_state.pop("admin_authenticated", None)
@@ -842,24 +834,22 @@ def top_nav() -> str:
             short = label.replace("\n", " ")
             if st.button(short, key=f"nav_m_{route}", use_container_width=True, type="secondary"):
                 st.session_state.route = route
+                st.rerun()
         if is_admin:
             render_admin_navigation_in_popover()
 
+    # Nouvelle instance du popover par route pour refermer après navigation (BaseWeb peut garder le volet ouvert).
+    _menu_pop_key = f"lv_menu_pop_{str(st.session_state.route)}"
+
     if compact_nav:
         # iframe (?lumenvia_narrow_nav=1) ou téléphone réel : pas de rangée « tuiles » dupliquant le Menu.
-        with st.popover("Menu", use_container_width=True):
+        with st.popover("Menu", use_container_width=True, key=_menu_pop_key):
             _nav_popover_body()
-        cur = html_escape(_lumenvia_route_breadcrumb_label(st.session_state.route))
-        st.markdown(
-            f"<p style='text-align:center;margin:0.25rem auto 0.55rem;line-height:1.45;color:#342E29;font-size:0.93rem;'>"
-            f"<span style='opacity:0.75;'>Page actuelle — </span><strong>{cur}</strong></p>",
-            unsafe_allow_html=True,
-        )
     else:
         with st.container(key="lv_nav_five_cols"):
             cols = st.columns([1, 1, 1, 1, 1], gap="small")
             with cols[0]:
-                with st.popover("Menu", use_container_width=True):
+                with st.popover("Menu", use_container_width=True, key=_menu_pop_key):
                     _nav_popover_body()
             for i, (route, label) in enumerate(labels):
                 with cols[i + 1]:
@@ -1361,6 +1351,16 @@ def _french_day_month_year(date_str: str) -> str:
     return f"{d.day} {mois[d.month - 1]} {d.year}"
 
 
+def _french_weekday_day_month_year(date_str: str) -> str:
+    """Pour une phrase comme « … la célébration du dimanche 10 mai 2026 » — jour en minuscules dans le cours de phrase."""
+    try:
+        d = date.fromisoformat(str(date_str).strip()[:10])
+    except Exception:
+        return str(date_str).strip()[:10]
+    jours_sem = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+    return f"{jours_sem[d.weekday()]} {_french_day_month_year(date_str)}"
+
+
 def _liturgy_cover_pdf_title(identity: object) -> str:
     wn = _extract_liturgical_week_num(getattr(identity, "semaine", None))
     temps = _liturgy_display_label(getattr(identity, "periode", None))
@@ -1633,23 +1633,26 @@ def render_sunday() -> None:
 
     st.subheader("Identité du jour")
     with st.container():
-        # Trois formats : courte intro datée + onglets Pdf / Audio / Texte (remplace télécharger / player / expander).
+        # Trois formats : intro datée puis Pdf / Audio / Texte côte à côte (colonnes).
         has_pdf_fmt = bool(pdf_bytes_for_user)
         has_audio_fmt = bundle_audio is not None
         has_text_fmt = bool((bundle_synth_text or "").strip())
-        date_prep = html_escape(_french_day_month_year(date_str))
+        date_prep = html_escape(_french_weekday_day_month_year(date_str))
+        # Teintes tirées du couple or / sépia (charte liturgique) : lisibles sur fond crème, distinctes du corps #342E29.
         st.markdown(
-            f"<p style=\"font-size:1.02rem;line-height:1.5;color:#342E29;margin:0 0 0.6rem;\">"
-            f"<strong>Trois formats</strong> disponibles — JOPAI LumenVia pour vous préparer "
-            f"à la célébration du <strong>{date_prep}</strong>."
-            f"</p>"
-            "<p style=\"font-size:0.9rem;opacity:0.82;margin:0 0 0.75rem;line-height:1.45;\">"
-            "Choisissez un format : Pdf, Audio ou Texte ci-dessous."
-            "</p>",
+            f"<p style=\"font-size:clamp(0.95rem, 0.35vw + 0.94rem, 1.06rem);line-height:1.52;"
+            f"text-align:center;text-wrap:balance;max-width:min(42rem,calc(100% - 0.75rem));"
+            f"margin:0 auto 0.85rem;color:#5f4f3a;\">"
+            f"<strong style=\"color:#6b5918;font-weight:600;\">Trois formats</strong>"
+            f"<span style=\"color:#5f4f3a;\"> disponibles — "
+            f"<strong style=\"color:#6b5918;font-weight:600;\">JOPAI LumenVia</strong>"
+            f" pour vous préparer</span>"
+            f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
+            f"<strong style=\"color:#584610;\">{date_prep}</strong>.</span></p>",
             unsafe_allow_html=True,
         )
-        tab_pdf, tab_audio, tab_texte = st.tabs(["Pdf", "Audio", "Texte"])
-        with tab_pdf:
+        col_pdf, col_audio, col_texte = st.columns([1, 1.25, 1], gap="medium")
+        with col_pdf:
             if has_pdf_fmt:
                 st.download_button(
                     label="Télécharger le PDF du dimanche",
@@ -1661,30 +1664,30 @@ def render_sunday() -> None:
                     use_container_width=True,
                 )
             else:
-                st.caption("Le fascicule PDF n’est pas encore disponible pour cette date.")
-        with tab_audio:
+                st.caption("Indisponible pour cette date.")
+        with col_audio:
             if has_audio_fmt:
                 st.caption(
-                    "Synthèse en cache sur cet appareil"
+                    "En cache sur cet appareil"
                     if bundle_from_disk
-                    else "Synthèse audio disponible pour cette semaine liturgique"
+                    else "Synthèse audio du dimanche"
                 )
                 st.audio(bundle_audio[0], format=bundle_audio[1])
             else:
                 st.caption(
-                    "L’audio de la synthèse n’est pas encore publié pour cette date. "
-                    "Les lectures sont affichées plus bas."
+                    "Pas encore publié. Les lectures sont affichées plus bas."
                 )
-        with tab_texte:
-            if has_text_fmt:
-                st.markdown(bundle_synth_text)
-            elif has_audio_fmt:
-                st.info(
-                    "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
-                    "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
-                )
-            else:
-                st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
+        with col_texte:
+            with st.expander("Lire le texte de cette synthèse", expanded=False):
+                if has_text_fmt:
+                    st.markdown(bundle_synth_text)
+                elif has_audio_fmt:
+                    st.info(
+                        "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
+                        "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
+                    )
+                else:
+                    st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
 
         if not has_pdf_fmt and not has_audio_fmt and not has_text_fmt:
             _synth_na_msg = (
