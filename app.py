@@ -677,6 +677,13 @@ label[data-testid="stWidgetLabel"] {
     overflow-wrap: normal !important;
   }
 }
+
+/* Mobile / tablette : masquer uniquement la colonne du popover « Menu » (doublon avec les 4 boutons) */
+@media (max-width: 767.98px) {
+  div[data-testid="column"]:has([data-testid="stPopover"]) {
+    display: none !important;
+  }
+}
 </style>
         """,
         unsafe_allow_html=True,
@@ -841,10 +848,16 @@ def admin_nav_bar() -> None:
             st.session_state.pop("admin_phone_preview", None)
             st.session_state.route = "about"
             st.rerun()
+
+    r3 = st.columns(4, gap="small")
+    with r3[0]:
+        if st.button("Simulateur\nmobile", key="adm_nav_mobile_sim", use_container_width=True):
+            st.session_state.route = "admin_mobile_sim"
+            st.rerun()
     st.toggle(
-        "Aperçu mobile 390px",
+        "Aperçu mobile",
         key="admin_phone_preview",
-        help="Force la largeur type iPhone (~390px) et un cadre arrondi pour tester le rendu liturgique sur bureau.",
+        help="Réduit la zone principale comme sur un téléphone (largeur : page « Simulateur vision mobile »).",
     )
 
 
@@ -2557,6 +2570,60 @@ def _admin_sort_targets_by_date(targets: list[dict]) -> list[dict]:
     return sorted(targets, key=lambda t: str(t.get("date") or ""))
 
 
+def _admin_targets_presence_compact(
+    targets_sorted: list[dict],
+) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    sig: list[tuple[str, str, tuple[str, ...]]] = []
+    for t in targets_sorted:
+        ds = str(t.get("date") or "").strip()[:10]
+        p0 = str(t.get("gcs_path_primary") or "").strip()
+        alts = tuple(
+            sorted(
+                {
+                    str(a or "").strip()
+                    for a in (t.get("alternates") or [])
+                    if str(a or "").strip()
+                }
+            )
+        )
+        sig.append((ds, p0, alts))
+    return tuple(sig)
+
+
+@st.cache_data(ttl=300, max_entries=8, show_spinner=False)
+def _admin_cached_manifest_cloud_presence(
+    bucket_name: str,
+    account_fp: str,
+    manifest_mtime_ns: int,
+    manifest_size: int,
+    compact: tuple[tuple[str, str, tuple[str, ...]], ...],
+) -> tuple[tuple[bool, ...], tuple[str | None, ...], tuple[str, ...]]:
+    """
+    Probe GCS blob existence for every manifest target (heavy). Cached ~5 min keyed by manifest size/mtime + bucket + SA fingerprint.
+    Exécution séquentielle pour éviter les problèmes de concurrence sur le client Storage.
+    """
+    if not compact:
+        return (), (), ()
+
+    errs: list[str] = []
+    cfg_inner = load_config()
+    gcs_inner = build_gcs_client(cfg_inner.gcp_service_account)
+    has_list: list[bool] = []
+    path_list: list[str | None] = []
+    for row in compact:
+        ds, p0, alts = row
+        target_dict = {"date": ds, "gcs_path_primary": p0, "alternates": list(alts)}
+        pth = _admin_first_existing_blob_path(
+            gcs=gcs_inner,
+            bucket_name=bucket_name,
+            target=target_dict,
+            errors=errs if len(errs) < 8 else None,
+        )
+        has_list.append(pth is not None)
+        path_list.append(pth)
+    return tuple(has_list), tuple(path_list), tuple(errs[:8])
+
+
 def _admin_execute_image_generations(
     *,
     cfg: object,
@@ -2702,21 +2769,37 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
         st.warning("Aucune cible dans le manifeste.")
         return
 
-    # Chargement Cloud (peut prendre un peu de temps) : overlay systématique.
-    ov_load = loading_overlay("Chargement du calendrier d’illustrations depuis Cloud…")
+    bucket_name = str(cfg.gcs_bucket_name).strip()
+    sorted_targets = _admin_sort_targets_by_date(targets_all)
+    try:
+        mstat = manifest_path.stat()
+        m_mtime_ns = int(getattr(mstat, "st_mtime_ns", int(mstat.st_mtime * 1e9)))
+        m_sz = int(mstat.st_size)
+    except Exception:
+        m_mtime_ns, m_sz = 0, 0
+    compact_presence = _admin_targets_presence_compact(sorted_targets)
+    sa_fp = _service_account_fingerprint(cfg.gcp_service_account)
+
+    c_cache, _ = st.columns([1, 3])
+    with c_cache:
+        if st.button("Invalider le cache Cloud (rafraîchir la grille)", key="adm_img_cache_clear"):
+            _admin_cached_manifest_cloud_presence.clear()
+            st.rerun()
+
+    # Présence sur le bucket : résultat mis en cache (TTL) pour accélérer les navigations suivantes.
+    ov_load = loading_overlay("Vérification de la présence des fichiers sur Cloud…")
     try:
         gcs = build_gcs_client(cfg.gcp_service_account)
-        bucket_name = str(cfg.gcs_bucket_name).strip()
-        sorted_targets = _admin_sort_targets_by_date(targets_all)
-        # Diagnostic Cloud : en cas de droits/projet/bucket erroné, `blob.exists()` peut lever (403) et on verrait tout "manquant".
-        # On remonte quelques erreurs d’exemple au lieu de les masquer silencieusement.
-        err_samples: list[str] = []
-        first_paths: list[str | None] = []
-        has_map: list[bool] = []
-        for t in sorted_targets:
-            p = _admin_first_existing_blob_path(gcs=gcs, bucket_name=bucket_name, target=t, errors=err_samples)
-            first_paths.append(p)
-            has_map.append(p is not None)
+        has_tpl, paths_tpl, err_tpl = _admin_cached_manifest_cloud_presence(
+            bucket_name,
+            sa_fp,
+            m_mtime_ns,
+            m_sz,
+            compact_presence,
+        )
+        err_samples = list(err_tpl)
+        first_paths = list(paths_tpl)
+        has_map = list(has_tpl)
     finally:
         ov_load.empty()
     n_missing = sum(1 for h in has_map if not h)
@@ -2903,6 +2986,8 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
                 skip_existing=False,
             )
             _admin_finish_generation_log(lines, dry_run=dry_run)
+            if not dry_run and any(ln.startswith("OK ") for ln in lines):
+                _admin_cached_manifest_cloud_presence.clear()
 
     if run_selected:
         to_gen = [
@@ -2925,6 +3010,8 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
                 skip_existing=False,
             )
             _admin_finish_generation_log(lines, dry_run=dry_run)
+            if not dry_run and any(ln.startswith("OK ") for ln in lines):
+                _admin_cached_manifest_cloud_presence.clear()
 
 
 def render_admin_vision_text() -> None:
@@ -3989,10 +4076,12 @@ def render_admin_plan_consolide() -> None:
     </tr>
     <tr>
       <td>Administration — <strong>simulateur vision mobile</strong></td>
-      <td><span class="lv-st-todo">À faire</span></td>
+      <td><span class="lv-st-ok">Livré v1</span></td>
       <td>
-        Nouvelle page ou panneau admin pour prévisualiser l’app comme sur téléphone (viewport réduit / iframe ou gabarit dédié),
-        afin de valider navigation, lectures et expander « Mes mémos » sans que le clavier virtuel ne masque tout l’écran.
+        Page dédiée <strong>« Simulateur mobile »</strong> (troisième ligne du menu Administration) : préréglages 320–428&nbsp;px + slider,
+        boutons d’accès Dimanche&nbsp;/&nbsp;Mémo&nbsp;/&nbsp;À&nbsp;propos avec cadre ; iframe optionnelle si <code>PUBLIC_APP_URL</code>
+        ou <code>st.context.url</code> disponible ; le toggle «&nbsp;Aperçu mobile&nbsp;» utilise la même largeur.
+        Complément recette&nbsp;: Chrome/Edge mode appareil pour clavier réaliste.
       </td>
     </tr>
   </tbody>
@@ -4001,9 +4090,8 @@ def render_admin_plan_consolide() -> None:
 <dl class="lv-keylist">
   <dt>Trois points chirurgicaux UX mobile (référence verrouillée)</dt>
   <dd>
-    <strong>1 — Navigation.</strong> Sur mobile uniquement, remplacer la rangée des 4 boutons horizontaux par un
-    <code>st.popover</code> étiqueté <strong>« Menu »</strong> (composant le plus proche d’un menu smartphone moderne) ;
-    conserver les 4 boutons sur grand écran.
+    <strong>1 — Navigation.</strong> Sur grand écran, le popover <strong>« Menu »</strong> reste disponible en plus des quatre boutons ;
+    sur viewport <strong>&lt; ~768&nbsp;px</strong>, le popover est masqué (CSS) pour éviter le doublon&nbsp;: seuls les quatre accès directs restent visibles.
   </dd>
   <dd>
     <strong>2 — Clavier vs saisie / expander.</strong> Ajouter un <code>padding-bottom</code> substantiel au conteneur principal lorsqu’un champ
@@ -4027,7 +4115,7 @@ def render_admin_plan_consolide() -> None:
   <dt>Priorités rapides (key list)</dt>
   <dd>Cahier des charges : génération automatique d’une version « livrable », visualisation admin, export PDF.</dd>
   <dd>Responsive : media queries &lt; 1024&nbsp;px, navigation empilée ou menu alternatif, tests réels tablette / téléphone.</dd>
-  <dd>Admin : simulateur mobile pour recette avant déploiement.</dd>
+  <dd>Admin : page Simulateur mobile + toggle « Aperçu mobile » (largeur réglable).</dd>
   <dd>Stabiliser Vision sur le bon projet GCP et valider une analyse complète sans 403.</dd>
   <dd>Repasser sur le PDF mensuel et la couverture si tu veux un gabarit « fascicule » multi-pages.</dd>
   <dd>PWA : choix d’hébergement et socle technique pour exposer le manifest au navigateur.</dd>
@@ -4912,24 +5000,29 @@ def _gcs_signed_url(
 
 
 def _inject_admin_phone_preview_css() -> None:
-    """Admin uniquement : largeur 390px + cadre arrondi type smartphone pour recette bureau."""
+    """Admin uniquement : largeur réglable + cadre arrondi type smartphone pour recette bureau."""
     if not st.session_state.get("admin_authenticated"):
         return
     if not st.session_state.get("admin_phone_preview"):
         return
+    try:
+        wpx = int(st.session_state.get("admin_mobile_preview_width", 390) or 390)
+    except Exception:
+        wpx = 390
+    wpx = max(280, min(560, wpx))
     st.markdown(
-        """
+        f"""
 <style>
-/* Aperçu « iPhone » 390px — activé par le toggle Administration */
-[data-testid="stAppViewContainer"] {
+/* Aperçu smartphone — activé par le toggle Administration ou la page Simulateur mobile */
+[data-testid="stAppViewContainer"] {{
   background: linear-gradient(165deg, #4a4a52 0%, #1e1e22 55%, #121214 100%) !important;
   min-height: 100vh !important;
-}
-[data-testid="stHeader"] {
+}}
+[data-testid="stHeader"] {{
   background: transparent !important;
-}
-section[data-testid="stMain"] {
-  max-width: 390px !important;
+}}
+section[data-testid="stMain"] {{
+  max-width: {wpx}px !important;
   width: 100% !important;
   margin-left: auto !important;
   margin-right: auto !important;
@@ -4944,25 +5037,157 @@ section[data-testid="stMain"] {
   min-height: min(88vh, 844px) !important;
   overflow-x: hidden !important;
   background: var(--liturgie-cream, #fdfbf7) !important;
-}
-section[data-testid="stMain"] .block-container {
+}}
+section[data-testid="stMain"] .block-container {{
   padding-left: max(0.65rem, env(safe-area-inset-left, 0px)) !important;
   padding-right: max(0.65rem, env(safe-area-inset-right, 0px)) !important;
-}
+}}
 </style>
         """,
         unsafe_allow_html=True,
     )
 
 
+def _lumenvia_app_origin_url() -> str | None:
+    """Origine HTTPS de l'app pour iframe simulateur (`PUBLIC_APP_URL` ou URL courante Streamlit)."""
+    try:
+        s = st.secrets
+        base = str(s.get("PUBLIC_APP_URL") or s.get("public_app_url") or "").strip().rstrip("/")
+    except Exception:
+        base = ""
+    if base:
+        return base
+    try:
+        u = str(getattr(st.context, "url", "") or "").strip()
+        if not u:
+            return None
+        from urllib.parse import urlparse
+
+        p = urlparse(u)
+        if p.scheme and p.netloc:
+            return f"{p.scheme}://{p.netloc}".rstrip("/")
+    except Exception:
+        pass
+    return None
+
+
+def render_admin_mobile_simulator() -> None:
+    """Panneau recette : prévisualisation iframe + paramètres du cadre appliqué à toute la session."""
+    st.title("Simulateur vision mobile")
+    st.markdown(
+        """
+Recette depuis un **ordinateur** : même session Streamlit que l’écran suivant après navigation.
+
+**Deux modes :**
+1. **Cadre sur l’app** : même onglet, réduit la zone principale façon téléphone (`max-width`), utile pour *Menu*,
+   *La Lumière du Dimanche*, *Mon Aide‑Mémoire* (dont expander « Mes mémos ») et les saisies.
+2. **iframe** ci‑dessous : **nouvelle connexion Streamlit** (session distincte).
+
+Le **clavier virtuel** réel du téléphone n’est pas reproductible ici ; pour un faux clavier utilise
+**Chrome / Edge → F12 → mode appareil** en complément si besoin.
+        """.strip()
+    )
+
+    if "admin_mobile_preview_width" not in st.session_state:
+        st.session_state["admin_mobile_preview_width"] = 390
+
+    p1, p2, p3, p4 = st.columns(4)
+    if p1.button("320 px · petit tel.", key="adm_mob_preset_320"):
+        st.session_state["admin_mobile_preview_width"] = 320
+        st.rerun()
+    if p2.button("360 px · classique", key="adm_mob_preset_360"):
+        st.session_state["admin_mobile_preview_width"] = 360
+        st.rerun()
+    if p3.button("390 px · iPhone", key="adm_mob_preset_390"):
+        st.session_state["admin_mobile_preview_width"] = 390
+        st.rerun()
+    if p4.button("428 px · large", key="adm_mob_preset_428"):
+        st.session_state["admin_mobile_preview_width"] = 428
+        st.rerun()
+
+    w = st.slider(
+        "Largeur du cadre (px)",
+        min_value=280,
+        max_value=560,
+        value=int(st.session_state.get("admin_mobile_preview_width", 390)),
+        step=2,
+        help="Utilisée par le cadre « Aperçu mobile » sous la grille Administration "
+        "ainsi que lorsque tu ouvres une page depuis les boutons ci-dessous.",
+    )
+    st.session_state["admin_mobile_preview_width"] = int(w)
+    st.caption(
+        "Pour activer le cadre avant de changer de page manuellement, utilise « Aperçu mobile » "
+        "(toggle situé sous la grille Administration)."
+    )
+
+    st.subheader("Ouvrir une page métier avec le cadre")
+    oc1, oc2, oc3 = st.columns(3)
+    with oc1:
+        if st.button("La Lumière du Dimanche + cadre", key="adm_mob_go_sunday", use_container_width=True):
+            # Ne pas modifier `admin_phone_preview` après instanciation du toggle (même rerun) :
+            # drapeau consommé en tête de `main()` avant tout widget avec cette clé.
+            st.session_state["_lumenvia_enable_phone_preview"] = True
+            st.session_state["admin_mobile_preview_width"] = int(
+                st.session_state.get("admin_mobile_preview_width", 390)
+            )
+            st.session_state.route = "sunday"
+            st.rerun()
+    with oc2:
+        if st.button("Mon Aide‑Mémoire + cadre", key="adm_mob_go_memo", use_container_width=True):
+            st.session_state["_lumenvia_enable_phone_preview"] = True
+            st.session_state["admin_mobile_preview_width"] = int(
+                st.session_state.get("admin_mobile_preview_width", 390)
+            )
+            st.session_state.route = "memo"
+            st.rerun()
+    with oc3:
+        if st.button("À propos + cadre", key="adm_mob_go_about", use_container_width=True):
+            st.session_state["_lumenvia_enable_phone_preview"] = True
+            st.session_state["admin_mobile_preview_width"] = int(
+                st.session_state.get("admin_mobile_preview_width", 390)
+            )
+            st.session_state.route = "about"
+            st.rerun()
+
+    st.divider()
+    st.subheader("Aperçu iframe (session distincte)")
+    origin = _lumenvia_app_origin_url()
+    if not origin:
+        st.info(
+            "Pour charger l’iframe, définis `PUBLIC_APP_URL` (ou `public_app_url`) dans les secrets avec l’URL publique "
+            "de déploiement (ex. ton app Streamlit Cloud). Sinon Streamlit doit exposer `st.context.url` sur ton hébergement."
+        )
+    else:
+        src = html_escape(origin.rstrip("/") + "/", quote=True)
+        iw = max(280, min(560, int(st.session_state.get("admin_mobile_preview_width", 390) or 390)))
+        iframe_html = f"""
+<div style="display:flex;justify-content:center;background:linear-gradient(165deg,#3a3a42,#121214);padding:1rem;border-radius:12px;">
+  <iframe
+    src="{src}"
+    title="LumenVia — aperçu mobile"
+    style="width:{iw}px;height:760px;border:12px solid #0d0d0f;border-radius:36px;box-sizing:border-box;background:#fdfbf7;"
+    loading="lazy"
+    referrerpolicy="strict-origin-when-cross-origin"
+  ></iframe>
+</div>
+"""
+        components.html(iframe_html, height=840, scrolling=True)
+        st.caption(
+            "L’iframe charge une nouvelle session : connexion utilisateur/admin non partagée avec cet onglet."
+        )
+
+
 def main() -> None:
     set_page_style()
+    # À appliquer avant tout widget lié à `admin_phone_preview` (ex. toggle admin + simulateur).
+    if st.session_state.pop("_lumenvia_enable_phone_preview", False):
+        st.session_state["admin_phone_preview"] = True
     _inject_admin_phone_preview_css()
 
     if "route" not in st.session_state:
         st.session_state.route = "about"
 
-    # Liens admin optionnels : ?admin=1 (test ressources), ?admin=login, ?admin=step3
+    # Liens admin optionnels : ?admin=1 (ressources), ?admin=login, ?admin=step3, ?admin=mob (simulateur mobile)
     params = st.query_params
     adm = (params.get("admin") or "").strip().lower()
     if adm == "1":
@@ -4982,6 +5207,11 @@ def main() -> None:
             st.session_state.route = "admin_cdc"
         else:
             st.session_state.route = "admin_login"
+    elif adm in ("mob", "mobile"):
+        if st.session_state.get("admin_authenticated"):
+            st.session_state.route = "admin_mobile_sim"
+        else:
+            st.session_state.route = "admin_login"
 
     sun_qp = (params.get("sunday") or "").strip()
     if sun_qp and len(sun_qp) >= 10:
@@ -4996,7 +5226,7 @@ def main() -> None:
         except Exception:
             pass
 
-    if adm in ("1", "login", "step3", "cdc"):
+    if adm in ("1", "login", "step3", "cdc", "mob", "mobile"):
         try:
             del st.query_params["admin"]
         except Exception:
@@ -5071,6 +5301,14 @@ def main() -> None:
                 st.rerun()
         else:
             render_admin_readings_cache()
+    elif route == "admin_mobile_sim":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_mobile_sim"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_mobile_simulator()
     else:
         render_about()
 
