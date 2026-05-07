@@ -328,7 +328,7 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
 /*
   Navigation (top_nav) : colonne Menu + 4 tuiles Rubriques.
   ≥1025px : 4 boutons Rubriques visibles, colonne Menu masquée.
-  ≤1024px : uniquement « Menu ⌵ » (dépliant) — pas de tuiles sous l’en-tête ; tout est dans le panneau.
+  ≤1024px : uniquement « Menu ⌵ » — secours `lv_nav_five_cols` (clé Stable Streamlit) car :has(:nth-child(5)) peut ne pas matcher.
 */
 @media (min-width: 1025px) {
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
@@ -362,6 +362,22 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
   /* Toolbar admin grille + toggle Aperçu mobile : hors-champ réel téléphone/tablette */
   div[class*="st-key-lv_admin_desktop_shell"],
   div[data-testid="stVerticalBlock"][class*="st-key-lv_admin_desktop_shell"] {
+    display: none !important;
+  }
+}
+
+/* Fallback ciblé — ancêtre avec clé projet (couvre mobiles où le bloc à 5 colonnes n’est pas le « dernier enfant ») */
+@media (max-width: 1024px) {
+  div[class*="st-key-lv_nav_five_cols"] div[data-testid="stHorizontalBlock"] {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  div[class*="st-key-lv_nav_five_cols"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 auto !important;
+  }
+  div[class*="st-key-lv_nav_five_cols"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:first-child) {
     display: none !important;
   }
 }
@@ -708,8 +724,42 @@ def _admin_do_logout_navigation() -> None:
     st.session_state.route = "about"
 
 
+def _lumenvia_phone_like_user_agent() -> bool:
+    """Détection téléphone via User-Agent (``st.context.headers``), sans dépendre du viewport/CSS.
+
+    Sur certains téléphones Streamlit/hosting, les media-queries voient encore une largeur « bureau » alors que les
+    contrôles tactiles nécessitent le layout « Menu seul ».
+    """
+    try:
+        hdrs = getattr(st.context, "headers", None)
+        if hdrs is None:
+            return False
+        ua = str(hdrs.get("user-agent") or hdrs.get("User-Agent") or "").lower()
+    except Exception:
+        return False
+    if not ua.strip():
+        return False
+    # iPad en mode bureau : UA type Mac sans « mobi » — on garde la grille large.
+    if "ipad" in ua and "mobi" not in ua:
+        return False
+    if "iphone" in ua or "ipod" in ua:
+        return True
+    if "android" in ua and "tablet" not in ua:
+        return True
+    if "mobi" in ua:
+        return True
+    return False
+
+
+def _use_compact_top_nav() -> bool:
+    """Menu dépliant seul : iframe (`lumenvia_narrow_nav`) ou client téléphone détecté par UA."""
+    if st.session_state.get("lumenvia_narrow_nav"):
+        return True
+    return _lumenvia_phone_like_user_agent()
+
+
 def render_admin_navigation_in_popover() -> None:
-    """Tuiles Administration dans le popover Menu (mobile CSS ≤1024px ou session iframe `lumenvia_narrow_nav`)."""
+    """Tuiles Administration dans le Menu dépliant (viewport étroit / iframe / téléphone UA)."""
     if not st.session_state.get("admin_authenticated"):
         return
     st.divider()
@@ -732,7 +782,7 @@ def top_nav() -> str:
     uid = str(st.session_state.get("auth_user_entity_id") or "").strip()
     email = str(st.session_state.get("auth_email_lc") or "").strip()
     is_admin = bool(st.session_state.get("admin_authenticated"))
-    narrow_nav = bool(st.session_state.get("lumenvia_narrow_nav"))
+    compact_nav = _use_compact_top_nav()
 
     if logo_path.is_file():
         _, mid, _ = st.columns([1, 1, 1])
@@ -754,19 +804,20 @@ def top_nav() -> str:
         if is_admin:
             render_admin_navigation_in_popover()
 
-    if narrow_nav:
-        # Iframe simulateur : le viewport CSS suit souvent la fenêtre parente — pas de 2ᵉ rangée de tuiles.
+    if compact_nav:
+        # iframe (?lumenvia_narrow_nav=1) ou téléphone réel : pas de rangée « tuiles » dupliquant le Menu.
         with st.popover("Menu", use_container_width=True):
             _nav_popover_body()
     else:
-        cols = st.columns([1, 1, 1, 1, 1], gap="small")
-        with cols[0]:
-            with st.popover("Menu", use_container_width=True):
-                _nav_popover_body()
-        for i, (route, label) in enumerate(labels):
-            with cols[i + 1]:
-                if st.button(label, key=f"nav_d_{route}", use_container_width=True, type="secondary"):
-                    st.session_state.route = route
+        with st.container(key="lv_nav_five_cols"):
+            cols = st.columns([1, 1, 1, 1, 1], gap="small")
+            with cols[0]:
+                with st.popover("Menu", use_container_width=True):
+                    _nav_popover_body()
+            for i, (route, label) in enumerate(labels):
+                with cols[i + 1]:
+                    if st.button(label, key=f"nav_d_{route}", use_container_width=True, type="secondary"):
+                        st.session_state.route = route
 
     if uid:
         b1, b2 = st.columns([4, 1], gap="small")
@@ -870,12 +921,11 @@ def admin_nav_bar() -> None:
     """Menu complémentaire réservé à la session administrateur (après connexion).
 
     Masqué en session **iframe simulateur** (`lumenvia_narrow_nav`) : l’admin y est uniquement sous Menu.
-    Sur grand écran, visible dans `lv_admin_desktop_shell` ; en ≤1024px hors iframe, grille masquée par CSS
-    (entrées sous Menu).
+    Sur grand écran : `lv_admin_desktop_shell`. Sinon entrées sous Menu (CSS compact ou UA / iframe).
     """
     if not st.session_state.get("admin_authenticated"):
         return
-    if st.session_state.get("lumenvia_narrow_nav"):
+    if _use_compact_top_nav():
         return
     with st.container(key="lv_admin_desktop_shell"):
         st.markdown("---")
@@ -4168,10 +4218,10 @@ def render_admin_plan_consolide() -> None:
   <dd>
     <strong>1 — Navigation.</strong> <strong>≥1025&nbsp;px&nbsp;</strong>&nbsp;: quatre tuiles Rubriques en ligne, colonne Menu masquée.     <strong>≤1024&nbsp;px&nbsp;</strong>&nbsp;: uniquement le déclencheur <strong>«&nbsp;Menu&nbsp;»</strong> — rubriques + (si session admin)
     dans le panneau ; pas de tuiles dupliquées sous le logo (<code>@media max-width:&nbsp;1024px</code>).
-    Pour l’<strong>iframe</strong> du simulateur, le viewport suit souvent le parent&nbsp;: ajouter <code>lumenvia_narrow_nav=1</code>
-    dans l’URL de l’iframe pour forcer ce layout sans second rang de boutons.
-    Connexion / déconnexion&nbsp;: ligne sous la barre de navigation (comme précédemment). Grille admin + «&nbsp;Aperçu mobile&nbsp;» masqués en ≤1024&nbsp;px,
-    ou entièrement sautés dans la session iframe compacte (<code>lumenvia_narrow_nav</code>).
+    <strong>Iframe simulateur&nbsp;:</strong> <code>lumenvia_narrow_nav=1</code> dans l’URL (viewport parent). <strong>Téléphone déployé&nbsp;:</strong> même layout
+    si <code>st.context.headers</code> («&nbsp;User-Agent&nbsp;» téléphone/Android/iPhone…) — sans cette détection, Streamlit peut laisser un viewport «&nbsp;bureau&nbsp;»
+    où le CSS suffit rarement ; secours <code>lv_nav_five_cols</code> sous <code>max-width:&nbsp;1024px</code>.
+    Connexion / déconnexion&nbsp;: ligne sous la navigation. Grille admin / «&nbsp;Aperçu mobile&nbsp;» masqués ou sautés selon compact.
   </dd>
   <dd>
     <strong>2 — Clavier vs saisie / expander.</strong> Ajouter un <code>padding-bottom</code> substantiel au conteneur principal lorsqu’un champ
