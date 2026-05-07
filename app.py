@@ -1449,10 +1449,14 @@ def render_sunday() -> None:
             default = date.fromisoformat(str(st.session_state.pop("_lumenvia_sunday_qs"))[:10])
         except Exception:
             pass
-    chosen_any = st.date_input("Choisir un jour (on affiche le dimanche de la semaine)", value=default)
+    chosen_any = st.date_input(
+        "Sélectionnez une date au calendrier pour préparer ou revivre la synthèse illustrée du dimanche correspondant.",
+        value=default,
+    )
     chosen = _sunday_of_week(chosen_any)
     if chosen_any != chosen:
-        st.caption(f"Semaine sélectionnée → dimanche affiché : **{chosen.isoformat()}**")
+        d_fr = html_escape(_french_day_month_year(chosen.isoformat()))
+        st.caption(f"Le dimanche **{d_fr}**")
     date_str = chosen.isoformat()
 
     gcs_top: object | None = None
