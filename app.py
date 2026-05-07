@@ -347,6 +347,11 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
     > div[data-testid="column"]:first-child {
     display: none !important;
   }
+  /* Secours Streamlit : colonne Menu parfois non strictement première */
+  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
+    > div[data-testid="column"]:has([data-testid="stPopover"]) {
+    display: none !important;
+  }
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
     > div[data-testid="column"]:not(:first-child) {
     display: flex !important;
