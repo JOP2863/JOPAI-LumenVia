@@ -1667,15 +1667,23 @@ def render_sunday() -> None:
                 st.caption("Indisponible pour cette date.")
         with col_audio:
             if has_audio_fmt:
-                st.caption(
-                    "En cache sur cet appareil"
-                    if bundle_from_disk
-                    else "Synthèse audio du dimanche"
+                st.markdown(
+                    "<p style=\"text-align:center;margin:0 0 0.3rem;line-height:1.35;color:#5f4f3a;"
+                    "font-size:0.95rem;\"><strong>Audio</strong></p>",
+                    unsafe_allow_html=True,
                 )
+                if bundle_from_disk:
+                    st.markdown(
+                        "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.35;"
+                        "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
+                        unsafe_allow_html=True,
+                    )
                 st.audio(bundle_audio[0], format=bundle_audio[1])
             else:
-                st.caption(
-                    "Pas encore publié. Les lectures sont affichées plus bas."
+                st.markdown(
+                    "<p style=\"text-align:center;margin:0 0 0.25rem;line-height:1.4;color:#5f4f3a;"
+                    "font-size:0.85rem;\">Pas encore publié. Les lectures sont affichées plus bas.</p>",
+                    unsafe_allow_html=True,
                 )
         with col_texte:
             with st.expander("Lire le texte de cette synthèse", expanded=False):
