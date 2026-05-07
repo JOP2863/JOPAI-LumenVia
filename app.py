@@ -36,6 +36,8 @@ from core.sheets_db import (
     utc_now_iso,
     with_concat,
 )
+from core.prompt_templates import compute_sha256_text
+from core.parametres_ia import pick_effective_templates
 from core.storage import blob_exists, upload_text, upload_bytes, download_bytes
 from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
@@ -57,6 +59,60 @@ from core.illustration_thumbs import (
 )
 from core.pdf_graine_parole_mensuel import build_graine_parole_monthly_pdf_bytes, strip_light_markdown_to_plain
 from ui.liturgy_render import render_liturgy_block
+
+
+_PROMPT_TEMPLATE_KEYS = {
+    # Clés_Prompt attendues dans l'onglet GSheet `Paramètres_IA`
+    "instructions_base_md",
+    "overlay_takeaways",
+    "overlay_no_takeaways",
+    "overlay_catechese_bridge",
+    "retry_hardened_prefix",
+}
+
+_PROMPT_TEMPLATE_LABELS: dict[str, str] = {
+    "instructions_base_md": "Socle — consignes générales (structure du prompt)",
+    "overlay_takeaways": "Surcouche — inclure « Le Psaume : Ma réponse » + « À retenir »",
+    "overlay_no_takeaways": "Surcouche — sans section « À retenir »",
+    "overlay_catechese_bridge": "Surcouche — passerelle catéchèse (Stone Card)",
+    "retry_hardened_prefix": "Surcouche — préfixe de relance (anti-hallucination renforcée)",
+}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint: str) -> dict[str, str]:
+    """
+    Charge les prompts IA depuis Google Sheets (onglet `Paramètres_IA`, standard MARPA).
+    Cache court pour éviter de relire Sheets à chaque run Streamlit.
+    """
+    if not gsheet_id:
+        return {}
+    # Le fingerprint force une séparation de cache par environnement/compte.
+    _ = service_account_fingerprint
+
+    cfg = load_config()
+    if not cfg.gcp_service_account:
+        return {}
+
+    gs = build_gspread_client(cfg.gcp_service_account)
+    rows = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="Paramètres_IA", limit=5000)
+    latest = pick_effective_templates(rows, allowed_keys=set(_PROMPT_TEMPLATE_KEYS))
+    return {k: v.content_md for k, v in latest.items() if k in _PROMPT_TEMPLATE_KEYS and v.content_md}
+
+
+def _service_account_fingerprint(sa: object) -> str:
+    try:
+        d = dict(sa or {})
+        stable = "|".join(
+            [
+                str(d.get("project_id") or ""),
+                str(d.get("client_email") or ""),
+                str(d.get("private_key_id") or ""),
+            ]
+        )
+        return compute_sha256_text(stable)[:16]
+    except Exception:
+        return "na"
 
 
 def _public_app_listen_url(*, date_str: str) -> tuple[str | None, str | None]:
@@ -727,13 +783,17 @@ div[data-anchor-streamlit*="adm_nav_logout"] button:hover {
 
 
 def _admin_login_and_password() -> tuple[str, str]:
-    """Identifiant et mot de passe administrateur (`.streamlit/secrets.toml` ou valeurs par défaut)."""
+    """Identifiant et mot de passe administrateur (exclusivement via `st.secrets`).
+
+    Important sécurité : pas de valeurs par défaut dans le code.
+    En environnement public, l’admin doit rester désactivée tant que non configurée.
+    """
     try:
         s = st.secrets
-        login = str(s.get("ADMIN_LOGIN", s.get("admin_login", "jop"))).strip().lower()
-        password = str(s.get("ADMIN_PASSWORD", s.get("admin_password", "JOP28")))
+        login = str(s.get("ADMIN_LOGIN", s.get("admin_login", ""))).strip().lower()
+        password = str(s.get("ADMIN_PASSWORD", s.get("admin_password", ""))).strip()
     except Exception:
-        login, password = "jop", "JOP28"
+        login, password = "", ""
     return login, password
 
 
@@ -1195,13 +1255,21 @@ def render_sunday() -> None:
         # Remplace tout whitespace (incluant \n) par des espaces, puis compacte.
         return re.sub(r"\s+", " ", raw).strip()
 
-    default = next_sunday(date.today())
+    def _sunday_of_week(d: date) -> date:
+        """Retourne le dimanche de la semaine ISO contenant d (dimanche inclus)."""
+        return d + timedelta(days=(6 - d.weekday()) % 7)
+
+    # UX: l’utilisateur peut choisir n’importe quel jour ; on affiche le DIMANCHE de la semaine.
+    default = date.today()
     if "_lumenvia_sunday_qs" in st.session_state:
         try:
             default = date.fromisoformat(str(st.session_state.pop("_lumenvia_sunday_qs"))[:10])
         except Exception:
             pass
-    chosen = st.date_input("Choisir le dimanche", value=default)
+    chosen_any = st.date_input("Choisir un jour (on affiche le dimanche de la semaine)", value=default)
+    chosen = _sunday_of_week(chosen_any)
+    if chosen_any != chosen:
+        st.caption(f"Semaine sélectionnée → dimanche affiché : **{chosen.isoformat()}**")
     date_str = chosen.isoformat()
 
     # Lectures : on utilise d'abord un cache Sheets (si configuré), sinon AELF, sinon cache local disque.
@@ -1434,7 +1502,8 @@ def render_sunday() -> None:
                         if cached_pdf:
                             st.session_state[pdf_key] = cached_pdf
                             st.info("PDF déjà généré — réutilisation depuis Cloud.")
-                            return
+                            # Ne pas quitter la fonction : on veut afficher le bouton de téléchargement (colonne de droite).
+                            cached_pdf = None
                     img_b = _fetch_liturgy_illustration_full_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
                     aud_url, aud_note = _public_app_listen_url(date_str=date_str)
                     # Si l'audio existe sur Cloud mais n'est pas public, générer une URL signée pour le PDF.
@@ -1569,7 +1638,25 @@ def _run_generate_sunday_flow(
     # La Passerelle catéchèse ajoute un module structuré : on augmente le budget pour éviter qu’elle disparaisse.
     if include_catechese_bridge:
         target_words += 180
-    instructions = Path("data/instructions_ia.md").read_text(encoding="utf-8")
+    templates: dict[str, str] = {}
+    try:
+        templates = _load_prompt_templates_cached(
+            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+            service_account_fingerprint=_service_account_fingerprint(getattr(cfg, "gcp_service_account", {}) or {}),
+        )
+    except Exception:
+        templates = {}
+
+    instructions_struct = templates.get("instructions_base_md") or Path("data/instructions_ia.md").read_text(
+        encoding="utf-8"
+    )
+    # Double blind : la "secret sauce" n'est pas dans Sheets (A), mais dans st.secrets (B).
+    try:
+        s = st.secrets
+        secret_sauce = str(s.get("IA_SECRET_SAUCE_MD") or s.get("ia_secret_sauce_md") or "").strip()
+    except Exception:
+        secret_sauce = ""
+    instructions = (instructions_struct + "\n\n" + secret_sauce).strip() if secret_sauce else instructions_struct
     liturgical_context = "\n".join(
         [
             f"- Temps liturgique ({identity.periode or '—'}): {_explain_liturgical_time(identity.periode)}",
@@ -1582,6 +1669,7 @@ def _run_generate_sunday_flow(
         length_words=int(target_words),
         include_takeaways=bool(include_takeaways),
         include_catechese_bridge=bool(include_catechese_bridge),
+        templates=templates,
         identity={
             "date": identity.date,
             "zone": identity.zone,
@@ -1642,12 +1730,12 @@ def _run_generate_sunday_flow(
     looks_truncated = (fr in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (words_out < int(target_words * 0.85))
     if looks_truncated or has_citations:
         # Prompt “durci” : aucune URL / aucune citation / uniquement textes fournis.
-        hardened = (
+        hardened_prefix = templates.get("retry_hardened_prefix") or (
             "IMPORTANT — SOURCES: ne cite aucune source externe, aucune URL, aucun site web. "
             "Utilise exclusivement les textes AELF fournis ci-dessous. "
-            "IMPORTANT — FORMAT: réponds uniquement avec la synthèse, sans préambule technique.\n\n"
-            + prompt
+            "IMPORTANT — FORMAT: réponds uniquement avec la synthèse, sans préambule technique."
         )
+        hardened = hardened_prefix.strip() + "\n\n" + prompt
         try:
             t0b = time.perf_counter()
             gen2 = vx.generate_text_auto(
@@ -3792,6 +3880,20 @@ def render_admin_plan_consolide() -> None:
   </thead>
   <tbody>
     <tr>
+      <td><strong>Déploiement public (Git + Streamlit Cloud) — sécurité</strong></td>
+      <td><span class="lv-st-partiel">À valider</span></td>
+      <td>
+        Objectif : dépôt public sans fuite de secrets. Déjà en place :
+        <ul>
+          <li><code>.gitignore</code> ignore <code>.streamlit/secrets.toml</code>, <code>.env*</code>, clés (<code>*.pem</code>, <code>*.key</code>, <code>*service*account*.json</code>…), <code>.venv/</code>, caches.</li>
+          <li>Admin login via <code>st.secrets</code> (pas d’identifiants par défaut en dur).</li>
+          <li>Prompts IA (structure) externalisés dans Sheets (<code>Paramètres_IA</code>) + “secret sauce” dans <code>st.secrets</code> (<code>IA_SECRET_SAUCE_MD</code>).</li>
+          <li>Fallback local <code>data/instructions_ia.md</code> réduit au minimum (repo public).</li>
+        </ul>
+        Reste : scan final (repo + historique) avant publication, puis paramétrage Streamlit Cloud (Secrets).
+      </td>
+    </tr>
+    <tr>
       <td>Manifestes étape 2–3 + illustrations Cloud + grille Vertex admin</td>
       <td><span class="lv-st-ok">Livré</span></td>
       <td>Bascule annuelle ; retouches unitaires si besoin (charte, date).</td>
@@ -3835,6 +3937,14 @@ def render_admin_plan_consolide() -> None:
       <td>Typologie biblique / Psaume « Ma réponse » (<code>data/instructions_ia.md</code>)</td>
       <td><span class="lv-st-ok">En données</span></td>
       <td>Pilotage éditorial continu ; pas de sources hors AELF.</td>
+    </tr>
+    <tr>
+      <td>Paramètres IA (Sheets — standard MARPA) + secret sauce</td>
+      <td><span class="lv-st-ok">Livré</span></td>
+      <td>
+        Admin : édition socle/surcouches dans <code>Paramètres_IA</code> (avec <code>Description</code> lisible) ; secret sauce jamais affichée en clair.
+        Reste : gouvernance (qui peut éditer), sauvegarde/exports, et nettoyage éventuel d’historique.
+      </td>
     </tr>
     <tr>
       <td><strong>Suivi Gemini + consolidation produit</strong></td>
@@ -4034,6 +4144,12 @@ def render_admin_cahier_charges() -> None:
 def render_admin_login() -> None:
     st.title("Connexion administration")
     login_ok, pwd_ok = _admin_login_and_password()
+    if not (login_ok and pwd_ok):
+        st.error(
+            "Administration désactivée : configure `ADMIN_LOGIN` et `ADMIN_PASSWORD` dans `st.secrets` "
+            "(Streamlit Cloud → Secrets) pour activer la connexion."
+        )
+        return
     with st.form("admin_login_form"):
         login_id = st.text_input("Identifiant", key="adm_login_id", autocomplete="username")
         pwd = st.text_input("Mot de passe", type="password", key="adm_login_pwd", autocomplete="current-password")
@@ -4088,7 +4204,7 @@ Le manifeste est construit **pour une année civile** (script étape 2 avec `--y
 
 
 def render_admin_test_resources() -> None:
-    st.title("Admin — test ressources")
+    st.title("Admin - diagnostique des ressources")
     cfg = load_config()
     st.write("Cette page sert à valider l’accès aux ressources configurées dans `secrets.toml`.")
 
@@ -4096,7 +4212,7 @@ def render_admin_test_resources() -> None:
         st.error("gcp_service_account manquant dans secrets.")
         return
 
-    st.subheader("Identité / projet (diagnostic)")
+    st.subheader("Identité / projet")
     sa = dict(cfg.gcp_service_account or {})
     sa_email = str(sa.get("client_email") or "").strip()
     sa_project_id = str(sa.get("project_id") or "").strip()
@@ -4110,49 +4226,139 @@ def render_admin_test_resources() -> None:
     }
     st.code("\n".join([f"{k}: {v}" for k, v in diag.items()]))
 
-    if cfg.gcs_bucket_name:
-        try:
-            gcs = build_gcs_client(cfg.gcp_service_account)
-            gcs_project = str(getattr(gcs, "project", "") or "").strip()
-            if gcs_project:
-                st.caption(f"Client Cloud — projet effectif : `{gcs_project}`")
-            bucket = gcs.bucket(cfg.gcs_bucket_name)
-            blobs = list(gcs.list_blobs(bucket, max_results=20, prefix="Images/"))
-            st.success(f"Cloud OK — bucket `{cfg.gcs_bucket_name}` (exemples: {len(blobs)} objets sous Images/)")
-            for b in blobs[:10]:
-                st.write(f"- {b.name}")
-        except Exception as e:
-            st.error(f"Cloud KO — {e}")
-    else:
+    st.divider()
+    st.subheader("Google Bucket")
+    if not cfg.gcs_bucket_name:
         st.warning("gcs_bucket_name manquant.")
-
-    if cfg.gsheet_id:
-        st.success("Google Sheets: gsheet_id présent.")
     else:
-        st.warning("gsheet_id manquant.")
+        with st.expander(f"Structure du bucket `gs://{cfg.gcs_bucket_name}`", expanded=False):
+            try:
+                gcs = build_gcs_client(cfg.gcp_service_account)
+                gcs_project = str(getattr(gcs, "project", "") or "").strip()
+                if gcs_project:
+                    st.caption(f"Client Cloud — projet effectif : `{gcs_project}`")
+
+                bucket_name = str(cfg.gcs_bucket_name).strip()
+                bucket = gcs.bucket(bucket_name)
+
+                # On liste un nombre raisonnable d’objets, puis on reconstruit une arborescence.
+                # Objectif: diagnostic lisible (pas un inventaire exhaustif).
+                names = [b.name for b in gcs.list_blobs(bucket, max_results=800)]
+                if not names:
+                    st.info("Aucun objet détecté (bucket vide ou droits insuffisants).")
+                else:
+                    def _add(tree: dict, parts: list[str]) -> None:
+                        cur = tree
+                        for p in parts:
+                            if not p:
+                                continue
+                            cur = cur.setdefault(p, {})
+
+                    tree: dict[str, dict] = {}
+                    for n in names:
+                        parts = [p for p in str(n).split("/") if p]
+                        # On affiche uniquement la STRUCTURE de dossiers (pas les fichiers)
+                        if len(parts) >= 2:
+                            _add(tree, parts[: min(4, len(parts) - 1)])  # profondeur limitée, sans feuille fichier
+
+                    def _render(cur: dict[str, dict], indent: int = 0, *, max_children: int = 40) -> list[str]:
+                        out: list[str] = []
+                        for i, k in enumerate(sorted(cur.keys())):
+                            if i >= max_children:
+                                out.append("  " * indent + "…")
+                                break
+                            # Ici on ne rend que des dossiers.
+                            out.append("  " * indent + f"- {k}/")
+                            out.extend(_render(cur[k], indent + 1, max_children=max_children))
+                        return out
+
+                    st.success(f"Cloud OK — bucket `{bucket_name}` ({len(names)} objet(s) échantillonnés)")
+                    st.code("\n".join(_render(tree)), language="markdown")
+                    st.caption("Affichage limité (profondeur/quantité) : c’est une vue de structure pour diagnostic.")
+            except Exception as e:
+                st.error(f"Cloud KO — {e}")
 
     st.divider()
-    st.subheader("Gemini API TTS (diagnostic)")
-    if not cfg.gemini_api_key:
-        st.warning("GEMINI_API_KEY manquante — fallback TTS via Gemini API indisponible.")
+    st.subheader("Google Sheet")
+    if not cfg.gsheet_id:
+        st.warning("gsheet_id manquant.")
     else:
-        if st.button("Tester Gemini TTS (court)", key="adm_test_gemini_tts"):
-            ov = loading_overlay("Test Gemini TTS…")
+        try:
+            gs = build_gspread_client(cfg.gcp_service_account)
+            sh = gs.open_by_key(cfg.gsheet_id)
+            ws_titles = [w.title for w in sh.worksheets()]
+            st.success(f"Sheets OK — {len(ws_titles)} onglet(s) accessibles.")
+            if "Paramètres_IA" in ws_titles:
+                ws = sh.worksheet("Paramètres_IA")
+                header = ws.row_values(1)
+                if "Description" in header:
+                    st.success("Table `Paramètres_IA` OK — colonne `Description` présente.")
+                else:
+                    st.warning("Table `Paramètres_IA` : colonne `Description` absente (header à mettre à jour).")
+            else:
+                st.warning("Onglet `Paramètres_IA` absent (lance `init_sheets_db.py`).")
+        except Exception as e:
+            st.error(f"Sheets KO — {e}")
+
+    st.divider()
+    st.subheader("Dépendances runtime")
+    st.caption("Vérifie que ce runtime Streamlit a bien les librairies nécessaires (PDF/Excel, etc.).")
+    try:
+        import openpyxl  # type: ignore
+
+        st.success(f"openpyxl OK — version {getattr(openpyxl, '__version__', '?')} ({getattr(openpyxl, '__file__', '')})")
+    except Exception as e:
+        st.warning(f"openpyxl non importable dans CE runtime Streamlit : {e}")
+
+    st.divider()
+    st.subheader("IA : Gemini API TTS et VertexAI")
+    st.caption(
+        "VertexAI est la voie principale (via compte de service). "
+        "La Gemini API (clé `GEMINI_API_KEY`) sert de **fallback** pour la TTS si Vertex refuse l’AUDIO (allowlist) "
+        "ou en cas de quota/erreur transitoire."
+    )
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if not cfg.gemini_api_key:
+            st.info("Gemini API : non configurée (`GEMINI_API_KEY` manquante).")
+        else:
+            if st.button("Tester Gemini TTS (court)", key="adm_test_gemini_tts"):
+                ov = loading_overlay("Test Gemini TTS…")
+                try:
+                    from core.gemini_tts_api import GeminiTtsApiClient
+
+                    t0 = time.perf_counter()
+                    cli = GeminiTtsApiClient(api_key=cfg.gemini_api_key)
+                    res = cli.generate_audio(
+                        model="gemini-2.5-flash-preview-tts",
+                        text="Test audio LumenVia. Un, deux, trois.",
+                        voice_name="Kore",
+                    )
+                    dt = time.perf_counter() - t0
+                    st.success(f"Gemini TTS OK — {len(res.audio_bytes)} octets en {dt:.2f}s ({res.mime_type})")
+                    st.audio(res.audio_bytes, format=res.mime_type or "audio/wav")
+                except Exception as e:
+                    st.error(f"Gemini TTS KO — {e}")
+                finally:
+                    ov.empty()
+    with col_b:
+        if st.button("Tester VertexAI (texte court)", key="adm_test_vertex_text"):
+            ov = loading_overlay("Test VertexAI (texte)…")
             try:
-                from core.gemini_tts_api import GeminiTtsApiClient
+                from core.vertex_gemini import VertexGeminiClient
 
                 t0 = time.perf_counter()
-                cli = GeminiTtsApiClient(api_key=cfg.gemini_api_key)
-                res = cli.generate_audio(
-                    model="gemini-2.5-flash-preview-tts",
-                    text="Test audio LumenVia. Un, deux, trois.",
-                    voice_name="Kore",
+                vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
+                res = vx.generate_text_auto(
+                    preferred_models=["gemini-2.0-flash", "gemini-2.5-flash"],
+                    prompt="Réponds uniquement par « OK ».",
+                    max_output_tokens=32,
                 )
                 dt = time.perf_counter() - t0
-                st.success(f"TTS OK — {len(res.audio_bytes)} octets en {dt:.2f}s ({res.mime_type})")
-                st.audio(res.audio_bytes, format=res.mime_type or "audio/wav")
+                st.success(f"VertexAI OK — {res.model} en {dt:.2f}s")
+                st.code((res.text or "").strip()[:400] or "—")
             except Exception as e:
-                st.error(f"TTS KO — {e}")
+                st.error(f"VertexAI KO — {e}")
             finally:
                 ov.empty()
 
@@ -4161,60 +4367,228 @@ def render_admin_test_resources() -> None:
     )
 
     st.divider()
-    st.subheader("Instructions IA (viewer / édition)")
-    instr_path = Path("data/instructions_ia.md")
-    if not instr_path.is_file():
-        st.warning(f"Fichier introuvable : `{instr_path.as_posix()}`.")
-    else:
-        instr_txt = instr_path.read_text(encoding="utf-8")
-        st.caption("Aperçu : le prompt final = instructions ci-dessous + surcouches optionnelles (À retenir, Passerelle catéchèse).")
-        tab_a, tab_b = st.tabs(["Éditer le socle (`instructions_ia.md`)", "Aperçu des surcouches"])
-
-        with tab_a:
-            edited = st.text_area(
-                "Contenu (Markdown)",
-                value=instr_txt,
-                height=420,
-                key="adm_instr_editor",
-            )
-            if st.button("Enregistrer les instructions (sur le disque)", type="primary", key="adm_instr_save"):
-                ov = loading_overlay("Enregistrement des instructions IA…")
-                try:
-                    instr_path.write_text(edited, encoding="utf-8")
-                    st.success(f"Sauvegardé : `{instr_path.as_posix()}`.")
-                    st.rerun()
-                finally:
-                    ov.empty()
-
-        with tab_b:
-            st.markdown("**Surcouche — À retenir / Psaume : Ma réponse** (si option activée)")
-            st.code(
-                "\n".join(
-                    [
-                        "Inclure une sous-section titrée exactement « Le Psaume : Ma réponse » : uniquement à partir du texte du psaume fourni.",
-                        "Terminer par une section « À retenir » avec 3 à 5 puces commençant par un verbe.",
-                    ]
-                )
-            )
-            st.markdown("**Surcouche — Passerelle catéchèse — L’écho des paraboles** (si option activée)")
-            st.code(
-                "\n".join(
-                    [
-                        "Ajouter à la fin une section titrée exactement : « Passerelle catéchèse — L’écho des paraboles ».",
-                        "Stone Card en 5 sous-parties : L’Essentiel / La Scène Visuelle / Le Mot-Clé / L’Analogie du Quotidien / Le Pas de la Semaine.",
-                        "Garde-fous : ne pas inventer de paroles, ton d’accompagnement, renvoyer au catéchiste si complexe/controversé.",
-                    ]
-                )
-            )
-
     st.divider()
-    st.subheader("Dépendances runtime (diagnostic)")
-    try:
-        import openpyxl  # type: ignore
+    st.subheader("Mes prompts à l’IA (secret sauce)")
+    st.caption(
+        "Le prompt final est composé de deux parties : "
+        "A) un **socle + des surcouches** versionnés dans Sheets (`Paramètres_IA`) ; "
+        "B) une partie confidentielle (secret sauce) dans `st.secrets` (`IA_SECRET_SAUCE_MD`)."
+    )
 
-        st.success(f"openpyxl OK — version {getattr(openpyxl, '__version__', '?')} ({getattr(openpyxl, '__file__', '')})")
-    except Exception as e:
-        st.warning(f"openpyxl non importable dans CE runtime Streamlit : {e}")
+    # Secret sauce : on n’affiche jamais le contenu en clair dans l’admin, seulement l’état.
+    try:
+        ss = str(st.secrets.get("IA_SECRET_SAUCE_MD") or "").strip()
+    except Exception:
+        ss = ""
+    if ss:
+        st.success(f"Secret sauce : configurée ({len(ss)} caractères).")
+    else:
+        st.warning("Secret sauce : absente (`IA_SECRET_SAUCE_MD` non défini).")
+
+    with st.expander("Fallback local minimal (dépôt public) — `data/instructions_ia.md`", expanded=False):
+        instr_path = Path("data/instructions_ia.md")
+        if not instr_path.is_file():
+            st.warning(f"Fichier introuvable : `{instr_path.as_posix()}`.")
+        else:
+            st.code(instr_path.read_text(encoding="utf-8").strip()[:2000] or "", language="markdown")
+            st.caption("Ce fallback doit rester minimal dans le dépôt public (il ne doit pas contenir la matière du prompt).")
+
+    if not (cfg.gsheet_id and cfg.gcp_service_account):
+        st.info("Configure `gsheet_id` + `gcp_service_account` pour gérer les templates IA ici.")
+    else:
+        gs = build_gspread_client(cfg.gcp_service_account)
+        try:
+            rows = fetch_records(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="Paramètres_IA",
+                limit=5000,
+            )
+        except Exception as e:
+            rows = []
+            st.warning(f"Lecture `Paramètres_IA` impossible : {e}")
+
+        # Admin : on affiche uniquement les templates effectivement Actifs (pivot “latest”),
+        # sans injecter des clés “théoriques” qui n’existent pas en base.
+        latest = pick_effective_templates(rows, allowed_keys=None)
+        existing_keys = sorted([k for k, v in latest.items() if (v.content_md or "").strip()])
+        # Libellés lisibles : on prend la Description de la ligne EFFECTIVE (pivot latest),
+        # pas “la première trouvée” dans l’historique (sinon incohérences visuelles).
+        def _norm0(v: object) -> str:
+            return str(v or "").strip()
+
+        desc_by_key: dict[str, str] = {}
+        for k, eff in latest.items():
+            # retrouve la ligne correspondante dans rows pour récupérer Description
+            # (en priorité via #ID, sinon via (clé, version)).
+            chosen: str = ""
+            eff_id = _norm0(getattr(eff, "id", ""))
+            eff_ver = int(getattr(eff, "version", 0) or 0)
+            for r in rows:
+                if _norm0(r.get("Clé_Prompt")) != k:
+                    continue
+                rid = _norm0(r.get("#ID") or r.get("ID") or r.get("id"))
+                if eff_id and rid and rid == eff_id:
+                    chosen = _norm0(r.get("Description"))
+                    break
+            if not chosen:
+                for r in rows:
+                    if _norm0(r.get("Clé_Prompt")) != k:
+                        continue
+                    try:
+                        rv = int(_norm0(r.get("Version") or 0) or 0)
+                    except Exception:
+                        rv = 0
+                    if rv != eff_ver:
+                        continue
+                    chosen = _norm0(r.get("Description"))
+                    if chosen:
+                        break
+            if chosen:
+                desc_by_key[k] = chosen
+
+        def _fmt_key(k: str) -> str:
+            d = (desc_by_key.get(k) or _PROMPT_TEMPLATE_LABELS.get(k) or "").strip()
+            return f"{k} — {d}" if d else k
+
+        create_new = st.toggle("Créer un nouveau prompt (socle / surcouche)", value=False, key="adm_tpl_create_new")
+        if create_new:
+            picked = st.text_input(
+                "Clé_Prompt (identifiant technique stable)",
+                value="",
+                key="adm_tpl_new_key",
+                help="Exemples : `instructions_base_md` (socle), `overlay_takeaways` (surcouche), `retry_hardened_prefix` (préfixe de relance). "
+                "Évite les espaces ; utilise des minuscules + underscores.",
+            ).strip()
+            current = ""
+            current_desc = ""
+        else:
+            if not existing_keys:
+                st.warning("Aucun prompt Actif trouvé en base (`Paramètres_IA`).")
+                return
+            picked = st.selectbox(
+                "Choisir un prompt existant (Actif)",
+                options=existing_keys,
+                index=existing_keys.index("instructions_base_md") if "instructions_base_md" in existing_keys else 0,
+                key="adm_tpl_key",
+                format_func=_fmt_key,
+            )
+            current = (latest.get(picked).content_md if picked in latest else "").strip()
+            current_desc = (desc_by_key.get(picked) or _PROMPT_TEMPLATE_LABELS.get(picked) or "").strip()
+
+        edited_desc = st.text_input(
+            "Description (affichage dans la liste)",
+            value=current_desc,
+            key=f"adm_tpl_desc__{picked}",
+            help="Optionnel. Sert uniquement à rendre la liste plus claire (tu peux mettre un nom métier).",
+        )
+        edited = st.text_area(
+            "Contenu (Markdown)",
+            value=current,
+            height=260,
+            # IMPORTANT Streamlit: une key fixe “colle” le texte quand on change le selectbox.
+            # Une key dépendante du template garde un état par template.
+            key=f"adm_tpl_editor__{picked}",
+            help="Append-only : enregistre une nouvelle version (Version + 1).",
+        )
+        notes = st.text_input("Notes (optionnel)", key="adm_tpl_notes", value="")
+        active = st.checkbox("Activer ce prompt", value=True, key="adm_tpl_active", help="Si coché, l’ancien Actif de la même Clé_Prompt sera automatiquement désactivé.")
+        date_effet = st.date_input("Date d'effet", value=date.today(), key="adm_tpl_date_effet")
+
+        disabled_save = (not bool(edited.strip())) or (create_new and not bool(picked.strip()))
+        if st.button("Enregistrer (nouvelle version dans Sheets)", type="primary", disabled=disabled_save, key="adm_tpl_save"):
+            ov = loading_overlay("Enregistrement du template IA (Sheets)…")
+            try:
+                body = edited.strip()
+                # Onglet MARPA: Paramètres_IA
+                sh = gs.open_by_key(cfg.gsheet_id)
+                ws = sh.worksheet("Paramètres_IA")
+                header = ws.row_values(1)
+                if not header:
+                    raise RuntimeError("Onglet `Paramètres_IA` non initialisé (header vide). Lance init_sheets_db.")
+                if "Description" not in header:
+                    raise RuntimeError("Colonne `Description` manquante dans `Paramètres_IA`. Relance init_sheets_db.py ou mets à jour le header.")
+
+                def _norm(s: object) -> str:
+                    return str(s or "").strip()
+
+                def _is_active(statut: object) -> bool:
+                    return _norm(statut).lower() in ("actif", "active", "ok", "1", "true")
+
+                # Calcule la prochaine version à partir de la table (pas seulement “latest”),
+                # car la table peut contenir plusieurs versions “Actif” à assainir.
+                key_norm = _norm(picked)
+                max_ver = 0
+                for r in rows:
+                    if _norm(r.get("Clé_Prompt")) != key_norm:
+                        continue
+                    try:
+                        max_ver = max(max_ver, int(_norm(r.get("Version") or 0) or 0))
+                    except Exception:
+                        pass
+                next_ver = int(max_ver + 1)
+                de = str(date_effet)
+
+                # MARPA (sans supprimer) : on met à jour EN PLACE les lignes Actif existantes
+                # pour cette clé (Statut -> Inactif), puis on append uniquement la nouvelle version.
+                if active:
+                    try:
+                        records = ws.get_all_records()  # lignes à partir de la ligne 2
+                    except Exception:
+                        records = []
+
+                    def _make_concat(*, row_id: str, key: str, version: str, statut: str, date_effet: str) -> str:
+                        return " | ".join([_norm(row_id), _norm(key), _norm(version), _norm(statut), _norm(date_effet)])
+
+                    try:
+                        col_statut = header.index("Statut") + 1
+                        col_concat = header.index("Concaténation") + 1
+                    except Exception:
+                        col_statut = 0
+                        col_concat = 0
+
+                    # Update les cellules une par une (peu de lignes) pour rester robuste.
+                    if col_statut and col_concat:
+                        for i, r in enumerate(records):
+                            if _norm(r.get("Clé_Prompt")) != key_norm:
+                                continue
+                            if not _is_active(r.get("Statut")):
+                                continue
+                            # Row number dans Sheets (header=1, records commencent à 2)
+                            row_num = i + 2
+                            ws.update_cell(row_num, col_statut, "Inactif")
+
+                            row_id = _norm(r.get("#ID") or r.get("ID") or r.get("id"))
+                            ver_str = _norm(r.get("Version"))
+                            de_str = _norm(r.get("Date_Effet")) or de
+                            ws.update_cell(row_num, col_concat, _make_concat(row_id=row_id, key=key_norm, version=ver_str, statut="Inactif", date_effet=de_str))
+
+                row_id = sha256(f"ia|{key_norm}|{next_ver}|{body}".encode("utf-8")).hexdigest()[:18]
+                statut = "Actif" if active else "Inactif"
+                concat = " | ".join([row_id, key_norm, str(next_ver), statut, de])
+                row_map = {
+                    "#ID": row_id,
+                    "Clé_Prompt": key_norm,
+                    "Description": str(edited_desc or "").strip(),
+                    "Version": str(next_ver),
+                    "Statut": statut,
+                    "Date_Effet": de,
+                    "Contenu_Markdown": body,
+                    "Concaténation": concat,
+                }
+                ws.append_rows([[row_map.get(c, "") for c in header]], value_input_option="RAW")
+
+                st.success("Paramètre IA enregistré (append-only).")
+                # Force refresh du cache prompt
+                try:
+                    _load_prompt_templates_cached.clear()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                st.rerun()
+            finally:
+                ov.empty()
+
+    # (Les dépendances runtime ont été déplacées plus haut.)
 
 
 def render_admin_readings_cache() -> None:
@@ -4370,6 +4744,7 @@ def _build_prompt(
     length_words: int,
     include_takeaways: bool,
     include_catechese_bridge: bool,
+    templates: dict[str, str] | None = None,
     identity: dict,
     readings: dict,
     liturgical_context: str | None = None,
@@ -4380,23 +4755,24 @@ def _build_prompt(
     ctx_block = ""
     if ctx:
         ctx_block = f"\nRepères liturgiques (résumé pédagogique, à intégrer sans invention hors textes AELF):\n{ctx}\n"
-    psalm_block = ""
-    if include_takeaways:
-        psalm_block = (
-            "\nInclure une sous-section titrée exactement « Le Psaume : Ma réponse » : uniquement à partir du texte du psaume fourni, "
-            "explique comment ce psaume permet de répondre en prière aux lectures (sans sources externes).\n"
-            "Structurer aussi la synthèse pour mettre en relief la promesse / préfiguration (Première lecture, AT si applicable) "
-            "et son accomplissement ou réponse dans l’Évangile, strictement à partir des textes fournis.\n"
-            "Terminer par une section « À retenir » avec 3 à 5 puces commençant par un verbe.\n"
-        )
-    else:
-        psalm_block = (
-            "\nMettre en relief la promesse / préfiguration (Première lecture) et l’accomplissement (Évangile), strictement à partir des textes fournis.\n"
-        )
+    tpls = dict(templates or {})
+    default_takeaways = (
+        "\nInclure une sous-section titrée exactement « Le Psaume : Ma réponse » : uniquement à partir du texte du psaume fourni, "
+        "explique comment ce psaume permet de répondre en prière aux lectures (sans sources externes).\n"
+        "Structurer aussi la synthèse pour mettre en relief la promesse / préfiguration (Première lecture, AT si applicable) "
+        "et son accomplissement ou réponse dans l’Évangile, strictement à partir des textes fournis.\n"
+        "Terminer par une section « À retenir » avec 3 à 5 puces commençant par un verbe.\n"
+    )
+    default_no_takeaways = (
+        "\nMettre en relief la promesse / préfiguration (Première lecture) et l’accomplissement (Évangile), strictement à partir des textes fournis.\n"
+    )
+    psalm_block = (tpls.get("overlay_takeaways") or default_takeaways) if include_takeaways else (
+        tpls.get("overlay_no_takeaways") or default_no_takeaways
+    )
 
     catechese_block = ""
     if include_catechese_bridge:
-        catechese_block = (
+        catechese_block = tpls.get("overlay_catechese_bridge") or (
             "\nAjouter à la fin une section titrée exactement : « Passerelle catéchèse — L’écho des paraboles ».\n"
             "Cette section doit être une “Stone Card” structurée en 5 sous-parties (titres exacts) :\n"
             "Important : ne mets pas de numérotation (pas de « 1) », « 2) », etc.).\n"

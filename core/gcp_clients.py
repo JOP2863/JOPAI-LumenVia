@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from google.cloud import storage, texttospeech, vision
+from google.cloud import storage, vision
 from google.oauth2 import service_account
 
 
@@ -26,7 +26,13 @@ def build_gcs_client(service_account_info: Mapping[str, Any]) -> storage.Client:
     return storage.Client(credentials=creds, project=service_account_info.get("project_id"))
 
 
-def build_tts_client(service_account_info: Mapping[str, Any]) -> texttospeech.TextToSpeechClient:
+def build_tts_client(service_account_info: Mapping[str, Any]):
+    try:
+        from google.cloud import texttospeech  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "Dépendance manquante: installe `google-cloud-texttospeech` pour activer le TTS."
+        ) from e
     creds = build_credentials(service_account_info)
     return texttospeech.TextToSpeechClient(credentials=creds)
 

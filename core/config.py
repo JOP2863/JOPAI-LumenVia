@@ -14,8 +14,6 @@ try:  # py<311
 except Exception:  # pragma: no cover
     tomli = None  # type: ignore[assignment]
 
-import streamlit as st
-
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -27,6 +25,15 @@ class AppConfig:
 
 
 def load_config() -> AppConfig:
+    try:
+        import streamlit as st  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Streamlit n'est pas installé dans cet environnement. "
+            "Pour exécuter l'app, installe les dépendances (dont streamlit). "
+            "Pour les scripts tools/*, utilise plutôt load_config_from_secrets_toml(...)."
+        ) from e
+
     s = st.secrets
     return AppConfig(
         gsheet_id=str(s.get("gsheet_id", "")).strip(),

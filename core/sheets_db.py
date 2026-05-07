@@ -92,6 +92,19 @@ def default_tables() -> list[TableSpec]:
             ),
         ),
         TableSpec(
+            name="Paramètres_IA",
+            columns=[
+                "#ID",
+                "Clé_Prompt",
+                "Description",
+                "Version",
+                "Statut",
+                "Date_Effet",
+                "Contenu_Markdown",
+                "Concaténation",
+            ],
+        ),
+        TableSpec(
             name="audio",
             columns=with_concat(
                 [
