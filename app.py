@@ -327,9 +327,9 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
 
 /*
   Navigation (top_nav) : 5 colonnes = popover « Menu » + 4 boutons.
-  Desktop (≥1025px) : masquer le popover, afficher les 4 boutons.
-  Tablette (768–1024px) : popover seul (les liens sont dans le panneau).
-  Téléphone (≤767px) : masquer le popover — afficher les 4 boutons empilés (évite menu toujours ouvert qui mange l’écran).
+  Desktop (≥1025px) : masquer le popover ; afficher les 4 boutons en ligne.
+  ≤1024px (mobile, tablette, simulateur) : masquer le popover — uniquement les 4 boutons empilés.
+  Sinon on obtient une entrée « Menu ⌵ » redondante au-dessus des mêmes liens (voir recette simulateur admin).
 */
 @media (min-width: 1025px) {
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
@@ -338,31 +338,7 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
   }
 }
 
-@media (max-width: 1024px) and (min-width: 768px) {
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child) {
-    flex-direction: column !important;
-    align-items: stretch !important;
-  }
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:first-child {
-    width: 100% !important;
-    max-width: 100% !important;
-    flex: 1 1 auto !important;
-  }
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:not(:first-child) {
-    display: none !important;
-  }
-  div[data-testid="stPopoverBody"] button[kind="secondary"],
-  [data-testid="stPopoverContent"] button[kind="secondary"],
-  [data-baseweb="popover"] button[kind="secondary"] {
-    width: 100% !important;
-    min-height: 55px !important;
-    font-size: 1rem !important;
-  }
-}
-
-@media (max-width: 767.98px) {
+@media (max-width: 1024px) {
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child) {
     flex-direction: column !important;
     align-items: stretch !important;
@@ -4134,9 +4110,9 @@ def render_admin_plan_consolide() -> None:
 <dl class="lv-keylist">
   <dt>Trois points chirurgicaux UX mobile (référence verrouillée)</dt>
   <dd>
-    <strong>1 — Navigation.</strong> Grand écran&nbsp;: quatre boutons, popover masqué. Intervalle <strong>768–1024&nbsp;px</strong>&nbsp;: popover
-    <strong>«&nbsp;Menu&nbsp;»</strong> seul avec liens tactiles dans le panneau. <strong>≤767&nbsp;px</strong>&nbsp;: popover masqué, quatre boutons
-    empilés pleine largeur pour libérer la zone centrale et éviter le bloc menu toujours visible par erreur CSS.
+    <strong>1 — Navigation.</strong> Largeur <strong>≥1025&nbsp;px&nbsp;</strong>: quatre boutons en ligne, popover masqué. Largeur <strong>≤1024&nbsp;px&nbsp;</strong>
+    (simulateur téléphone inclus)&nbsp;: popover <strong>«&nbsp;Menu&nbsp;»</strong> également masqué — seuls quatre boutons empilés, pour éviter une entrée
+    «&nbsp;Menu&nbsp;⌵&nbsp;» redondante au-dessus des mêmes liens.
   </dd>
   <dd>
     <strong>2 — Clavier vs saisie / expander.</strong> Ajouter un <code>padding-bottom</code> substantiel au conteneur principal lorsqu’un champ
