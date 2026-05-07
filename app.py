@@ -315,7 +315,30 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
   font-family: 'Lora', serif !important;
 }
 
+/* Moins d’air sous la chrome Streamlit (Deploy / menu ⋮ / bannière dev « File change ») pour remonter logo + Menu */
+header[data-testid="stHeader"] {
+  padding-top: 0.28rem !important;
+  padding-bottom: 0.28rem !important;
+}
+[data-testid="stToolbar"] {
+  padding-top: 0 !important;
+  padding-bottom: 0.35rem !important;
+  margin-bottom: 0 !important;
+}
+[data-testid="stDecoration"] hr {
+  margin: 0.2rem auto !important;
+}
+section[data-testid="stMain"] .block-container {
+  padding-top: 0.45rem !important;
+}
 @media (max-width: 1024px) {
+  header[data-testid="stHeader"] {
+    padding-top: 0.18rem !important;
+    padding-bottom: 0.18rem !important;
+  }
+  section[data-testid="stMain"] .block-container {
+    padding-top: 0.2rem !important;
+  }
   html, body {
     overflow-x: hidden !important;
   }
