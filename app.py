@@ -326,10 +326,9 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
 }
 
 /*
-  Navigation (top_nav) : 5 colonnes = popover « Menu » + 4 boutons.
-  Desktop (≥1025px) : masquer le popover ; afficher les 4 boutons en ligne.
-  ≤1024px (mobile, tablette, simulateur) : masquer le popover — uniquement les 4 boutons empilés.
-  Sinon on obtient une entrée « Menu ⌵ » redondante au-dessus des mêmes liens (voir recette simulateur admin).
+  Navigation (top_nav) : colonne Menu + 4 tuiles Rubriques.
+  ≥1025px : 4 boutons Rubriques visibles, colonne Menu masquée.
+  ≤1024px : uniquement « Menu ⌵ » (dépliant) — pas de tuiles sous l’en-tête ; tout est dans le panneau.
 */
 @media (min-width: 1025px) {
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
@@ -345,25 +344,36 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
   }
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
     > div[data-testid="column"]:first-child {
-    display: none !important;
-  }
-  /* Secours Streamlit : colonne Menu parfois non strictement première */
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:has([data-testid="stPopover"]) {
-    display: none !important;
-  }
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:not(:first-child) {
-    display: flex !important;
     width: 100% !important;
     max-width: 100% !important;
     flex: 1 1 auto !important;
   }
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:not(:first-child) button[kind="secondary"] {
+    > div[data-testid="column"]:not(:first-child) {
+    display: none !important;
+  }
+  div[data-testid="stPopoverBody"] button[kind="secondary"],
+  [data-testid="stPopoverContent"] button[kind="secondary"],
+  [data-baseweb="popover"] button[kind="secondary"] {
     width: 100% !important;
     min-height: 55px !important;
     font-size: 1rem !important;
+  }
+  /* Toolbar admin grille + toggle Aperçu mobile : hors-champ réel téléphone/tablette */
+  div[class*="st-key-lv_admin_desktop_shell"],
+  div[data-testid="stVerticalBlock"][class*="st-key-lv_admin_desktop_shell"] {
+    display: none !important;
+  }
+}
+
+/* Connexion étroite : texte à droite de la ligne logo */
+@media (max-width: 1024px) {
+  div[class*="st-key-lv_nav_header"]
+    div[data-testid="column"]:last-child [data-testid="stCaptionContainer"],
+  div[class*="st-key-lv_nav_header"]
+    div[data-testid="column"]:last-child {
+    align-items: flex-end !important;
+    text-align: right !important;
   }
 }
 
@@ -689,15 +699,68 @@ label[data-testid="stWidgetLabel"] {
     )
 
 
+# Pages Administration (sans « Quitter administration » ni toggle) — même ordre que la grille bureau.
+_ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
+    ("step3", "Visuels\nliturgiques", "admin_step3"),
+    ("thumbs", "Vignettes\nCloud", "admin_thumbs"),
+    ("vision", "Texte\nimages", "admin_vision"),
+    ("readings_cache", "Cache\nlectures", "admin_readings_cache"),
+    ("res", "Test\nressources", "admin_resources"),
+    ("cdc", "Cahier\ndes\ncharges", "admin_cdc"),
+    ("plan", "Plan\nconsolidé", "admin_plan"),
+    ("mobile_sim", "Simulateur\nmobile", "admin_mobile_sim"),
+)
+
+
+def _admin_do_logout_navigation() -> None:
+    """Sortie administration : même effet depuis la grille bureau ou depuis le Menu mobile."""
+    st.session_state.pop("admin_authenticated", None)
+    st.session_state.pop("admin_phone_preview", None)
+    st.session_state.route = "about"
+
+
+def render_admin_navigation_in_popover() -> None:
+    """Tuiles Administration dans le popover Menu (viewport ≤1024px : la grille bureau est masquée)."""
+    if not st.session_state.get("admin_authenticated"):
+        return
+    st.divider()
+    st.caption("Administration")
+    for slug, label, rte in _ADMIN_PAGES:
+        short = label.replace("\n", " ")
+        if st.button(short, key=f"adm_p_{slug}", use_container_width=True, type="secondary"):
+            st.session_state.route = rte
+            st.rerun()
+    if st.button("Quitter administration", key="adm_p_logout", use_container_width=True, type="secondary"):
+        _admin_do_logout_navigation()
+        st.rerun()
+
+
 def top_nav() -> str:
     if "route" not in st.session_state:
         st.session_state.route = "about"
 
     logo_path = Path("assets/branding/logo_mark.svg")
-    if logo_path.is_file():
-        _, mid, _ = st.columns([1, 1, 1])
-        with mid:
-            st.image(str(logo_path), width=56)
+    uid = str(st.session_state.get("auth_user_entity_id") or "").strip()
+    email = str(st.session_state.get("auth_email_lc") or "").strip()
+    is_admin = bool(st.session_state.get("admin_authenticated"))
+
+    with st.container(key="lv_nav_header"):
+        c_l, c_c, c_r = st.columns([1, 3, 1.45], gap="small")
+        with c_l:
+            st.empty()
+        with c_c:
+            if logo_path.is_file():
+                st.image(str(logo_path), width=56)
+        with c_r:
+            if uid:
+                st.caption(f"🟢 Connecté · {email or 'session active'}")
+                if st.button("Déconnexion", key="auth_logout_nav"):
+                    for k in ("auth_user_entity_id", "auth_email_lc"):
+                        if k in st.session_state:
+                            del st.session_state[k]
+                    st.session_state.pop("admin_authenticated", None)
+                    st.session_state.pop("admin_phone_preview", None)
+                    st.rerun()
 
     labels = [
         ("about", "JOPAI LumenVia :\nC’est quoi ?"),
@@ -713,25 +776,12 @@ def top_nav() -> str:
                 short = label.replace("\n", " ")
                 if st.button(short, key=f"nav_m_{route}", use_container_width=True, type="secondary"):
                     st.session_state.route = route
+            if is_admin:
+                render_admin_navigation_in_popover()
     for i, (route, label) in enumerate(labels):
         with cols[i + 1]:
             if st.button(label, key=f"nav_d_{route}", use_container_width=True, type="secondary"):
                 st.session_state.route = route
-
-    uid = str(st.session_state.get("auth_user_entity_id") or "").strip()
-    email = str(st.session_state.get("auth_email_lc") or "").strip()
-    if uid:
-        b1, b2 = st.columns([4, 1], gap="small")
-        with b1:
-            st.caption(f"🟢 Connecté · {email or 'session active'}")
-        with b2:
-            if st.button("Déconnexion", key="auth_logout_nav"):
-                for k in ("auth_user_entity_id", "auth_email_lc"):
-                    if k in st.session_state:
-                        del st.session_state[k]
-                st.session_state.pop("admin_authenticated", None)
-                st.session_state.pop("admin_phone_preview", None)
-                st.rerun()
 
     admin_nav_bar()
 
@@ -781,6 +831,21 @@ div[id*="adm_nav_logout"] button:hover,
 div[data-anchor-streamlit*="adm_nav_logout"] button:hover {
   filter: brightness(1.06);
 }
+
+div[class*="st-key-adm_p_logout"] button,
+div[class*="adm_p_logout"] button,
+div[id*="adm_p_logout"] button,
+div[data-anchor-streamlit*="adm_p_logout"] button {
+  background-color: #8b6914 !important;
+  color: #ffffff !important;
+  border-color: #654d0f !important;
+}
+div[class*="st-key-adm_p_logout"] button:hover,
+div[class*="adm_p_logout"] button:hover,
+div[id*="adm_p_logout"] button:hover,
+div[data-anchor-streamlit*="adm_p_logout"] button:hover {
+  filter: brightness(1.06);
+}
 </style>
 
         """,
@@ -804,60 +869,45 @@ def _admin_login_and_password() -> tuple[str, str]:
 
 
 def admin_nav_bar() -> None:
-    """Menu complémentaire réservé à la session administrateur (après connexion)."""
+    """Menu complémentaire réservé à la session administrateur (après connexion).
+
+    Visible sur **grand écran** uniquement (`lv_admin_desktop_shell`) ; en ≤1024px le même contenu vit
+    sous le Menu dépliant (`render_admin_navigation_in_popover`) et ce bloc est masqué par CSS.
+    """
     if not st.session_state.get("admin_authenticated"):
         return
-    st.markdown("---")
-    st.caption("Administration")
-    # 1) Deux rangées de 4 boutons (8 entrées) : plus lisible sur mobile/bureau
-    r1 = st.columns(4, gap="small")
-    with r1[0]:
-        if st.button("Visuels\nliturgiques", key="adm_nav_step3", use_container_width=True):
-            st.session_state.route = "admin_step3"
-            st.rerun()
-    with r1[1]:
-        if st.button("Vignettes\nCloud", key="adm_nav_thumbs", use_container_width=True):
-            st.session_state.route = "admin_thumbs"
-            st.rerun()
-    with r1[2]:
-        if st.button("Texte\nimages", key="adm_nav_vision", use_container_width=True):
-            st.session_state.route = "admin_vision"
-            st.rerun()
-    with r1[3]:
-        if st.button("Cache\nlectures", key="adm_nav_readings_cache", use_container_width=True):
-            st.session_state.route = "admin_readings_cache"
-            st.rerun()
-
-    r2 = st.columns(4, gap="small")
-    with r2[0]:
-        if st.button("Test\nressources", key="adm_nav_res", use_container_width=True):
-            st.session_state.route = "admin_resources"
-            st.rerun()
-    with r2[1]:
-        if st.button("Cahier\ndes\ncharges", key="adm_nav_cdc", use_container_width=True):
-            st.session_state.route = "admin_cdc"
-            st.rerun()
-    with r2[2]:
-        if st.button("Plan\nconsolidé", key="adm_nav_plan", use_container_width=True):
-            st.session_state.route = "admin_plan"
-            st.rerun()
-    with r2[3]:
-        if st.button("Quitter\nadministration", key="adm_nav_logout", use_container_width=True):
-            st.session_state.pop("admin_authenticated", None)
-            st.session_state.pop("admin_phone_preview", None)
-            st.session_state.route = "about"
-            st.rerun()
-
-    r3 = st.columns(4, gap="small")
-    with r3[0]:
-        if st.button("Simulateur\nmobile", key="adm_nav_mobile_sim", use_container_width=True):
-            st.session_state.route = "admin_mobile_sim"
-            st.rerun()
-    st.toggle(
-        "Aperçu mobile",
-        key="admin_phone_preview",
-        help="Réduit la zone principale comme sur un téléphone (largeur : page « Simulateur vision mobile »).",
-    )
+    with st.container(key="lv_admin_desktop_shell"):
+        st.markdown("---")
+        st.caption("Administration")
+        r1 = st.columns(4, gap="small")
+        for i in range(4):
+            slug, label, rte = _ADMIN_PAGES[i]
+            with r1[i]:
+                if st.button(label, key=f"adm_nav_{slug}", use_container_width=True, type="secondary"):
+                    st.session_state.route = rte
+                    st.rerun()
+        r2 = st.columns(4, gap="small")
+        for j in range(3):
+            slug, label, rte = _ADMIN_PAGES[4 + j]
+            with r2[j]:
+                if st.button(label, key=f"adm_nav_{slug}", use_container_width=True, type="secondary"):
+                    st.session_state.route = rte
+                    st.rerun()
+        with r2[3]:
+            if st.button("Quitter\nadministration", key="adm_nav_logout", use_container_width=True, type="secondary"):
+                _admin_do_logout_navigation()
+                st.rerun()
+        r3 = st.columns(4, gap="small")
+        slug_sim, lbl_sim, rte_sim = _ADMIN_PAGES[7]
+        with r3[0]:
+            if st.button(lbl_sim, key=f"adm_nav_{slug_sim}", use_container_width=True, type="secondary"):
+                st.session_state.route = rte_sim
+                st.rerun()
+        st.toggle(
+            "Aperçu mobile",
+            key="admin_phone_preview",
+            help="Réduit la zone principale comme sur un téléphone (largeur : page « Simulateur vision mobile »).",
+        )
 
 
 def _strip_accents(s: str) -> str:
@@ -4115,9 +4165,10 @@ def render_admin_plan_consolide() -> None:
 <dl class="lv-keylist">
   <dt>Trois points chirurgicaux UX mobile (référence verrouillée)</dt>
   <dd>
-    <strong>1 — Navigation.</strong> Largeur <strong>≥1025&nbsp;px&nbsp;</strong>: quatre boutons en ligne, popover masqué. Largeur <strong>≤1024&nbsp;px&nbsp;</strong>
-    (simulateur téléphone inclus)&nbsp;: popover <strong>«&nbsp;Menu&nbsp;»</strong> également masqué — seuls quatre boutons empilés, pour éviter une entrée
-    «&nbsp;Menu&nbsp;⌵&nbsp;» redondante au-dessus des mêmes liens.
+    <strong>1 — Navigation.</strong> <strong>≥1025&nbsp;px&nbsp;</strong>&nbsp;: quatre tuiles Rubriques en ligne, colonne Menu masquée. <strong>≤1024&nbsp;px&nbsp;</strong>&nbsp;: uniquement
+    le déclencheur <strong>«&nbsp;Menu&nbsp;»</strong> — rubriques + (si session admin) entrées Administration dans le panneau ; pas de tuiles dupliquées sous l’en-tête.
+    Connexion / déconnexion dans la colonne droite de <code>lv_nav_header</code>. Grille admin bureau + toggle «&nbsp;Aperçu mobile&nbsp;» sont masqués en ≤1024&nbsp;px
+    (<code>lv_admin_desktop_shell</code>), car redondants sur un vrai téléphone.
   </dd>
   <dd>
     <strong>2 — Clavier vs saisie / expander.</strong> Ajouter un <code>padding-bottom</code> substantiel au conteneur principal lorsqu’un champ
