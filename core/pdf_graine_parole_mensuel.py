@@ -16,6 +16,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus.doctemplate import BaseDocTemplate, PageTemplate as PdfPageTemplate, _doNothing
+from reportlab.platypus.frames import Frame
 
 from core.pdf_liturgy_cover import draw_jopai_footer_bar
 
@@ -157,8 +159,29 @@ def build_graine_parole_monthly_pdf_bytes(
         story.append(t)
 
     story.append(Spacer(1, 20))
-    # Footer marque (immuable) sur chaque page
-    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    # Pied en onPageEnd pour que le flux ne recouvre pas le bandeau + mention dev.
+    doc._calc()
+    frameT = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="normal")
+    doc.pageTemplates = []
+    doc.addPageTemplates(
+        [
+            PdfPageTemplate(
+                id="First",
+                frames=[frameT],
+                onPage=_doNothing,
+                onPageEnd=_footer,
+                pagesize=A4,
+            ),
+            PdfPageTemplate(
+                id="Later",
+                frames=[frameT],
+                onPage=_doNothing,
+                onPageEnd=_footer,
+                pagesize=A4,
+            ),
+        ]
+    )
+    BaseDocTemplate.build(doc, story)
     return buf.getvalue()
 
 

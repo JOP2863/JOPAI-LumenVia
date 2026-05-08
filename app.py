@@ -22,6 +22,7 @@ import streamlit.components.v1 as components
 from core.aelf import AelfClient
 from core.local_aelf_cache import load_aelf_snapshot, persist_aelf_snapshot
 from core.config import load_config
+from core.dev_notice import LUMENVIA_DEVELOPMENT_NOTICE
 from core.gemini_tts_api import GeminiTtsApiClient
 from core.gcp_clients import build_gcs_client, build_vision_image_annotator_client
 from core.audio_utils import normalize_audio_bytes, join_wav_bytes
@@ -29,10 +30,14 @@ from core.auth import hash_password, verify_password
 from core.vertex_gemini import VertexGeminiClient
 from core.sheets_db import (
     BASE_COLUMNS,
+    SHEETS_ROW_STATUS_ACTIVE,
+    SHEETS_ROW_STATUS_INACTIVE,
     append_immutable_row,
     append_immutable_rows_bulk,
     build_gspread_client,
+    compute_concat,
     fetch_records,
+    sheet_row_status_is_live,
     utc_now_iso,
     with_concat,
 )
@@ -178,7 +183,7 @@ def _inject_expander_footer_scroll() -> None:
 
   function footerReservePx() {
     try {
-      var f = doc.querySelector(".lv-footer-fixed");
+      var f = doc.querySelector(".lv-footer-stack") || doc.querySelector(".lv-footer-fixed");
       if (f && f.getBoundingClientRect)
         return Math.ceil(f.getBoundingClientRect().height) + 20;
     } catch (e) {}
@@ -434,8 +439,8 @@ header[data-testid="stHeader"] {
 }
 section[data-testid="stMain"] .block-container {
   padding-top: max(0.45rem, calc(0.2rem + env(safe-area-inset-top, 0px))) !important;
-  /* Footer fixe (immuable) */
-  padding-bottom: max(4.4rem, calc(3.4rem + env(safe-area-inset-bottom, 0px))) !important;
+  /* Footer fixe (immuable + bandeau dev) */
+  padding-bottom: max(6.6rem, calc(5.35rem + env(safe-area-inset-bottom, 0px))) !important;
 }
 /* Bureau / large fenêtre : marge haute un peu plus généreuse (logo + menu ne doivent pas toucher / être coupés par la chrome). */
 @media (min-width: 1025px) {
@@ -715,7 +720,7 @@ audio {
   border-top: none !important;
   padding: 1rem !important;
   /* Défilement : réserve sous le bloc quand footer fixe (complément au script `scrollIntoView`) */
-  scroll-margin-bottom: max(5.75rem, calc(4.5rem + env(safe-area-inset-bottom, 0px))) !important;
+  scroll-margin-bottom: max(7rem, calc(5.65rem + env(safe-area-inset-bottom, 0px))) !important;
 }
 
 /* Légendes : contraste suffisant sur fond crème (évite gris fantôme) */
@@ -844,30 +849,51 @@ label[data-testid="stWidgetLabel"] {
         unsafe_allow_html=True,
     )
 
-    # Footer immuable sur tous les écrans (y compris mobile)
+    # Pied de page : bandeau « développement » + marque JOPAI (fixes, tous les écrans).
+    dn = html_escape(LUMENVIA_DEVELOPMENT_NOTICE)
     st.markdown(
-        """
-<div class="lv-footer-fixed" role="contentinfo" aria-label="JOPAI footer">
-  <div class="lv-footer-inner">
-    <span class="lv-jopai-mark">
-      <span class="lv-jop">JOP</span><span class="lv-ai">AI</span><sup>©</sup>
-    </span>
-    <span class="lv-footer-sep">·</span>
-    <span class="lv-footer-txt">LumenVia - 2026 | TOUS DROITS RESERVES</span>
+        f"""
+<div class="lv-footer-stack">
+  <div class="lv-dev-notice-banner" role="note" aria-label="Mention développement">{dn}</div>
+  <div class="lv-footer-fixed" role="contentinfo" aria-label="Pied JOPAI">
+    <div class="lv-footer-inner">
+      <span class="lv-jopai-mark">
+        <span class="lv-jop">JOP</span><span class="lv-ai">AI</span><sup>©</sup>
+      </span>
+      <span class="lv-footer-sep">·</span>
+      <span class="lv-footer-txt">LumenVia - 2026 | TOUS DROITS RESERVES</span>
+    </div>
   </div>
 </div>
 <style>
-.lv-footer-fixed{
+.lv-footer-stack{{
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+}}
+/* Première carte = hors bas d’écran ; dernière = bandeau JOPAI collé au bord inférieur. */
+.lv-dev-notice-banner{{
+  background: #F2F2F2;
+  color: #7F8C8D;
+  font-size: 10px;
+  line-height: 1.38;
+  text-align: center;
+  padding: 5px 10px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+}}
+.lv-footer-fixed{{
+  position: relative;
   background: var(--jopai-petrole);
   color: #ffffff;
   border-top: 1px solid rgba(255,255,255,0.10);
-}
-.lv-footer-inner{
+}}
+.lv-footer-inner{{
   max-width: 920px;
   margin: 0 auto;
   padding: 0.65rem 0.9rem;
@@ -877,20 +903,21 @@ label[data-testid="stWidgetLabel"] {
   justify-content: center;
   font-family: 'Lora', serif;
   letter-spacing: 0.2px;
-}
-.lv-jopai-mark{
+}}
+.lv-jopai-mark{{
   color: var(--jopai-turquoise);
   font-size: 0.95rem;
-}
-.lv-jopai-mark .lv-jop{ font-weight: 700; }
-.lv-jopai-mark .lv-ai{ font-style: italic; font-weight: 500; }
-.lv-jopai-mark sup{ font-size: 0.65em; vertical-align: super; margin-left: 1px; }
-.lv-footer-sep{ opacity: 0.55; }
-.lv-footer-txt{ opacity: 0.92; font-size: 0.92rem; }
-@media (max-width: 520px){
-  .lv-footer-inner{ padding: 0.62rem 0.7rem; }
-  .lv-footer-txt{ font-size: 0.88rem; }
-}
+}}
+.lv-jopai-mark .lv-jop{{ font-weight: 700; }}
+.lv-jopai-mark .lv-ai{{ font-style: italic; font-weight: 500; }}
+.lv-jopai-mark sup{{ font-size: 0.65em; vertical-align: super; margin-left: 1px; }}
+.lv-footer-sep{{ opacity: 0.55; }}
+.lv-footer-txt{{ opacity: 0.92; font-size: 0.92rem; }}
+@media (max-width: 520px){{
+  .lv-footer-inner{{ padding: 0.62rem 0.7rem; }}
+  .lv-footer-txt{{ font-size: 0.88rem; }}
+  .lv-dev-notice-banner{{ font-size: 9.5px; padding: 4px 8px; }}
+}}
 </style>
         """.strip(),
         unsafe_allow_html=True,
@@ -1916,7 +1943,7 @@ def render_sunday() -> None:
                     for r in rc
                     if str(r.get("date") or "").strip() == date_str[:10]
                     and str(r.get("zone") or "").strip() == zone
-                    and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                    and sheet_row_status_is_live(r.get("status"))
                     and not str(r.get("error") or "").strip()
                 ]
                 if hits:
@@ -4151,7 +4178,7 @@ def render_admin_vision_text() -> None:
                         str(r.get("gcs_path") or "").strip()
                         for r in wl_rows
                         if str(r.get("gcs_path") or "").strip().startswith(f"Images/illustrations/{year}/")
-                        and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                        and sheet_row_status_is_live(r.get("status"))
                     }
                 except Exception:
                     whitelist = set()
@@ -5606,9 +5633,6 @@ def render_admin_test_resources() -> None:
                 def _norm(s: object) -> str:
                     return str(s or "").strip()
 
-                def _is_active(statut: object) -> bool:
-                    return _norm(statut).lower() in ("actif", "active", "ok", "1", "true")
-
                 # Calcule la prochaine version à partir de la table (pas seulement “latest”),
                 # car la table peut contenir plusieurs versions “Actif” à assainir.
                 key_norm = _norm(picked)
@@ -5646,7 +5670,7 @@ def render_admin_test_resources() -> None:
                         for i, r in enumerate(records):
                             if _norm(r.get("Clé_Prompt")) != key_norm:
                                 continue
-                            if not _is_active(r.get("Statut")):
+                            if not sheet_row_status_is_live(r.get("Statut")):
                                 continue
                             # Row number dans Sheets (header=1, records commencent à 2)
                             row_num = i + 2
@@ -5773,7 +5797,7 @@ def render_admin_readings_cache() -> None:
                 str(r.get("date") or "").strip()
                 for r in existing
                 if str(r.get("zone") or "").strip() == zone
-                and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                and sheet_row_status_is_live(r.get("status"))
                 and not str(r.get("error") or "").strip()
                 and str(r.get("date") or "").strip().startswith(str(year))
             }
@@ -6016,6 +6040,7 @@ def render_admin_emailing() -> None:
                     "language",
                     "subject",
                     "body",
+                    "active",  # colonne facultative sur la feuille ; pas utilisée pour filtrer le template (seul `status` compte).
                     "status_note",
                 ]
             ),
@@ -6023,27 +6048,32 @@ def render_admin_emailing() -> None:
     )
 
     template_key = "weekly_friday_lumenvia"
+    st.caption(
+        "**Templates e-mail :** seule la colonne **`status`** (**Actif** / **Inactif**) détermine quelle ligne est la version "
+        "courante (aperçu, enregistrement, envoi manuel, **et** choix du modèle côté campagne / scheduler). "
+        "La colonne **`active`** sur cette table n’est **pas** utilisée par l’app pour ce choix (elle peut rester pour du "
+        "pilotage manuel ou un usage futur lié au planning, mais si **`status`** est **Inactif**, la ligne est ignorée "
+        "**sans** lire **`active`**)."
+    )
     with st.expander("Paramètres du template (clé/canal/langue)", expanded=False):
         st.caption(f"Template : `{template_key}` (canal: email, langue: fr)")
 
-    from core.emailing import EmailTemplate, render_template, supported_tags, french_day_month_year
+    from core.emailing import (
+        EmailTemplate,
+        render_template,
+        supported_tags,
+        french_day_month_year,
+        pick_latest_live_email_template,
+        email_template_row_is_live,
+    )
 
     try:
-        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=4000)
+        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
     except Exception:
         rows = []
 
-    eff = [
-        r
-        for r in rows
-        if str(r.get("template_key") or "").strip() == template_key
-        and str(r.get("channel") or "").strip().lower() == "email"
-        and str(r.get("language") or "").strip().lower() in ("fr", "fr-fr", "france", "")
-        and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
-        and str(r.get("active") or "true").strip().lower() not in ("false", "0", "no", "non", "inactive")
-    ]
-    eff_sorted = sorted(eff, key=lambda r: str(r.get("created_at") or ""), reverse=True)
-    current = eff_sorted[0] if eff_sorted else {}
+    lang_fr = ("fr", "fr-fr", "france", "")
+    current = pick_latest_live_email_template(rows, template_key=template_key, channel="email", language_in=lang_fr) or {}
 
     default_subject = "🕯️ Votre halte LumenVia : Préparez la célébration du dimanche {{date_dimanche}}"
     default_body = ""
@@ -6167,53 +6197,92 @@ def render_admin_emailing() -> None:
         try:
             # Inactivation (historique) de la version précédente active (si elle existe)
             try:
-                rows2 = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=4000)
+                rows2 = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
             except Exception:
                 rows2 = []
-            prev_eff = [
-                r
-                for r in rows2
-                if str(r.get("template_key") or "").strip() == template_key
-                and str(r.get("channel") or "").strip().lower() == "email"
-                and str(r.get("language") or "").strip().lower() in ("fr", "fr-fr", "france", "")
-                and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
-                and str(r.get("active") or "true").strip().lower() not in ("false", "0", "no", "non", "inactive")
-            ]
-            prev_eff_sorted = sorted(prev_eff, key=lambda r: str(r.get("created_at") or ""), reverse=True)
-            prev = prev_eff_sorted[0] if prev_eff_sorted else None
-            if prev and (str(prev.get("subject") or "").strip() != subject.strip() or str(prev.get("body") or "").strip() != body.strip()):
+            prev = pick_latest_live_email_template(rows2, template_key=template_key, channel="email", language_in=lang_fr)
+            body_n = body.strip()
+            subj_n = subject.strip()
+
+            # Immuabilité : si le contenu n’a pas bougé, on n’écrit pas une nouvelle version.
+            unchanged = prev and str(prev.get("subject") or "").strip() == subj_n and str(prev.get("body") or "").strip() == body_n
+            if unchanged:
+                st.info("Aucune modification détectée (objet + corps inchangés) — pas de nouvelle ligne.")
+            else:
+                # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
+                # (comme MARPA pour Paramètres_IA : append seul laisse l’historique encore « Actif »).
+                from core.sheets_db import _resolve_table_name
+
+                sh_etpl = gs.open_by_key(cfg.gsheet_id)
+                ws_etpl = sh_etpl.worksheet(_resolve_table_name(sh=sh_etpl, table="email_templates"))
+                header_etpl = ws_etpl.row_values(1)
+                if not header_etpl:
+                    raise RuntimeError("Onglet templates e-mail sans en-tête — relance init_sheets_db ou vérifie l’alias ETPL.")
+
+                try:
+                    rec_etpl = ws_etpl.get_all_records(numericise_ignore=["all"])
+                except Exception:
+                    rec_etpl = []
+
+                def _tpl_row_lang_ok(lang_raw: object) -> bool:
+                    lg = str(lang_raw or "").strip().lower()
+                    return lg in lang_fr
+
+                col_status_etpl = header_etpl.index("status") + 1 if "status" in header_etpl else 0
+                col_concat_etpl = header_etpl.index("concat") + 1 if "concat" in header_etpl else 0
+                if not col_status_etpl:
+                    raise RuntimeError("Colonne `status` absente sur l’onglet templates e-mail.")
+
+                for ix, rr in enumerate(rec_etpl):
+                    if str(rr.get("template_key") or "").strip() != template_key:
+                        continue
+                    if str(rr.get("channel") or "").strip().lower() != "email":
+                        continue
+                    if not _tpl_row_lang_ok(rr.get("language")):
+                        continue
+                    if not email_template_row_is_live(rr):
+                        continue
+
+                    merged = dict(rr)
+                    merged["status"] = SHEETS_ROW_STATUS_INACTIVE
+                    row_num = ix + 2
+                    ws_etpl.update_cell(row_num, col_status_etpl, SHEETS_ROW_STATUS_INACTIVE)
+                    if col_concat_etpl:
+                        ws_etpl.update_cell(row_num, col_concat_etpl, compute_concat(merged, header=header_etpl))
+
+                # 2) Version suivante à partir de l’historique (toutes lignes série, pas seulement actives)
+                max_tpl_ver = 0
+                for r0 in rows2:
+                    if str(r0.get("template_key") or "").strip() != template_key:
+                        continue
+                    if str(r0.get("channel") or "").strip().lower() != "email":
+                        continue
+                    if not _tpl_row_lang_ok(r0.get("language")):
+                        continue
+                    vtxt = str(r0.get("version") or "").strip()
+                    if vtxt.isdigit():
+                        max_tpl_ver = max(max_tpl_ver, int(vtxt))
+                next_tpl_ver = int(max_tpl_ver + 1)
+
                 append_immutable_row(
                     gspread_client=gs,
                     spreadsheet_id=cfg.gsheet_id,
                     table="email_templates",
                     values_by_col={
-                        "entity_id": sha256(f"tpl|inactive|{template_key}|{prev.get('entity_id')}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                        "entity_id": sha256(f"tpl|{template_key}|{next_tpl_ver}|{subj_n}|{body_n}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
                         "template_key": template_key,
                         "channel": "email",
                         "language": "fr",
-                        "subject": str(prev.get("subject") or "").strip(),
-                        "body": str(prev.get("body") or "").strip(),
-                        "active": "false",
-                        "status_note": f"superseded_by_next ({str(prev.get('entity_id') or '')[:12]})",
+                        "subject": subj_n,
+                        "body": body_n,
+                        "version": next_tpl_ver,
+                        "status": SHEETS_ROW_STATUS_ACTIVE,
+                        "status_note": note.strip(),
                     },
+                    version=next_tpl_ver,
                 )
-            append_immutable_row(
-                gspread_client=gs,
-                spreadsheet_id=cfg.gsheet_id,
-                table="email_templates",
-                values_by_col={
-                    "entity_id": sha256(f"tpl|{template_key}|{subject}|{body}".encode("utf-8")).hexdigest()[:24],
-                    "template_key": template_key,
-                    "channel": "email",
-                    "language": "fr",
-                    "subject": subject.strip(),
-                    "body": body.strip(),
-                    "active": "true",
-                    "status_note": note.strip(),
-                },
-            )
-            st.success("Template enregistré.")
-            st.rerun()
+                st.success("Template enregistré.")
+                st.rerun()
         finally:
             ov.empty()
 
@@ -6288,6 +6357,21 @@ def render_admin_emailing() -> None:
         try:
             import traceback
 
+            try:
+                _tpl_mail_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
+            except Exception:
+                _tpl_mail_rows = []
+            _tpl_live_mail = pick_latest_live_email_template(
+                _tpl_mail_rows, template_key=template_key, channel="email", language_in=("fr", "fr-fr", "france", "")
+            )
+            if not _tpl_live_mail:
+                st.warning(
+                    "Aucune ligne avec **`status` = Actif** pour ce template (clé `weekly_friday_lumenvia`, e-mail, FR). "
+                    "L’envoi utilise le **texte du formulaire** ci-dessus en secours — corrige **`status`** sur l’onglet templates."
+                )
+            subject_rt = (str(_tpl_live_mail.get("subject") or "").strip() if _tpl_live_mail else "") or subject
+            body_rt = (str(_tpl_live_mail.get("body") or "").strip() if _tpl_live_mail else "") or body
+
             # recipients
             users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
             subs_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=6000)
@@ -6319,7 +6403,7 @@ def render_admin_emailing() -> None:
             recipients: list[tuple[str, dict]] = []
             if send_to_all:
                 for uid0, subr in latest_sub.items():
-                    if str(subr.get("status") or "").strip().lower() in ("inactive", "deleted"):
+                    if not sheet_row_status_is_live(subr.get("status")):
                         continue
                     if str(subr.get("opt_in") or "").strip().lower() not in ("true", "1", "oui", "yes"):
                         continue
@@ -6444,6 +6528,7 @@ def render_admin_emailing() -> None:
                 for p in paras:
                     out.append("<p>" + p.replace("\n", "<br>\n") + "</p>")
                 inner = ("\n".join(out) if out else "<p></p>")
+                dn_ml = html_escape(LUMENVIA_DEVELOPMENT_NOTICE)
                 return (
                     "<!doctype html>\n"
                     "<html><head><meta charset=\"utf-8\">"
@@ -6456,6 +6541,7 @@ def render_admin_emailing() -> None:
                     "</style>"
                     "</head><body>\n"
                     f"{inner}\n"
+                    f'<p style="color:#7F8C8D;font-size:10px;line-height:1.4;margin-top:18px;"><em>{dn_ml}</em></p>\n'
                     "</body></html>"
                 )
 
@@ -6505,85 +6591,229 @@ def render_admin_emailing() -> None:
                     # Évite d'afficher des URLs signées interminables en clair
                     if "X-Goog-Algorithm=" in ln or "X-Goog-Credential=" in ln or "X-Goog-Signature=" in ln:
                         continue
-                    if "{{affichage_de_l_illustration_de_la_semaine" in ln:
+                    if re.search(r"(?is)\{\{\s*affichage.*illustration", ln):
                         continue
                     filtered.append(ln)
                 if not filtered:
                     filtered = ["La fin de semaine approche : voici votre préparation dominicale."]
 
-                # Mise en forme: paragraphes + liste à puces pour les points clés
-                bullets: list[str] = []
-                paras: list[str] = []
-                for ln in filtered:
-                    if re.match(r"(?i)^(la synth[eè]se|l['’]exp[eé]rience|l['’]illustration)\b", ln) or ln.startswith(("-", "•")):
-                        bullets.append(ln.lstrip("-• ").strip())
-                    else:
-                        paras.append(ln)
+                def _is_list_unsubscribe_line(ln: str) -> bool:
+                    s = (ln or "").strip()
+                    if not s:
+                        return False
+                    if re.search(r"(?i)vous recevez cet e-mail", s):
+                        return True
+                    if re.search(r"(?i)préférences ou vous désabonner", s):
+                        return True
+                    if re.search(r"(?i)membre de la communauté\s+LumenVia", s) and re.search(
+                        r"(?i)cliquez\s+ici", s
+                    ):
+                        return True
+                    return False
 
-                intro_html = ""
-                for p in paras[:4]:
-                    pp = lumenvia_wrap_feedback_cta_with_link(
-                        (p or "").strip(),
-                        origin_for_href=origin0,
-                        recipient_email=email0 or None,
+                def _is_feedback_survey_bullet(ln: str) -> bool:
+                    """True uniquement pour la ligne CTA questionnaire (pas « L'Expérience Sonore »)."""
+                    if "👉" not in ln:
+                        return False
+                    if re.match(r"(?i)^l['’]exp[eé]rience\s+sonore\b", ln.strip()):
+                        return False
+                    return bool(
+                        re.search(r"(?i)donner\s+(mon\s+)?avis|avis\s+sur\s+cette\s+expérience", ln)
+                        or re.search(r"(?i)questionnaire", ln)
                     )
-                    pp = _linkify_html(pp)
-                    for kw in ("LumenVia", "JOPAI", "PDF", "Audio", "Illustration", "messe", "Parole"):
-                        pp = re.sub(rf"(?i)\b{re.escape(kw)}\b", lambda m: f"<strong>{m.group(0)}</strong>", pp)
-                    intro_html += f"<p>{pp}</p>"
-                if bullets:
-                    def _esc(s: str) -> str:
-                        return (
-                            (s or "")
-                            .replace("&", "&amp;")
-                            .replace("<", "&lt;")
-                            .replace(">", "&gt;")
-                            .replace('"', "&quot;")
-                        )
 
-                    def _bullet_html(b: str) -> str:
-                        bb0 = (b or "").strip()
-                        if "👉" in bb0:
-                            left, right = bb0.split("👉", 1)
-                            left = left.strip()
-                            right = right.strip()
-                            href = ""
-                            if url_pdf0 and re.search(r"(?i)synth[èe]se.*pdf|pdf", bb0):
-                                href = url_pdf0
-                            elif url_audio0 and re.search(r"(?i)audio|[ée]couter", bb0):
-                                href = url_audio0
-                            elif url_illu0 and re.search(r"(?i)image|illustration", bb0):
-                                href = url_illu0
-                            fb_url = lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None)
-                            if (
-                                not href
-                                and fb_url
-                                and re.search(r"(?i)donner\s+mon\s+avis\s+sur\s+cette\s+expérience", right)
-                            ):
-                                href = fb_url
-                            # Soft return: texte puis retour doux puis CTA
-                            if href:
+                legal_notice_line = ""
+
+                # Ordre du template : paragraphes et puces entrelacés (évite tout le prose puis toute la liste).
+                segments: list[tuple[str, str]] = []
+                for ln in filtered:
+                    if _is_list_unsubscribe_line(ln):
+                        legal_notice_line = ln.strip()
+                        continue
+                    raw = ln.strip()
+                    lead = raw.lstrip("-•").lstrip()
+                    if re.match(
+                        r"(?i)^(la synth[eè]se|l['’]exp[eé]rience\s+sonore|l['’]illustration)\b",
+                        lead,
+                    ) or raw.startswith(("-", "•")):
+                        segments.append(("li", lead))
+                        continue
+                    if _is_feedback_survey_bullet(raw):
+                        # Pas en <ul>/<li> : évite une puce • avant le CTA questionnaire (absente du template).
+                        segments.append(("cta", lead))
+                        continue
+                    segments.append(("p", raw))
+
+                _wrap_lo: int | None = None
+                _wrap_hi: int | None = None
+                for _wi, (_wk, _wch) in enumerate(segments):
+                    if _wk == "p" and re.match(
+                        r"(?i)^beau\s+chemin\s+vers\s+dimanche",
+                        (_wch or "").strip(),
+                    ):
+                        _wrap_lo = _wi
+                        break
+                if _wrap_lo is not None:
+                    _wrap_hi = _wrap_lo
+                    _wj = _wrap_lo + 1
+                    while _wj < len(segments):
+                        _nk, _ = segments[_wj]
+                        if _nk in ("p", "cta"):
+                            _wrap_hi = _wj
+                            _wj += 1
+                            continue
+                        break
+
+                def _esc(s: str) -> str:
+                    return (
+                        (s or "")
+                        .replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                        .replace('"', "&quot;")
+                    )
+
+                def _bullet_html(b: str) -> str:
+                    bb0 = (b or "").strip()
+                    if "👉" in bb0:
+                        left, right = bb0.split("👉", 1)
+                        left = left.strip()
+                        right = right.strip()
+                        href = ""
+                        if url_pdf0 and re.search(r"(?i)synth[èe]se.*pdf|pdf", bb0):
+                            href = url_pdf0
+                        elif url_audio0 and re.search(r"(?i)audio|[ée]couter", bb0):
+                            href = url_audio0
+                        elif url_illu0 and re.search(r"(?i)image|illustration", bb0):
+                            href = url_illu0
+                        fb_url = lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None)
+                        if not href and fb_url and re.search(
+                            r"(?i)donner\s+mon\s+avis|avis\s+sur\s+cette\s+expérience|donner\s+votre\s+avis",
+                            right,
+                        ):
+                            href = fb_url
+                        if href:
+                            if left:
                                 return (
                                     f"{_esc(left)}<br>"
                                     f"👉 <a href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\"><strong>{_esc(right)}</strong></a>"
                                 ).strip()
+                            return (
+                                f"👉 <a href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\"><strong>{_esc(right)}</strong></a>"
+                            ).strip()
+                        if left:
                             return f"{_esc(left)}<br>👉 <strong>{_esc(right)}</strong>".strip()
-                        # Sans CTA: texte simple, sans linkify (évite de casser des URLs)
-                        return _esc(bb0)
+                        return f"👉 <strong>{_esc(right)}</strong>".strip()
+                    return _esc(bb0)
 
-                    items = "".join([f"<li style=\"margin:8px 0;\">{_bullet_html(b)}</li>" for b in bullets[:8]])
-                    intro_html += f"<ul style=\"margin:10px 0 6px 18px;padding:0;\">{items}</ul>"
+                intro_html = ""
+                _ul_items: list[str] = []
+                _max_intro_paras = 40
+                _max_intro_li = 16
+                _max_intro_cta = 6
+                _p_used = 0
+                _li_used = 0
+                _cta_used = 0
 
-                # Citation mise en valeur (couleur compatible LumenVia)
+                def _flush_ul() -> None:
+                    nonlocal intro_html, _ul_items
+                    if not _ul_items:
+                        return
+                    blk = "".join([f"<li style=\"margin:8px 0;\">{x}</li>" for x in _ul_items])
+                    intro_html += f"<ul style=\"margin:10px 0 6px 18px;padding:0;\">{blk}</ul>"
+                    _ul_items = []
+
+                _wrap_div_open = (
+                    '<div style="border:1px solid #e7e5e4;border-radius:14px;padding:14px 16px;'
+                    'margin:14px 0;background:#fdfcfa;">'
+                )
+
+                for _seg_i, (kind, chunk) in enumerate(segments):
+                    if _wrap_lo is not None and _seg_i == _wrap_lo:
+                        intro_html += _wrap_div_open
+                    if kind == "p":
+                        _flush_ul()
+                        if _p_used < _max_intro_paras:
+                            pp = lumenvia_wrap_feedback_cta_with_link(
+                                (chunk or "").strip(),
+                                origin_for_href=origin0,
+                                recipient_email=email0 or None,
+                            )
+                            pp = _linkify_html(pp)
+                            for kw in ("LumenVia", "JOPAI", "PDF", "Audio", "Illustration", "messe", "Parole"):
+                                pp = re.sub(rf"(?i)\b{re.escape(kw)}\b", lambda m: f"<strong>{m.group(0)}</strong>", pp)
+                            _in_fb = (
+                                _wrap_lo is not None
+                                and _wrap_hi is not None
+                                and _wrap_lo <= _seg_i <= _wrap_hi
+                            )
+                            if _in_fb:
+                                _psty = (
+                                    "margin:0;"
+                                    if _seg_i == _wrap_hi
+                                    else "margin:0 0 10px 0;"
+                                )
+                                intro_html += f'<p style="{_psty}">{pp}</p>'
+                            else:
+                                intro_html += f"<p>{pp}</p>"
+                            _p_used += 1
+                    elif kind == "cta":
+                        _flush_ul()
+                        if _cta_used < _max_intro_cta:
+                            _cta_margin = (
+                                "10px 0 0 0"
+                                if (
+                                    _wrap_lo is not None
+                                    and _wrap_hi is not None
+                                    and _wrap_lo <= _seg_i <= _wrap_hi
+                                )
+                                else "8px 0 0 0"
+                            )
+                            intro_html += (
+                                f'<p style="margin:{_cta_margin};padding:0;">{_bullet_html(chunk)}</p>'
+                            )
+                            _cta_used += 1
+                    else:
+                        if _li_used < _max_intro_li:
+                            _ul_items.append(_bullet_html(chunk))
+                            _li_used += 1
+                    if _wrap_hi is not None and _seg_i == _wrap_hi:
+                        intro_html += "</div>"
+
+                _flush_ul()
+
+                prefs_link = (pref_url or optout0 or "").strip()
+
+                def _legal_subscription_notice_html(line: str, link: str) -> str:
+                    s = (line or "").strip()
+                    if not s:
+                        return ""
+                    esc = html_escape(s)
+                    if link:
+                        esc = re.sub(
+                            r"(?i)cliquez\s+ici\b",
+                            lambda m: (
+                                f'<a href="{link}" target="_blank" rel="noopener noreferrer" '
+                                'style="color:#0d9488;text-decoration:underline;">'
+                                f"{html_escape(m.group(0))}</a>"
+                            ),
+                            esc,
+                        )
+                    return (
+                        f"<p style=\"color:#64748b;font-size:12px;line-height:1.45;margin:16px 0 0 0;\">{esc}</p>"
+                    )
+
+                # Citation mise en valeur (seulement si absente du corps — le template Sheets peut déjà la porter)
                 quote_txt = (
                     "LumenVia n'est pas là pour remplacer la rencontre, mais pour la préparer, "
                     "afin que chaque messe devienne une rencontre plus consciente avec le Christ."
                 )
-                intro_html += (
-                    "<p style=\"margin-top:14px;padding:10px 12px;border-left:4px solid #0d9488;"
-                    "background:#f0fdfa;color:#0b2745;border-radius:10px;\">"
-                    f"<em>{quote_txt}</em></p>"
-                )
+                if not re.search(r"remplacer la rencontre", intro_html, flags=re.I):
+                    intro_html += (
+                        "<p style=\"margin-top:14px;padding:10px 12px;border-left:4px solid #0d9488;"
+                        "background:#f0fdfa;color:#0b2745;border-radius:10px;\">"
+                        f"<em>{html_escape(quote_txt)}</em></p>"
+                    )
 
                 cards = []
                 if url_pdf0:
@@ -6620,8 +6850,10 @@ def render_admin_emailing() -> None:
                     footer_links.append(
                         f'<a href="{origin0.rstrip("/")}/?route=about" target="_blank" rel="noopener noreferrer">Accéder à LumenVia</a>'
                     )
-                if pref_url:
-                    footer_links.append(f'<a href="{pref_url}" target="_blank" rel="noopener noreferrer">Gérer mes préférences</a>')
+                if prefs_link:
+                    footer_links.append(
+                        f'<a href="{prefs_link}" target="_blank" rel="noopener noreferrer">Gérer mes préférences</a>'
+                    )
                 footer_html = " • ".join(footer_links)
 
                 h2 = (nom_dim + (" — " + date_dim if date_dim else "")).strip(" —")
@@ -6652,12 +6884,18 @@ def render_admin_emailing() -> None:
                 if footer_html:
                     parts.append("<div class=\"hr\"></div>")
                     parts.append(f"<p style=\"color:#475569;font-size:12px;\">{footer_html}</p>")
+                if legal_notice_line:
+                    parts.append(_legal_subscription_notice_html(legal_notice_line, prefs_link))
                 parts.append("<div class=\"hr\"></div>")
                 parts.append(
                     "<div class=\"jopai\">"
                     "<span class=\"jop\">JOP</span><span class=\"ai\">AI</span><sup class=\"ai\">©</sup>"
                     "<span class=\"rest\"> LumenVia - 2026 | TOUS DROITS RESERVES</span>"
                     "</div>"
+                )
+                dn_email = html_escape(LUMENVIA_DEVELOPMENT_NOTICE)
+                parts.append(
+                    f"<p style=\"color:#7F8C8D;font-size:10px;line-height:1.4;margin:14px 0 0 0;\"><em>{dn_email}</em></p>"
                 )
                 parts.append("</div></body></html>")
                 return "".join(parts)
@@ -6707,7 +6945,7 @@ def render_admin_emailing() -> None:
                 if values2.get("origin") and to_email:
                     enc = quote_plus(to_email) if quote_plus else to_email
                     values2["optout_url"] = values2["origin"].rstrip("/") + "/?route=account&email=" + enc
-                rendered2 = render_template(EmailTemplate(subject=subject, body=body), values=values2)
+                rendered2 = render_template(EmailTemplate(subject=subject_rt, body=body_rt), values=values2)
                 # Placeholder "docx" (non-tag) : illustration
                 rendered2 = EmailTemplate(
                     subject=rendered2.subject,
@@ -6717,9 +6955,28 @@ def render_admin_emailing() -> None:
                         as_html=False,
                     ),
                 )
-                # Nettoyage des artefacts du template (souvent issus d’un copier/coller mail)
+                # Nettoyage des artefacts du template (copier/coller mail) : on ne retire « Objet : … »
+                # que si cette ligne redit essentiellement l’objet réel (sinon on garde variantes / mentions de test).
                 body_clean = (rendered2.body or "").replace("\r\n", "\n").strip()
-                body_clean = re.sub(r"(?im)^\s*Objet\s*:\s*.*\n+", "", body_clean)
+
+                def _maybe_strip_objet_preamble(*, body: str, subject: str) -> str:
+                    b = body
+                    m = re.match(r"(?im)^\s*Objet\s*:\s*(.+?)\s*\n+", b)
+                    if not m:
+                        return b
+                    obj_line = str(m.group(1) or "").strip()
+                    subj = str(subject or "").strip()
+
+                    def _squash(s: str) -> str:
+                        return re.sub(r"\s+", " ", s).replace("—", "-").strip().lower()
+
+                    if _squash(obj_line) == _squash(subj) or (
+                        subj and _squash(subj) in _squash(obj_line) and len(_squash(obj_line)) - len(_squash(subj)) <= 2
+                    ):
+                        return b[m.end() :].lstrip()
+                    return b
+
+                body_clean = _maybe_strip_objet_preamble(body=body_clean, subject=rendered2.subject)
                 body_clean = re.sub(r"(?im)^\s*Corps du message\s*:\s*\n*", "", body_clean)
                 rendered2 = EmailTemplate(subject=rendered2.subject, body=body_clean.strip())
 
@@ -6742,11 +6999,14 @@ def render_admin_emailing() -> None:
                             )
                         else:
                             html2 = _body_to_html(html_src) if send_email_as_html else None
+                        _notice_txt_mail = rendered2.body.strip()
+                        _notice_txt_mail = (_notice_txt_mail + "\n\n—\n") if _notice_txt_mail else ""
+                        _notice_txt_mail += LUMENVIA_DEVELOPMENT_NOTICE
                         send_smtp_email(
                             cfg=smtp_cfg,
                             to_email=to_email,
                             subject=rendered2.subject,
-                            body_text=rendered2.body,
+                            body_text=_notice_txt_mail,
                             body_html=html2,
                             html_only=bool(send_email_html_only and send_email_as_html),
                         )
@@ -6959,6 +7219,8 @@ def lumenvia_manual_broadcast_users(
     if send_to_all:
         ordered: list[dict] = []
         for uid0, subr in latest_sub.items():
+            if not sheet_row_status_is_live(subr.get("status")):
+                continue
             if str(subr.get("opt_in") or "").strip().lower() not in ("true", "1", "oui", "yes"):
                 continue
             if str(subr.get("active") or "").strip().lower() not in ("true", "1", "oui", "yes", "active"):
@@ -7082,6 +7344,8 @@ par identifiant de campagne.
             ),
         ),
     )
+
+    from core.emailing import pick_latest_live_email_template
 
     # Seed audiences si table vide
     try:
@@ -7382,7 +7646,7 @@ par identifiant de campagne.
             send_sms = st.checkbox("Envoyer SMS", value=str(camp.get("send_sms") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_send_sms")
 
     with st.expander("Audience (qui reçoit ?)", expanded=False):
-        aud_active = [r for r in aud_rows if str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")]
+        aud_active = [r for r in aud_rows if sheet_row_status_is_live(r.get("status"))]
         aud_latest: dict[str, dict] = {}
         for r in aud_active:
             k = str(r.get("audience_key") or "").strip()
@@ -7478,7 +7742,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
         st.markdown("**Templates (formats)**")
         # Templates e-mail: sélection parmi les clés existantes
         try:
-            tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=6000)
+            tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
         except Exception:
             tpl_rows = []
         email_keys = sorted({str(r.get("template_key") or "").strip() for r in tpl_rows if str(r.get("channel") or "").strip().lower() == "email" and str(r.get("template_key") or "").strip()})
@@ -7655,18 +7919,16 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 users_rows=users_rows, subs_rows=subs_rows, send_to_all=send_to_all
             )
 
-            # template actif
-            tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=4000)
-            eff = [
-                r
-                for r in tpl_rows
-                if str(r.get("template_key") or "").strip() == email_tpl_key
-                and str(r.get("channel") or "").strip().lower() == "email"
-                and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
-                and str(r.get("active") or "true").strip().lower() not in ("false", "0", "no", "non", "inactive")
-            ]
-            eff.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
-            tpl = eff[0] if eff else {}
+            # template actif — même filtres vivants/langue FR que la page Emailing
+            tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
+
+            tpl0 = pick_latest_live_email_template(
+                tpl_rows,
+                template_key=email_tpl_key,
+                channel="email",
+                language_in=("fr", "fr-fr", "france", ""),
+            )
+            tpl = tpl0 if tpl0 is not None else {}
             subj = str(tpl.get("subject") or "").strip()
             body = str(tpl.get("body") or "").strip()
 
@@ -7714,6 +7976,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
             )
 
             from core.emailing import EmailTemplate, render_template, french_day_month_year
+
             vals_base = {
                 "origin": origin,
                 "date_dimanche": french_day_month_year(sunday),
@@ -7737,7 +8000,10 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 if do_email and em and smtp_cfg.host and smtp_cfg.from_email:
                     try:
                         html2 = ""  # le gabarit est généré dans render_admin_emailing; ici simple fallback texte
-                        send_smtp_email(cfg=smtp_cfg, to_email=em, subject=rendered.subject, body_text=rendered.body, body_html=html2 or None)
+                        bt = rendered.body.strip()
+                        bt = (bt + "\n\n—\n") if bt else ""
+                        bt += LUMENVIA_DEVELOPMENT_NOTICE
+                        send_smtp_email(cfg=smtp_cfg, to_email=em, subject=rendered.subject, body_text=bt, body_html=html2 or None)
                         ok0 += 1
                     except Exception:
                         err0 += 1

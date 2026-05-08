@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Iterable
 
+from core.sheets_db import sheet_row_status_is_live
+
 
 @dataclass(frozen=True)
 class ParamIaRow:
@@ -38,7 +40,7 @@ def _parse_date_effet(v: object) -> date | None:
 
 
 def _is_active(statut: str) -> bool:
-    return _norm(statut).lower() in ("actif", "active", "ok", "1", "true")
+    return sheet_row_status_is_live(statut)
 
 
 def pick_effective_templates(

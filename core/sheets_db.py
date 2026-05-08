@@ -62,6 +62,61 @@ BASE_COLUMNS = [
     "created_at",
 ]
 
+# Valeurs affichées dans les onglets Sheets (alignement produit)
+SHEETS_ROW_STATUS_ACTIVE = "Actif"
+SHEETS_ROW_STATUS_INACTIVE = "Inactif"
+
+_SHEETS_STATUS_INACTIVE_ALIASES: frozenset[str] = frozenset(
+    {
+        "inactif",
+        "inactive",
+        "deleted",
+        "supprimé",
+        "supprime",
+        "obsolete",
+        "obsolète",
+        "archived",
+        "archivé",
+        "archive",
+    }
+)
+
+
+def normalize_row_status_for_write(raw: object, *, default: str = SHEETS_ROW_STATUS_ACTIVE) -> str:
+    """
+    Canonicalise une valeur de colonne ``status`` (BASE_COLUMNS) avant écriture : **Actif** ou **Inactif**.
+    Accepte encore les anciennes formes (`active`, `inactive`, vide, etc.).
+    """
+
+    def _nz(s: object) -> str:
+        return str(s or "").strip().lower()
+
+    s = _nz(raw)
+    if not s:
+        return default
+    if s.startswith("inactif") or s.startswith("inactive"):
+        return SHEETS_ROW_STATUS_INACTIVE
+    if s in _SHEETS_STATUS_INACTIVE_ALIASES:
+        return SHEETS_ROW_STATUS_INACTIVE
+    if s in ("actif", "active", "true", "1", "oui", "yes", "enabled", "on", "ok"):
+        return SHEETS_ROW_STATUS_ACTIVE
+    # Valeur inhabituelle : on conserve **Actif** par défaut (moins cassant pour des typos légers)
+    return SHEETS_ROW_STATUS_ACTIVE
+
+
+def sheet_row_status_is_live(raw: object) -> bool:
+    """
+    Une ligne Sheets est utilisée tant que ``status`` (ou colonne équivalente **Statut**)
+    n’indique pas inactif / supprimé. Vide = actif (lignes historiques avant ``Actif``/``Inactif``).
+    """
+
+    s = str(raw or "").strip().lower()
+    if not s:
+        return True
+    if s.startswith("inactif") or s.startswith("inactive"):
+        return False
+    return s not in _SHEETS_STATUS_INACTIVE_ALIASES and s not in ("false", "0", "no", "non", "off")
+
 
 def with_concat(columns: list[str]) -> list[str]:
     # Contrainte utilisateur: une colonne concat qui concatène tous les champs d'avant.
@@ -133,7 +188,7 @@ def default_tables() -> list[TableSpec]:
                     "language",
                     "subject",
                     "body",
-                    "active",
+                    "active",  # colonne facultative ; le choix de version template côté app repose uniquement sur `status`
                     "status_note",
                 ]
             ),
@@ -434,16 +489,20 @@ def _ensure_header(ws: gspread.Worksheet, header: list[str]) -> None:
     ws.update([header], "A1")
 
 
-def make_row(values_by_col: Mapping[str, Any], *, status: str = "active", version: int = 1) -> dict[str, Any]:
+def make_row(values_by_col: Mapping[str, Any], *, status: str = SHEETS_ROW_STATUS_ACTIVE, version: int = 1) -> dict[str, Any]:
     row_id = str(uuid4())
     entity_id = str(values_by_col.get("entity_id") or uuid4())
     created_at = utc_now_iso()
+
+    raw_stat = values_by_col.get("status")
+    eff_status = status if raw_stat is None or str(raw_stat).strip() == "" else raw_stat
+    status_default = normalize_row_status_for_write(status)
 
     row: dict[str, Any] = {
         "row_id": row_id,
         "entity_id": entity_id,
         "version": int(values_by_col.get("version") or version),
-        "status": str(values_by_col.get("status") or status),
+        "status": normalize_row_status_for_write(eff_status, default=status_default),
         "created_at": str(values_by_col.get("created_at") or created_at),
     }
     for k, v in values_by_col.items():
@@ -473,7 +532,7 @@ def append_immutable_row(
     spreadsheet_id: str,
     table: str,
     values_by_col: Mapping[str, Any],
-    status: str = "active",
+    status: str = SHEETS_ROW_STATUS_ACTIVE,
     version: int = 1,
 ) -> dict[str, Any]:
     sh = gspread_client.open_by_key(spreadsheet_id)
@@ -523,7 +582,7 @@ def append_immutable_rows_bulk(
     spreadsheet_id: str,
     table: str,
     values_by_col_list: list[Mapping[str, Any]],
-    status: str = "active",
+    status: str = SHEETS_ROW_STATUS_ACTIVE,
     version: int = 1,
     chunk_size: int = 120,
 ) -> int:
@@ -564,7 +623,10 @@ def fetch_records(
     # Important: preserve phone numbers like "+336..." and other identifiers as strings.
     # gspread may "numericise" values (cast to int/float) which would drop leading "+" / zeros.
     records = ws.get_all_records(numericise_ignore=["all"])
-    if limit and len(records) > limit:
+    # limit<=0 ou None : conserve tout l’onglet (important pour tables append-only anciennes lignes en tête).
+    if limit is None or limit <= 0:
+        return records
+    if len(records) > limit:
         return records[-limit:]
     return records
 

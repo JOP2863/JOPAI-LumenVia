@@ -21,6 +21,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.platypus import Image as RLImage
 from reportlab.platypus import KeepInFrame, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus.doctemplate import BaseDocTemplate, PageTemplate as PdfPageTemplate, _doNothing
+from reportlab.platypus.frames import Frame
 
 from core.pdf_graine_parole_mensuel import strip_light_markdown_to_plain
 
@@ -29,6 +31,7 @@ from core.pdf_liturgy_cover import build_liturgy_cover_pdf_bytes, draw_jopai_foo
 
 
 def _footer_every_page(canvas: object, doc: object) -> None:
+    # Doit être appelé après le corps (ex. PageTemplate.onPageEnd) : en onPage, le flux recouvre le pied.
     # Liseré (couleur liturgique si fournie via doc)
     try:
         canvas.saveState()
@@ -212,8 +215,6 @@ def build_liturgy_body_pdf_bytes(
         rightMargin=17 * mm,
         topMargin=12 * mm,
         bottomMargin=16 * mm,
-        onFirstPage=_footer_every_page,
-        onLaterPages=_footer_every_page,
     )
     # Hack simple : stocke l’accent sur doc pour le callback footer.
     try:
@@ -555,9 +556,29 @@ def build_liturgy_body_pdf_bytes(
             # On ignore : le PDF reste générable même si l’image est corrompue.
             story.append(Paragraph("<i>Quatrième de couverture indisponible.</i>", body))
 
-    # IMPORTANT : sur SimpleDocTemplate, on passe onFirstPage/onLaterPages à build()
-    # (sinon le footer n'est pas appliqué sur les pages du corps).
-    doc.build(story, onFirstPage=_footer_every_page, onLaterPages=_footer_every_page)
+    # Footer + mention dev en onPageEnd : si on les met en onPage, ReportLab dessine le flux par-dessus.
+    doc._calc()
+    frameT = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="normal")
+    doc.pageTemplates = []
+    doc.addPageTemplates(
+        [
+            PdfPageTemplate(
+                id="First",
+                frames=[frameT],
+                onPage=_doNothing,
+                onPageEnd=_footer_every_page,
+                pagesize=A4,
+            ),
+            PdfPageTemplate(
+                id="Later",
+                frames=[frameT],
+                onPage=_doNothing,
+                onPageEnd=_footer_every_page,
+                pagesize=A4,
+            ),
+        ]
+    )
+    BaseDocTemplate.build(doc, story)
     return buf.getvalue()
 
 

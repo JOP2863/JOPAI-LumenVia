@@ -103,7 +103,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
             continue
         if acr in existing and full not in existing:
             # L'onglet acronyme existe déjà, on documente seulement.
-            ws_alias.append_row([str(next_id), "active", "1", full, acr, desc.get(full, "")], value_input_option="RAW")
+            ws_alias.append_row([str(next_id), "Actif", "1", full, acr, desc.get(full, "")], value_input_option="RAW")
             next_id += 1
             continue
         if full in existing:
@@ -112,7 +112,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
                 existing[acr] = existing.pop(full)
             except Exception:
                 pass
-        ws_alias.append_row([str(next_id), "active", "1", full, acr, desc.get(full, "")], value_input_option="RAW")
+        ws_alias.append_row([str(next_id), "Actif", "1", full, acr, desc.get(full, "")], value_input_option="RAW")
         next_id += 1
 
     # Nettoyage contrôlé : réécrit AliasTables sans doublons et avec descriptions.
@@ -139,7 +139,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
         cleaned.append(
             [
                 str(i),
-                "active",
+                "Actif",
                 "1",
                 full,
                 acr,

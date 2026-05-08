@@ -16,10 +16,45 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+from core.dev_notice import LUMENVIA_DEVELOPMENT_NOTICE
+
 # Footer marque JOPAI© — charte : JOP (gras) + AI (italique) + © (exposant)
 _JOPAI_PETROLE = colors.HexColor("#0b2745")
 _JOPAI_TURQUOISE = colors.HexColor("#0d9488")
 _JOPAI_FOOTER_TEXT_REST = " LumenVia - 2026 | TOUS DROITS RESERVES"
+_DEV_NOTICE_GRAY = colors.HexColor("#7F8C8D")
+
+
+def draw_lumenvia_pdf_dev_notice(c: canvas.Canvas, page_width: float, page_height: float) -> None:
+    """Mention développement : italique ~8 pt, au-dessus du bandeau marque, alignée à droite (chaque page)."""
+
+    hbar = 9.0 * mm
+    pad_r = 5 * mm
+    txt = str(LUMENVIA_DEVELOPMENT_NOTICE or "").strip()
+    if not txt:
+        return
+    c.saveState()
+    c.setFillColor(_DEV_NOTICE_GRAY)
+    c.setFont("Helvetica-Oblique", 8)
+    baseline = hbar + 1 * mm
+    max_w = float(page_width) - 2 * pad_r
+    if c.stringWidth(txt, "Helvetica-Oblique", 8) <= max_w:
+        c.drawRightString(page_width - pad_r, baseline, txt)
+    else:
+        # Retour automatique très simple (~2 lignes max sur A4).
+        mid = txt.find(" — ")
+        if mid > 8:
+            left, right = txt[:mid].strip(), txt[mid + 3 :].strip()
+            c.drawRightString(page_width - pad_r, baseline + 9, left)
+            c.drawRightString(page_width - pad_r, baseline, right)
+        else:
+            half = len(txt) // 2
+            cut = txt.rfind(" ", 8, max(len(txt) - 8, half))
+            if cut <= 0:
+                cut = half
+            c.drawRightString(page_width - pad_r, baseline + 9, txt[:cut].strip())
+            c.drawRightString(page_width - pad_r, baseline, txt[cut:].strip())
+    c.restoreState()
 
 
 def draw_jopai_footer_bar(c: canvas.Canvas, page_width: float, page_height: float) -> None:
@@ -54,6 +89,7 @@ def draw_jopai_footer_bar(c: canvas.Canvas, page_width: float, page_height: floa
     c.setFont("Helvetica-Oblique", 7.2)
     c.drawString(x0 + w_jop + w_ai + w_copy, base_y, rest)
     c.restoreState()
+    draw_lumenvia_pdf_dev_notice(c, page_width, page_height)
 
 
 def build_liturgy_cover_pdf_bytes(

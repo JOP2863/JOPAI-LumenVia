@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Iterable
 
+from core.sheets_db import sheet_row_status_is_live
+
 
 @dataclass(frozen=True)
 class PromptTemplate:
@@ -46,7 +48,7 @@ def pick_latest_active_by_key(rows: Iterable[dict[str, Any]]) -> dict[str, Promp
         key = _norm_key(r.get("template_key"))
         if not key:
             continue
-        if not _to_bool(r.get("active", True)) or str(r.get("status") or "").strip().lower() not in ("", "active"):
+        if not _to_bool(r.get("active", True)) or not sheet_row_status_is_live(r.get("status")):
             continue
 
         tpl = PromptTemplate(

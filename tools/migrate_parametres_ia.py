@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from core.config import load_config_from_secrets_toml
-from core.sheets_db import build_gspread_client
+from core.sheets_db import build_gspread_client, sheet_row_status_is_live
 
 
 PARAMS_SHEET = "Paramètres_IA"
@@ -92,7 +92,7 @@ def _norm(s: object) -> str:
 
 
 def _is_active(statut: object) -> bool:
-    return _norm(statut).lower() in ("actif", "active", "ok", "1", "true")
+    return sheet_row_status_is_live(statut)
 
 
 def _existing_active_rows(ws) -> dict[str, list[dict[str, object]]]:
