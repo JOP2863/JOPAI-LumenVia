@@ -15,6 +15,10 @@ Pour chaque table:
 - Colonne obligatoire: `concat` = concaténation de toutes les colonnes précédentes (optimisation recherche)
 - Aucun “update destructeur”: tout changement = **nouvelle ligne** (nouvelle version, `status` adapté).
 
+### Sheets — AliasTables et noms d’onglets (**obligatoire** pour chaque nouvelle table)
+- Toute **nouvelle table** doit avoir une entrée dans **`AliasTables`**: nom logique lisible (« Nom complet table ») ↔ **acronyme** sur **exactement 3 ou 4 caractères** (pas plus — jamais d’onglet au nom long type mot entier dans le fichier).
+- Le dépôt doit rester synchronisé: mapping dans `tools/init_sheets_db.py` (`_suggest_aliases`) et `TableSpec` / code qui utilisent le **nom logique** ; `core/sheets_db.py` résout vers l’onglet physique via `AliasTables`.
+
 ## Secrets
 - Ne jamais commiter `.streamlit/secrets.toml`.
 - Toujours charger via `st.secrets` en app, ou via lecture toml outillée en scripts.
@@ -29,6 +33,12 @@ Pour chaque table:
 Respecter la charte CSS liturgique fournie dans le cahier des charges (or, crème, typo serif, accent par saison).
 
 Assets marque : répertoire `assets/branding/` (`logo_mark.svg`, optionnel `favicon.png` pour `page_icon`).
+
+## Identité de marque — footer JOPAI© (immuable)
+- Le footer doit être **immuable** sur tous les écrans, y compris en version mobile.
+- Formatage **obligatoire** : **JOP** *(gras)* + **AI** *(italique)* + **©** *(exposant)* → **JOPAI©**.
+- Couleurs de référence : Turquoise `#0d9488` et Bleu Pétrole `#0b2745`.
+- Le footer PDF doit être **strictement identique** (mêmes couleurs et même marque JOPAI©) au footer de l’app.
 
 ## UX — traitements serveur (overlay)
 - Toute action utilisateur qui déclenche un **traitement serveur long** (Sheets, GCS, Vertex/Gemini, préchargement lourd) doit afficher un **calque plein écran** via `loading_overlay()` dans `app.py` (style glassmorphism, message clair du type « LumenVia … »), puis **`empty()` dans un `finally`** pour le retirer.

@@ -17,6 +17,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from core.pdf_liturgy_cover import draw_jopai_footer_bar
+
 
 _GOLD = colors.HexColor("#D4AF37")
 _CREAM = colors.HexColor("#FDFBF7")
@@ -92,14 +94,13 @@ def build_graine_parole_monthly_pdf_bytes(
         textColor=_TEXT,
         alignment=TA_JUSTIFY,
     )
-    foot_style = ParagraphStyle(
-        name="LVFoot",
-        parent=styles["Normal"],
-        fontName="Helvetica-Oblique",
-        fontSize=8,
-        textColor=_TEXT,
-        alignment=TA_CENTER,
-    )
+    def _footer(canvas, doc) -> None:
+        try:
+            canvas.saveState()
+            draw_jopai_footer_bar(canvas, A4[0], A4[1])
+            canvas.restoreState()
+        except Exception:
+            pass
 
     story: list = []
     story.append(Paragraph("Graine de Parole", title_style))
@@ -156,9 +157,8 @@ def build_graine_parole_monthly_pdf_bytes(
         story.append(t)
 
     story.append(Spacer(1, 20))
-    story.append(Paragraph(xml_escape(footer), foot_style))
-
-    doc.build(story)
+    # Footer marque (immuable) sur chaque page
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buf.getvalue()
 
 

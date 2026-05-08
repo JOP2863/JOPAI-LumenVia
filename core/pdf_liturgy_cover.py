@@ -10,30 +10,49 @@ from __future__ import annotations
 
 from io import BytesIO
 
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
-# Aligné sur Memoria (`memoria_core/services/pdf_album_service.py`) — bandeau pied de page PDF marque.
-_JOPAI_FOOTER_BG = (12 / 255.0, 74 / 255.0, 94 / 255.0)
-JOPAI_PRODUCTION_FOOTER_LINE = "JOP AI  PRODUCTION   2026 | TOUS DROITS RESERVES"
-JOPAI_PRODUCTION_FOOTER_LEGAL = (
-    "Usage non commercial – Droits de reproduction réservés à l'auteur. © 2026 JOP Production."
-)
+# Footer marque JOPAI© — charte : JOP (gras) + AI (italique) + © (exposant)
+_JOPAI_PETROLE = colors.HexColor("#0b2745")
+_JOPAI_TURQUOISE = colors.HexColor("#0d9488")
+_JOPAI_FOOTER_TEXT_REST = " LumenVia - 2026 | TOUS DROITS RESERVES"
 
 
-def draw_jopai_production_footer_bar(c: canvas.Canvas, page_width: float, page_height: float) -> None:
-    """Bandeau bas pleine largeur (pétrole) + texte blanc — marque + mention légale."""
+def draw_jopai_footer_bar(c: canvas.Canvas, page_width: float, page_height: float) -> None:
+    """Bandeau bas pleine largeur + texte marque immuable."""
     hbar = 9.0 * mm
     c.saveState()
-    c.setFillColorRGB(*_JOPAI_FOOTER_BG)
+    c.setFillColor(_JOPAI_PETROLE)
     c.rect(0, 0, page_width, hbar, fill=1, stroke=0)
-    c.setFillColorRGB(1, 1, 1)
-    c.setFont("Helvetica-Oblique", 5.0)
-    c.drawCentredString(page_width / 2, 1.15 * mm, JOPAI_PRODUCTION_FOOTER_LEGAL)
-    c.setFont("Helvetica-Oblique", 6.5)
-    c.drawCentredString(page_width / 2, 5.0 * mm, JOPAI_PRODUCTION_FOOTER_LINE)
+
+    # Texte : JOP (bold) + AI (italic) + © (superscript) + reste (blanc)
+    base_y = 3.2 * mm
+    jop = "JOP"
+    ai = "AI"
+    copy = "©"
+    rest = _JOPAI_FOOTER_TEXT_REST
+    w_jop = c.stringWidth(jop, "Helvetica-Bold", 7.8)
+    w_ai = c.stringWidth(ai, "Helvetica-Oblique", 7.8)
+    w_copy = c.stringWidth(copy, "Helvetica", 5.6)
+    w_rest = c.stringWidth(rest, "Helvetica-Oblique", 7.2)
+    total_w = w_jop + w_ai + w_copy + w_rest
+    x0 = (page_width - total_w) / 2
+
+    c.setFillColor(_JOPAI_TURQUOISE)
+    c.setFont("Helvetica-Bold", 7.8)
+    c.drawString(x0, base_y, jop)
+    c.setFont("Helvetica-Oblique", 7.8)
+    c.drawString(x0 + w_jop, base_y, ai)
+    c.setFont("Helvetica", 5.6)
+    c.drawString(x0 + w_jop + w_ai, base_y + 1.4, copy)
+
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Oblique", 7.2)
+    c.drawString(x0 + w_jop + w_ai + w_copy, base_y, rest)
     c.restoreState()
 
 
@@ -44,13 +63,14 @@ def build_liturgy_cover_pdf_bytes(
     date_line: str,
     meta_line: str | None = None,
     audio_listen_url: str | None = None,
+    accent_hex: str | None = None,
     footer: str | None = None,
 ) -> bytes:
     """
     Retourne un PDF d’une page A4 (couverture).
 
     - ``image_bytes`` : PNG/JPEG/WebP lisible par ReportLab (``ImageReader``).
-    - ``week_title`` : ex. « Semaine 12 · Temps ordinaire ».
+    - ``week_title`` : ex. « 14ème Dimanche du Temps Ordinaire\n(semaine II du Psautier) ».
     - ``date_line`` : ex. « Dimanche 23 mars 2026 ».
     - ``footer`` : ignoré (conservé pour compatibilité) ; le pied de page est toujours la marque **JOP AI Production**.
     """
@@ -65,9 +85,13 @@ def build_liturgy_cover_pdf_bytes(
     img_w, img_h = 165 * mm, 105 * mm
     top_y = h - margin - img_h
 
-    # Liseré or (rappel UI)
+    # Liseré (couleur liturgique si connue, sinon or)
+    hx = (accent_hex or "").strip() or "#D4AF37"
     c.saveState()
-    c.setFillColorRGB(0xD4 / 255.0, 0xAF / 255.0, 0x37 / 255.0)
+    try:
+        c.setFillColor(colors.HexColor(hx))
+    except Exception:
+        c.setFillColor(colors.HexColor("#D4AF37"))
     c.rect(10 * mm, 18 * mm, 2.2 * mm, h - (18 * mm) - (14 * mm), fill=1, stroke=0)
     c.restoreState()
 
@@ -80,8 +104,16 @@ def build_liturgy_cover_pdf_bytes(
 
     c.setFillColorRGB(0.204, 0.180, 0.161)
     c.setFont("Helvetica-Bold", 18)
-    title = (week_title or "").strip()[:200]
-    c.drawCentredString(w / 2, h / 2 - 8 * mm, title)
+    title = (week_title or "").strip()[:260]
+    # Titre sur 2 lignes si nécessaire
+    t_lines = [ln.strip() for ln in title.splitlines() if ln.strip()]
+    if len(t_lines) >= 2:
+        # Même police / taille / graisse pour les deux lignes (comme demandé)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawCentredString(w / 2, h / 2 - 3.5 * mm, t_lines[0][:160])
+        c.drawCentredString(w / 2, h / 2 - 13.5 * mm, t_lines[1][:200])
+    else:
+        c.drawCentredString(w / 2, h / 2 - 8 * mm, (t_lines[0] if t_lines else ""))
 
     c.setFont("Helvetica", 11)
     dline = (date_line or "").strip()[:200]
@@ -104,7 +136,7 @@ def build_liturgy_cover_pdf_bytes(
         c.drawString(x, y, label)
         c.linkURL(url, (x, y - 2, x + tw, y + 10), relative=0)
 
-    draw_jopai_production_footer_bar(c, w, h)
+    draw_jopai_footer_bar(c, w, h)
 
     c.showPage()
     c.save()

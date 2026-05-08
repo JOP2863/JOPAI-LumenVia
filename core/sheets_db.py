@@ -20,6 +20,40 @@ class TableSpec:
     columns: list[str]
 
 
+def _resolve_table_name(*, sh: gspread.Spreadsheet, table: str) -> str:
+    """
+    Résout un nom logique (ex: 'users') vers le nom physique d'onglet.
+    Supporte la convention AliasTables (acronymes 3–4 lettres).
+    Fallback: retourne `table` si aucun mapping trouvé.
+    """
+    t = str(table or "").strip()
+    if not t:
+        return t
+    try:
+        titles = {ws.title for ws in sh.worksheets()}
+    except Exception:
+        titles = set()
+    if t in titles:
+        return t
+    # Si on reçoit déjà un acronyme (3-4 majuscules), on l'utilise tel quel
+    if len(t) in (3, 4) and t.isupper():
+        return t
+    # AliasTables : "Nom Complet Table" -> "Acronyme Table"
+    try:
+        ws_alias = sh.worksheet("AliasTables")
+        rows = ws_alias.get_all_records(numericise_ignore=["all"])
+        for r in rows:
+            full = str(r.get("Nom Complet Table") or "").strip()
+            acr = str(r.get("Acronyme Table") or "").strip()
+            if not acr:
+                continue
+            if full == t or acr == t:
+                return acr
+    except Exception:
+        pass
+    return t
+
+
 BASE_COLUMNS = [
     "row_id",
     "entity_id",
@@ -37,11 +71,38 @@ def with_concat(columns: list[str]) -> list[str]:
 def default_tables() -> list[TableSpec]:
     return [
         TableSpec(
+            name="AliasTables",
+            columns=[
+                "#ID",
+                "Statut",
+                "Version",
+                "Nom Complet Table",
+                "Acronyme Table",
+                "Description",
+            ],
+        ),
+        TableSpec(
+            name="AUDC",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "audience_key",
+                    "libelle",
+                    "description",
+                    "spec_aide",
+                ]
+            ),
+        ),
+        TableSpec(
             name="users",
             columns=with_concat(
                 [
                     *BASE_COLUMNS,
                     "email",
+                    "first_name",
+                    "last_name",
+                    "phone_e164",
+                    "country",
                     "source",
                     "password_salt_b64",
                     "password_hash_b64",
@@ -57,7 +118,101 @@ def default_tables() -> list[TableSpec]:
                     "type",
                     "zone",
                     "length_pref",
+                    "opt_in",
                     "active",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="email_templates",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "template_key",
+                    "channel",
+                    "language",
+                    "subject",
+                    "body",
+                    "active",
+                    "status_note",
+                ]
+            ),
+        ),
+        # Scheduler (acronymes physiques)
+        TableSpec(
+            name="CMPG",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "campaign_key",
+                    "name",
+                    "enabled",
+                    "timezone",
+                    "schedule_kind",  # manual|weekly|daily
+                    "schedule_spec",  # ex: "fri 19:00"
+                    "audience_kind",  # ex: "weekly_friday_optin"
+                    "audience_spec",  # json/text (futur)
+                    "send_email",
+                    "send_sms",
+                    "email_template_key",
+                    "sms_template_key",
+                    "content_pdf",
+                    "content_audio",
+                    "content_illustration",
+                    "content_app_link",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="RUNS",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "campaign_key",
+                    "run_kind",  # manual|scheduled
+                    "status_detail",
+                    "started_at",
+                    "finished_at",
+                    "recipients_ok",
+                    "recipients_err",
+                    "error",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="experience_feedback",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "submitter_email",
+                    "emotion_global",
+                    "rating_illustration",
+                    "rating_synthesis",
+                    "rating_audio",
+                    "utility_liturgy",
+                    "touch_memorable",
+                    "wish_improve_one",
+                    "campaign_hint",
+                    "date_dimanche_hint",
+                    "source_route",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="outbound_messages",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "channel",
+                    "template_key",
+                    "user_entity_id",
+                    "email",
+                    "phone_e164",
+                    "date_dimanche",
+                    "status_detail",
+                    "scheduled_at",
+                    "sent_at",
+                    "error",
                 ]
             ),
         ),
@@ -247,7 +402,8 @@ def ensure_database(
     existing = {ws.title: ws for ws in sh.worksheets()}
 
     for t in tables:
-        ws = existing.get(t.name) or sh.add_worksheet(title=t.name, rows=2000, cols=max(10, len(t.columns) + 2))
+        name = _resolve_table_name(sh=sh, table=t.name)
+        ws = existing.get(name) or sh.add_worksheet(title=name, rows=2000, cols=max(10, len(t.columns) + 2))
         _ensure_header(ws, t.columns)
 
 
@@ -259,10 +415,11 @@ def ensure_table(
 ) -> None:
     """Crée l'onglet si absent et pose le header. Utile en runtime (admin) sans relancer init_sheets_db."""
     sh = gspread_client.open_by_key(spreadsheet_id)
+    name = _resolve_table_name(sh=sh, table=table.name)
     try:
-        ws = sh.worksheet(table.name)
+        ws = sh.worksheet(name)
     except Exception:
-        ws = sh.add_worksheet(title=table.name, rows=2000, cols=max(10, len(table.columns) + 2))
+        ws = sh.add_worksheet(title=name, rows=2000, cols=max(10, len(table.columns) + 2))
     _ensure_header(ws, table.columns)
 
 
@@ -320,7 +477,7 @@ def append_immutable_row(
     version: int = 1,
 ) -> dict[str, Any]:
     sh = gspread_client.open_by_key(spreadsheet_id)
-    ws = sh.worksheet(table)
+    ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
     header = ws.row_values(1)
     if not header:
         raise RuntimeError(f"Table '{table}' non initialisée (header vide).")
@@ -374,7 +531,7 @@ def append_immutable_rows_bulk(
     if not values_by_col_list:
         return 0
     sh = gspread_client.open_by_key(spreadsheet_id)
-    ws = sh.worksheet(table)
+    ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
     header = ws.row_values(1)
     if not header:
         raise RuntimeError(f"Table '{table}' non initialisée (header vide).")
@@ -403,8 +560,10 @@ def fetch_records(
     limit: int = 500,
 ) -> list[dict[str, Any]]:
     sh = gspread_client.open_by_key(spreadsheet_id)
-    ws = sh.worksheet(table)
-    records = ws.get_all_records()
+    ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
+    # Important: preserve phone numbers like "+336..." and other identifiers as strings.
+    # gspread may "numericise" values (cast to int/float) which would drop leading "+" / zeros.
+    records = ws.get_all_records(numericise_ignore=["all"])
     if limit and len(records) > limit:
         return records[-limit:]
     return records

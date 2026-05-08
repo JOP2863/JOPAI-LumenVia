@@ -1,0 +1,16 @@
+Objet : 🕯️ Votre halte LumenVia : Préparez la célébration du dimanche {{date_dimanche}}
+Corps du message :
+Bonjour {{prenom}} {{nom}},
+La fin de semaine approche et, avec elle, l’invitation à déposer le bruit du monde pour se tourner vers l'essentiel.
+Comme chaque vendredi, LumenVia, votre compagnon spirituel par JOPAI, vous accompagne pour franchir le seuil de la célébration avec un cœur ouvert. Nous avons préparé pour vous les clés de lecture de ce dimanche {{nom_du_dimanche}} ({{date_dimanche}}).
+Voici de quoi nourrir votre méditation sur votre chemin vers l'église :
+La Synthèse Illustrée (PDF) : Retrouvez le "fil rouge" qui relie les textes de cette semaine. Une mise en perspective claire pour éclairer votre intelligence avant d'entendre la Parole. 👉 Télécharger votre synthèse PDF
+L’Expérience Sonore (Audio) : Que vous soyez dans les transports, en marche ou dans un moment de calme, laissez l’esprit de la fête infuser en vous. 👉 Écouter la synthèse audio
+L'Illustration de la Semaine : Une méditation visuelle pour habiter pleinement le temps liturgique actuel. 👉 Voir l'image du jour
+"LumenVia n'est pas là pour remplacer la rencontre, mais pour la préparer, afin que chaque messe devienne une rencontre plus consciente avec le Christ."
+Vous pouvez également retrouver l'historique de vos mémos et les archives des célébrations passées directement sur votre espace : Accéder à LumenVia depuis votre ordinateur ou votre téléphone
+Beau chemin vers dimanche,
+L’équipe LumenVia par JOPAI
+Vous recevez cet e-mail car vous êtes membre de la communauté LumenVia. Pour gérer vos préférences ou vous désabonner, cliquez ici.
+
+{{affichage de l’illustration de la semaine}}

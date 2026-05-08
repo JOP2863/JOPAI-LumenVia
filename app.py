@@ -165,6 +165,107 @@ def _inject_viewport_meta() -> None:
     )
 
 
+def _inject_expander_footer_scroll() -> None:
+    """Ouverture d’un ``st.expander`` : petite correction de scroll pour ne pas perdre le contenu sous le footer fixe."""
+    components.html(
+        """
+<script>
+(function () {
+  var rootWin = window.parent || window;
+  var doc = rootWin.document || document;
+  if (doc.__lumenviaExpFooterScroll) return;
+  doc.__lumenviaExpFooterScroll = true;
+
+  function footerReservePx() {
+    try {
+      var f = doc.querySelector(".lv-footer-fixed");
+      if (f && f.getBoundingClientRect)
+        return Math.ceil(f.getBoundingClientRect().height) + 20;
+    } catch (e) {}
+    return 92;
+  }
+
+  function bumpScroll(detailsEl) {
+    if (!detailsEl || !detailsEl.open) return;
+    var reserve = footerReservePx();
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        try {
+          detailsEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+          var rect = detailsEl.getBoundingClientRect();
+          var vh = rootWin.innerHeight || doc.documentElement.clientHeight || 720;
+          var bottomLimit = vh - reserve;
+          var overflow = rect.bottom - bottomLimit;
+          if (overflow <= 6) return;
+          var dy = overflow + 8;
+          var se = doc.scrollingElement || doc.documentElement || doc.body;
+          try {
+            se.scrollBy({ top: dy, behavior: "smooth" });
+          } catch (e2) {
+            rootWin.scrollBy(0, dy);
+          }
+        } catch (e) {}
+      });
+    });
+  }
+
+  try {
+    var appRoot = doc.querySelector('[data-testid="stAppViewContainer"]') || doc.body;
+    if (!appRoot || !window.MutationObserver) return;
+
+    function onDetails(details) {
+      if (!details.open) return;
+      if (!(details.closest && details.closest('[data-testid="stExpander"]'))) return;
+      bumpScroll(details);
+    }
+
+    appRoot.querySelectorAll('[data-testid="stExpander"] details').forEach(function (d) {
+      if (d.open) onDetails(d);
+    });
+
+    var mo = new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var m = muts[i];
+        var t = m.target;
+        if (!t || t.tagName !== "DETAILS") continue;
+        if (!(t.closest && t.closest('[data-testid="stExpander"]'))) continue;
+        if (m.attributeName !== "open") continue;
+        onDetails(t);
+      }
+    });
+    mo.observe(appRoot, { attributes: true, attributeFilter: ["open"], subtree: true });
+
+    doc.addEventListener(
+      "click",
+      function (ev) {
+        try {
+          var s = ev.target && ev.target.closest && ev.target.closest('[data-testid="stExpander"] summary');
+          if (!s) return;
+          var exp0 = s.closest('[data-testid="stExpander"]');
+          var det = exp0
+            ? exp0.querySelector("details") ||
+              exp0.querySelector('[data-testid="stExpanderDetails"]')
+            : null;
+          if (!det) return;
+          window.setTimeout(function () {
+            onDetails(det);
+          }, 90);
+          window.setTimeout(function () {
+            onDetails(det);
+          }, 320);
+        } catch (e) {}
+      },
+      true
+    );
+  } catch (e) {}
+})();
+</script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def loading_overlay(message: str = "LumenVia travaille pour toi…") -> object:
     """Calque plein écran (glassmorphism) pendant une opération serveur longue."""
     slot = st.empty()
@@ -289,6 +390,7 @@ def set_page_style() -> None:
     page_icon: str | Path = str(_icon) if _icon.is_file() else "✨"
     st.set_page_config(page_title="JOPAI LumenVia", layout="centered", page_icon=page_icon)
     _inject_viewport_meta()
+    _inject_expander_footer_scroll()
     st.markdown(
         """
 <style>
@@ -306,6 +408,8 @@ def set_page_style() -> None:
   --liturgie-accent: var(--liturgie-gold);
   /* Renforce le thème Streamlit (config.toml) pour widgets natifs */
   --primary-color: #D4AF37;
+  --jopai-turquoise: #0d9488;
+  --jopai-petrole: #0b2745;
 }
 
 /* 1. Reset Global & Fond */
@@ -330,6 +434,8 @@ header[data-testid="stHeader"] {
 }
 section[data-testid="stMain"] .block-container {
   padding-top: max(0.45rem, calc(0.2rem + env(safe-area-inset-top, 0px))) !important;
+  /* Footer fixe (immuable) */
+  padding-bottom: max(4.4rem, calc(3.4rem + env(safe-area-inset-bottom, 0px))) !important;
 }
 /* Bureau / large fenêtre : marge haute un peu plus généreuse (logo + menu ne doivent pas toucher / être coupés par la chrome). */
 @media (min-width: 1025px) {
@@ -360,8 +466,8 @@ section[data-testid="stMain"] .block-container {
 
 /*
   Navigation (top_nav) : colonne Menu + 4 tuiles Rubriques.
-  ≥1025px : 4 boutons Rubriques visibles, colonne Menu masquée.
-  ≤1024px : uniquement « Menu ⌵ » — secours `lv_nav_five_cols` (clé Stable Streamlit) car :has(:nth-child(5)) peut ne pas matcher.
+  ≥1025px : boutons Rubriques visibles, colonne Menu masquée.
+  ≤1024px : uniquement « Menu ⌵ » — secours `lv_nav_five_cols` (clé Stable Streamlit) si :has ne matche pas.
 */
 @media (min-width: 1025px) {
   div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
@@ -392,7 +498,7 @@ section[data-testid="stMain"] .block-container {
     min-height: 55px !important;
     font-size: 1rem !important;
   }
-  /* Toolbar admin grille + toggle Aperçu mobile : hors-champ réel téléphone/tablette */
+  /* Barre grille admin (bureau) : hors-champ réel téléphone/tablette ; aperçu mobile via tuile Simulateur */
   div[class*="st-key-lv_admin_desktop_shell"],
   div[data-testid="stVerticalBlock"][class*="st-key-lv_admin_desktop_shell"] {
     display: none !important;
@@ -608,6 +714,8 @@ audio {
   border: 1px solid rgba(212, 175, 55, 0.2) !important;
   border-top: none !important;
   padding: 1rem !important;
+  /* Défilement : réserve sous le bloc quand footer fixe (complément au script `scrollIntoView`) */
+  scroll-margin-bottom: max(5.75rem, calc(4.5rem + env(safe-area-inset-bottom, 0px))) !important;
 }
 
 /* Légendes : contraste suffisant sur fond crème (évite gris fantôme) */
@@ -736,6 +844,67 @@ label[data-testid="stWidgetLabel"] {
         unsafe_allow_html=True,
     )
 
+    # Footer immuable sur tous les écrans (y compris mobile)
+    st.markdown(
+        """
+<div class="lv-footer-fixed" role="contentinfo" aria-label="JOPAI footer">
+  <div class="lv-footer-inner">
+    <span class="lv-jopai-mark">
+      <span class="lv-jop">JOP</span><span class="lv-ai">AI</span><sup>©</sup>
+    </span>
+    <span class="lv-footer-sep">·</span>
+    <span class="lv-footer-txt">LumenVia - 2026 | TOUS DROITS RESERVES</span>
+  </div>
+</div>
+<style>
+.lv-footer-fixed{
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2147483000;
+  background: var(--jopai-petrole);
+  color: #ffffff;
+  border-top: 1px solid rgba(255,255,255,0.10);
+}
+.lv-footer-inner{
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 0.65rem 0.9rem;
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+  justify-content: center;
+  font-family: 'Lora', serif;
+  letter-spacing: 0.2px;
+}
+.lv-jopai-mark{
+  color: var(--jopai-turquoise);
+  font-size: 0.95rem;
+}
+.lv-jopai-mark .lv-jop{ font-weight: 700; }
+.lv-jopai-mark .lv-ai{ font-style: italic; font-weight: 500; }
+.lv-jopai-mark sup{ font-size: 0.65em; vertical-align: super; margin-left: 1px; }
+.lv-footer-sep{ opacity: 0.55; }
+.lv-footer-txt{ opacity: 0.92; font-size: 0.92rem; }
+@media (max-width: 520px){
+  .lv-footer-inner{ padding: 0.62rem 0.7rem; }
+  .lv-footer-txt{ font-size: 0.88rem; }
+}
+</style>
+        """.strip(),
+        unsafe_allow_html=True,
+    )
+
+
+def _jopai_mark_html() -> str:
+    """Marque immuable : JOP (gras) + AI (italique) + © (exposant)."""
+    return (
+        '<span class="lv-jopai-mark">'
+        '<span class="lv-jop">JOP</span><span class="lv-ai">AI</span><sup>©</sup>'
+        "</span>"
+    )
+
 
 # Pages Administration (sans « Quitter administration » ni toggle) — même ordre que la grille bureau.
 _ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
@@ -743,11 +912,25 @@ _ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
     ("thumbs", "Vignettes\nCloud", "admin_thumbs"),
     ("vision", "Texte\nimages", "admin_vision"),
     ("readings_cache", "Cache\nlectures", "admin_readings_cache"),
+    ("accounts", "Comptes\ninscrits", "admin_accounts"),
+    ("emailing", "Emailing", "admin_emailing"),
+    ("scheduler", "Scheduler", "admin_scheduler"),
     ("res", "Test\nressources", "admin_resources"),
     ("cdc", "Cahier\ndes\ncharges", "admin_cdc"),
     ("plan", "Plan\nconsolidé", "admin_plan"),
     ("mobile_sim", "Simulateur\nmobile", "admin_mobile_sim"),
 )
+
+
+def _admin_pages_for_device() -> list[tuple[str, str, str]]:
+    """Sur téléphone réel, le simulateur mobile n’a pas de sens → masqué."""
+    pages = list(_ADMIN_PAGES)
+    try:
+        if _lumenvia_phone_like_user_agent():
+            pages = [p for p in pages if p[0] != "mobile_sim"]
+    except Exception:
+        pass
+    return pages
 
 
 def _admin_do_logout_navigation() -> None:
@@ -797,7 +980,7 @@ def render_admin_navigation_in_popover() -> None:
         return
     st.divider()
     st.caption("Administration")
-    for slug, label, rte in _ADMIN_PAGES:
+    for slug, label, rte in _admin_pages_for_device():
         short = label.replace("\n", " ")
         if st.button(short, key=f"adm_p_{slug}", use_container_width=True, type="secondary"):
             st.session_state.route = rte
@@ -835,6 +1018,9 @@ def top_nav() -> str:
             if st.button(short, key=f"nav_m_{route}", use_container_width=True, type="secondary"):
                 st.session_state.route = route
                 st.rerun()
+        if st.button("Donner votre avis", key="nav_m_feedback", use_container_width=True, type="secondary"):
+            st.session_state.route = "feedback"
+            st.rerun()
         if is_admin:
             render_admin_navigation_in_popover()
 
@@ -857,11 +1043,20 @@ def top_nav() -> str:
                         st.session_state.route = route
 
     if uid:
-        b1, b2 = st.columns([4, 1], gap="small")
+        b1, b2, b3 = st.columns([3.35, 1.45, 1.95], gap="small")
         with b1:
             st.caption(f"🟢 Connecté · {email or 'session active'}")
         with b2:
-            if st.button("Déconnexion", key="auth_logout_nav"):
+            if st.button(
+                "Donner votre avis",
+                key="nav_feedback_beside_logout",
+                type="secondary",
+                use_container_width=True,
+            ):
+                st.session_state.route = "feedback"
+                st.rerun()
+        with b3:
+            if st.button("Déconnexion", key="auth_logout_nav", use_container_width=True):
                 for k in ("auth_user_entity_id", "auth_email_lc"):
                     if k in st.session_state:
                         del st.session_state[k]
@@ -887,6 +1082,27 @@ def _inject_admin_action_buttons_css() -> None:
         """
 <style>
 /* Déconnexion — ton pétrole (charte footer) */
+div[class*="st-key-nav_feedback_beside_logout"] button,
+div[class*="nav_feedback_beside_logout"] button,
+div[id*="nav_feedback_beside_logout"] button,
+div[data-anchor-streamlit*="nav_feedback_beside_logout"] button {
+  background-color: #ffffff !important;
+  color: #0b2745 !important;
+  border: 1px solid #D4AF37 !important;
+  justify-content: center !important;
+  min-height: 64px !important;
+}
+div[class*="st-key-nav_feedback_beside_logout"] button p,
+div[class*="nav_feedback_beside_logout"] button p,
+div[id*="nav_feedback_beside_logout"] button p,
+div[data-anchor-streamlit*="nav_feedback_beside_logout"] button p {
+  text-align: center !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  word-break: keep-all !important;
+  line-height: 1.18 !important;
+  width: 100% !important;
+}
 div[class*="st-key-auth_logout_nav"] button,
 div[class*="auth_logout_nav"] button,
 div[id*="auth_logout_nav"] button,
@@ -894,6 +1110,22 @@ div[data-anchor-streamlit*="auth_logout_nav"] button {
   background-color: #145a72 !important;
   color: #ffffff !important;
   border-color: #0f4456 !important;
+  justify-content: center !important;
+  text-align: center !important;
+  min-height: 64px !important;
+}
+div[class*="st-key-auth_logout_nav"] button p,
+div[class*="auth_logout_nav"] button p,
+div[id*="auth_logout_nav"] button p,
+div[data-anchor-streamlit*="auth_logout_nav"] button p {
+  text-align: center !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  hyphens: none !important;
+  width: 100% !important;
+  line-height: 1.2 !important;
 }
 div[class*="st-key-auth_logout_nav"] button:hover,
 div[class*="auth_logout_nav"] button:hover,
@@ -964,38 +1196,44 @@ def admin_nav_bar() -> None:
         return
     if _use_compact_top_nav():
         return
+    pages = _admin_pages_for_device()
     with st.container(key="lv_admin_desktop_shell"):
         st.markdown("---")
         st.caption("Administration")
-        r1 = st.columns(4, gap="small")
-        for i in range(4):
-            slug, label, rte = _ADMIN_PAGES[i]
-            with r1[i]:
-                if st.button(label, key=f"adm_nav_{slug}", use_container_width=True, type="secondary"):
-                    st.session_state.route = rte
+        # Rend toutes les tuiles admin sans dépendre d’index fixes
+        tiles = list(pages)
+        cols_per_row = 4
+        for start in range(0, len(tiles), cols_per_row):
+            row = tiles[start : start + cols_per_row]
+            rcols = st.columns(cols_per_row, gap="small")
+            for i, (slug, label, rte) in enumerate(row):
+                with rcols[i]:
+                    if st.button(label, key=f"adm_nav_{slug}", use_container_width=True, type="secondary"):
+                        st.session_state.route = rte
+                        st.rerun()
+            # Complète la ligne avec “Quitter administration” si c’est la dernière ligne et qu’il reste de la place
+            if start + cols_per_row >= len(tiles) and len(row) < cols_per_row:
+                with rcols[len(row)]:
+                    if st.button(
+                        "Quitter\nadministration",
+                        key="adm_nav_logout",
+                        use_container_width=True,
+                        type="secondary",
+                    ):
+                        _admin_do_logout_navigation()
+                        st.rerun()
+        # Si la dernière ligne était pleine, ajoute un bouton de sortie sur une ligne dédiée
+        if len(tiles) % cols_per_row == 0:
+            r = st.columns(cols_per_row, gap="small")
+            with r[cols_per_row - 1]:
+                if st.button(
+                    "Quitter\nadministration",
+                    key="adm_nav_logout",
+                    use_container_width=True,
+                    type="secondary",
+                ):
+                    _admin_do_logout_navigation()
                     st.rerun()
-        r2 = st.columns(4, gap="small")
-        for j in range(3):
-            slug, label, rte = _ADMIN_PAGES[4 + j]
-            with r2[j]:
-                if st.button(label, key=f"adm_nav_{slug}", use_container_width=True, type="secondary"):
-                    st.session_state.route = rte
-                    st.rerun()
-        with r2[3]:
-            if st.button("Quitter\nadministration", key="adm_nav_logout", use_container_width=True, type="secondary"):
-                _admin_do_logout_navigation()
-                st.rerun()
-        r3 = st.columns(4, gap="small")
-        slug_sim, lbl_sim, rte_sim = _ADMIN_PAGES[7]
-        with r3[0]:
-            if st.button(lbl_sim, key=f"adm_nav_{slug_sim}", use_container_width=True, type="secondary"):
-                st.session_state.route = rte_sim
-                st.rerun()
-        st.toggle(
-            "Aperçu mobile",
-            key="admin_phone_preview",
-            help="Réduit la zone principale comme sur un téléphone (largeur : page « Simulateur vision mobile »).",
-        )
 
 
 def _strip_accents(s: str) -> str:
@@ -1302,7 +1540,7 @@ def _try_show_liturgy_illustration(*, gcs: object, cfg: object, date_str: str) -
     img_b = _fetch_liturgy_illustration_display_bytes(gcs=gcs, cfg=cfg, date_str=date_str)
     if img_b:
         st.image(io.BytesIO(img_b), use_container_width=True)
-        st.caption("Illustration du dimanche")
+        st.caption(f"Illustration du dimanche {_french_day_month_year(date_str)}")
 
 
 def _french_long_date_label(date_str: str) -> str:
@@ -1412,11 +1650,24 @@ def render_about() -> None:
     except Exception:
         pass
 
-    st.markdown(_ABOUT_MARKDOWN)
+    # Citation : centrée + couleur thème (autre que noir)
+    try:
+        quote, rest = _ABOUT_MARKDOWN.split("\n\n", 1)
+    except Exception:
+        quote, rest = _ABOUT_MARKDOWN, ""
+    qtxt = quote.strip().strip("«").strip("»").strip()
+    if qtxt:
+        st.markdown(
+            f"<div style='text-align:center;color:var(--liturgie-accent);font-style:italic;"
+            f"font-size:1.02rem;line-height:1.55;margin:0.25rem auto 0.95rem;max-width:min(44rem,95vw);'>"
+            f"« {html_escape(qtxt.strip('* ').strip())} »</div>",
+            unsafe_allow_html=True,
+        )
+    if rest.strip():
+        st.markdown(rest.strip())
     st.subheader("Référence")
     st.markdown(
-        "Source liturgique : AELF (Association Épiscopale Liturgique pour les pays Francophones). "
-        "[AELF API](https://api.aelf.org/)"
+        'Source liturgique : [AELF](https://api.aelf.org/) (Association Épiscopale Liturgique pour les pays Francophones).'
     )
 
 
@@ -1453,6 +1704,153 @@ def render_sunday() -> None:
         "Sélectionnez une date au calendrier pour préparer ou revivre la synthèse illustrée du dimanche correspondant.",
         value=default,
     )
+
+    @st.cache_data(ttl=180, show_spinner=False, max_entries=24)
+    def _month_content_status(
+        *,
+        gsheet_id: str,
+        service_account_fp: str,
+        year: int,
+        month: int,
+        zone: str,
+        bucket_name: str | None,
+    ) -> dict[str, dict[str, bool]]:
+        """
+        Retourne un mapping date_iso -> {text,audio,pdf} pour les dimanches du mois.
+        Objectif : affichage indicatif (encerclage) sans empêcher la régénération.
+        """
+        out: dict[str, dict[str, bool]] = {}
+        try:
+            gs = build_gspread_client(load_config().gcp_service_account)
+            gens = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="generations", limit=6000)
+            aud = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="audio", limit=6000)
+        except Exception:
+            gens, aud = [], []
+
+        # Dernière génération par date
+        gen_by_date: dict[str, dict] = {}
+        for r in gens:
+            if str(r.get("zone") or "").strip() != zone:
+                continue
+            ds = str(r.get("date") or "").strip()[:10]
+            if len(ds) != 10:
+                continue
+            try:
+                d = date.fromisoformat(ds)
+            except Exception:
+                continue
+            if d.year != int(year) or d.month != int(month):
+                continue
+            prev = gen_by_date.get(ds)
+            if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+                gen_by_date[ds] = r
+
+        # Audio par gen_entity_id (au moins une ligne)
+        audio_gen_ids = {str(r.get("gen_entity_id") or "").strip() for r in aud if str(r.get("gen_entity_id") or "").strip()}
+
+        # PDF : existence objet GCS (best-effort)
+        pdf_exists: set[str] = set()
+        if bucket_name:
+            try:
+                cfg2 = load_config()
+                gcs = build_gcs_client(cfg2.gcp_service_account)
+                for ds in gen_by_date.keys():
+                    path = f"Fascicules/{ds}/lumenvia_dimanche_{ds}.pdf"
+                    try:
+                        if blob_exists(gcs=gcs, bucket_name=bucket_name, path=path):
+                            pdf_exists.add(ds)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        # Dimanches du mois (tous) : on marque ceux qui ont contenu
+        import calendar as _cal
+
+        cal = _cal.Calendar(firstweekday=0)  # lundi
+        for d in cal.itermonthdates(int(year), int(month)):
+            if d.month != int(month):
+                continue
+            if d.weekday() != 6:  # dimanche
+                continue
+            ds = d.isoformat()
+            g = gen_by_date.get(ds)
+            has_text = bool(str((g or {}).get("text_gcs_path") or "").strip())
+            gen_id = str((g or {}).get("entity_id") or "").strip()
+            has_audio = bool(gen_id and gen_id in audio_gen_ids)
+            out[ds] = {"text": has_text, "audio": has_audio, "pdf": (ds in pdf_exists)}
+        return out
+
+    # Mini-calendrier HTML : dimanches encerclés si contenu déjà présent
+    if cfg.gcp_service_account and cfg.gsheet_id:
+        try:
+            fp = _service_account_fingerprint(getattr(cfg, "gcp_service_account", {}) or {})
+            bucket = str(cfg.gcs_bucket_name or "").strip() or None
+            st_map = _month_content_status(
+                gsheet_id=str(cfg.gsheet_id).strip(),
+                service_account_fp=fp,
+                year=int(chosen_any.year),
+                month=int(chosen_any.month),
+                zone=zone,
+                bucket_name=bucket,
+            )
+            # Rendu HTML
+            import calendar as _cal2
+
+            cal2 = _cal2.Calendar(firstweekday=0)
+            weeks = cal2.monthdatescalendar(int(chosen_any.year), int(chosen_any.month))
+            mois_fr = (
+                "janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"
+            )[int(chosen_any.month) - 1]
+            rows_html: list[str] = []
+            for w in weeks:
+                tds: list[str] = []
+                for d in w:
+                    in_month = (d.month == int(chosen_any.month))
+                    ds = d.isoformat()
+                    st0 = st_map.get(ds) or {}
+                    is_sun = d.weekday() == 6
+                    has_any = bool(st0.get("text") or st0.get("audio") or st0.get("pdf"))
+                    ring = "lv-ring" if (in_month and is_sun and has_any) else ("lv-sun" if (in_month and is_sun) else "")
+                    muted = "lv-muted" if not in_month else ""
+                    tds.append(
+                        f"<td class='{muted}'><div class='lv-day {ring}'>{d.day}</div></td>"
+                    )
+                rows_html.append("<tr>" + "".join(tds) + "</tr>")
+
+            html = f"""
+<div style="margin:0.35rem auto 0.15rem;max-width:420px;">
+  <div style="text-align:center;color:#6b5918;font-weight:700;margin-bottom:0.25rem;font-size:0.95rem;">
+    Dimanches déjà générés — {mois_fr} {chosen_any.year}
+  </div>
+  <div style="border:1px solid rgba(212,175,55,0.30);background:rgba(255,255,255,0.62);padding:0.25rem 0.25rem 0.35rem;">
+    <table style="width:100%;border-collapse:collapse;text-align:center;font-size:0.85rem;">
+      <thead>
+        <tr style="opacity:0.85;">
+          <th style="padding:3px 0;">L</th><th>M</th><th>M</th><th>J</th><th>V</th><th>S</th><th>D</th>
+        </tr>
+      </thead>
+      <tbody>
+        {''.join(rows_html)}
+      </tbody>
+    </table>
+    <div style="display:flex;gap:0.55rem;justify-content:center;margin-top:0.25rem;font-size:0.78rem;opacity:0.9;">
+      <span><span class="lv-legend-ring"></span> Dimanche avec contenu</span>
+    </div>
+  </div>
+</div>
+<style>
+.lv-day{{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;border-radius:9px;margin:1px auto;color:var(--liturgie-text);font-size:0.86rem;}}
+.lv-sun{{color:#6b5918;font-weight:600;}}
+.lv-ring{{outline:1px solid var(--liturgie-accent);outline-offset:1px;border-radius:9px;}}
+.lv-muted .lv-day{{opacity:0.35;}}
+.lv-legend-ring{{display:inline-block;width:9px;height:9px;border-radius:3px;outline:1px solid var(--liturgie-accent);outline-offset:1px;margin-right:0.25rem;vertical-align:middle;}}
+</style>
+            """.strip()
+            with st.expander(f"Voir les contenus déjà disponibles — {mois_fr} {chosen_any.year}", expanded=False):
+                st.markdown(html, unsafe_allow_html=True)
+        except Exception:
+            pass
     chosen = _sunday_of_week(chosen_any)
     if chosen_any != chosen:
         d_fr = html_escape(_french_day_month_year(chosen.isoformat()))
@@ -1648,8 +2046,8 @@ def render_sunday() -> None:
             f"text-align:center;text-wrap:balance;max-width:min(42rem,calc(100% - 0.75rem));"
             f"margin:0 auto 0.85rem;color:#5f4f3a;\">"
             f"<strong style=\"color:#6b5918;font-weight:600;\">Trois formats</strong>"
-            f"<span style=\"color:#5f4f3a;\"> disponibles — "
-            f"<strong style=\"color:#6b5918;font-weight:600;\">JOPAI LumenVia</strong>"
+            f"<span style=\"color:#5f4f3a;\"> disponibles proposé par "
+            f"<strong style=\"color:#6b5918;font-weight:600;\">{_jopai_mark_html()} LumenVia</strong>"
             f" pour vous préparer</span>"
             f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
             f"<strong style=\"color:#584610;\">{date_prep}</strong>.</span></p>",
@@ -1721,6 +2119,14 @@ def render_sunday() -> None:
             if gcs_top and cfg.gcs_bucket_name:
                 prep_key = f"prep_liturgy_pdf_{date_str}"
                 st.caption("Administration — fascicule PDF")
+                has_any_synthesis = bool((bundle_synth_text or "").strip()) or (bundle_audio is not None)
+                if not has_any_synthesis:
+                    st.info(
+                        "Le fascicule PDF « complet » (avec synthèse) n’a pas encore de contenu : "
+                        "génère d’abord **la synthèse et l’audio** ci‑dessous. "
+                        "Sinon, le PDF contiendrait essentiellement les lectures.",
+                        icon="ℹ️",
+                    )
                 include_catechese_pdf = st.checkbox(
                     "Inclure la « Passerelle catéchèse — L’écho des paraboles » dans le PDF",
                     value=True,
@@ -1732,7 +2138,15 @@ def render_sunday() -> None:
                     value=False,
                     key=f"pdf_force_regen_{date_str}",
                 )
-                if st.button("Préparer le PDF du dimanche (complet)", key=prep_key):
+                allow_readings_only_pdf = st.checkbox(
+                    "Autoriser un PDF lectures seules (sans synthèse)",
+                    value=False,
+                    key=f"pdf_allow_readings_only_{date_str}",
+                    help="À utiliser uniquement si tu veux un PDF minimal (lectures), en attendant la synthèse.",
+                    disabled=has_any_synthesis,
+                )
+                can_build_pdf = bool(has_any_synthesis or allow_readings_only_pdf)
+                if st.button("Préparer le PDF du dimanche (complet)", key=prep_key, disabled=not can_build_pdf):
                     ov_pdf = loading_overlay("Préparation du PDF (couverture + lectures + synthèse)…")
                     try:
                         if not force_regen_pdf:
@@ -1751,7 +2165,7 @@ def render_sunday() -> None:
                             )
                             if signed:
                                 aud_url = signed
-                        synth_for_pdf = bundle_synth_text
+                        synth_for_pdf = bundle_synth_text if has_any_synthesis else ""
                         if not include_catechese_pdf:
                             synth_for_pdf = _strip_catechese_bridge(synth_for_pdf)
                         back_cover_b = None
@@ -1764,13 +2178,38 @@ def render_sunday() -> None:
                             )
                         except Exception:
                             back_cover_b = None
+
+                        # Titre PDF sur 2 lignes : fête puis (semaine du Psautier uniquement)
+                        semaine_psautier = (getattr(identity, "semaine", None) or "").strip()
+                        line1 = _liturgy_display_label(
+                            (getattr(identity, "fete", None) or "").strip()
+                            or (_jour_liturgique(identity) or "").strip()
+                            or _liturgy_cover_pdf_title(identity)
+                        )
+                        line2 = ""
+                        if semaine_psautier and ("psautier" in semaine_psautier.lower()):
+                            lbl = _liturgy_display_label(semaine_psautier).strip()
+                            line2 = f"({lbl})" if lbl else ""
+                        week_title_pdf = (line1 + ("\n" + line2 if line2 else "")).strip()
+
+                        # Index de la vignette du dimanche dans le montage annuel (pour encadrer la semaine correspondante)
+                        highlight_idx = None
+                        try:
+                            manifest = json.loads(
+                                Path("data/manifests/illustration_pipeline.json").read_text(encoding="utf-8")
+                            )
+                            targets = manifest.get("targets") or []
+                            year = str(date_str)[:4]
+                            year_targets = [t for t in targets if str(t.get("date") or "").startswith(year)]
+                            year_dates = [str(t.get("date") or "")[:10] for t in year_targets]
+                            if str(date_str)[:10] in year_dates:
+                                highlight_idx = int(year_dates.index(str(date_str)[:10]))
+                        except Exception:
+                            highlight_idx = None
+
                         pdf_b = build_liturgy_sunday_pdf_bytes(
                             image_bytes=img_b,
-                            week_title=_liturgy_display_label(
-                                (getattr(identity, "fete", None) or "").strip()
-                                or (_jour_liturgique(identity) or "").strip()
-                                or _liturgy_cover_pdf_title(identity)
-                            ),
+                            week_title=week_title_pdf,
                             date_line=_french_long_date_label(date_str),
                             meta_line=(
                                 f"{_liturgy_display_label(getattr(identity, 'periode', None))} · "
@@ -1786,6 +2225,8 @@ def render_sunday() -> None:
                             audio_listen_note=aud_note,
                             about_markdown=_ABOUT_MARKDOWN,
                             back_cover_image_bytes=back_cover_b,
+                            accent_hex=_liturgical_accent_hex(getattr(identity, "couleur", None)),
+                            back_cover_highlight_cell_index=highlight_idx,
                         )
                         st.session_state[pdf_key] = pdf_b
                         try:
@@ -1804,6 +2245,14 @@ def render_sunday() -> None:
                         ov_pdf.empty()
                 st.divider()
             st.caption("Administration — synthèse (texte + audio)")
+            already_has_bundle = bool((bundle_synth_text or "").strip()) or (bundle_audio is not None)
+            if already_has_bundle:
+                st.info(
+                    "Une synthèse existe déjà pour ce dimanche (texte et/ou audio). "
+                    "Tout est **téléchargeable en haut de la page**. "
+                    "Tu peux régénérer ci-dessous si besoin.",
+                    icon="ℹ️",
+                )
             pct = st.segmented_control(
                 "Longueur (en % du total des lectures)",
                 options=[10, 15, 20, 25, 30, 35, 40, 45, 50],
@@ -1820,10 +2269,19 @@ def render_sunday() -> None:
                 help="Ajoute un encart pédagogique structuré pour la transmission (jeunes / catéchèse).",
                 key=f"adm_sunday_catech_{date_str}",
             )
+            auto_pdf = st.checkbox(
+                "Générer aussi le PDF dans la foulée (peut prendre plus de temps)",
+                value=False,
+                key=f"adm_sunday_auto_pdf_{date_str}",
+            )
             debug = st.toggle("Mode debug", value=False, key=f"adm_sunday_debug_{date_str}")
             if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
                 st.warning("Configuration incomplète (service account / gsheet_id / bucket). Synthèse indisponible.")
-            elif st.button("Générer la synthèse et l’audio", type="primary", key=f"adm_sunday_gen_{date_str}"):
+            elif st.button(
+                "Régénérer la synthèse et l’audio" if already_has_bundle else "Générer la synthèse et l’audio",
+                type="primary",
+                key=f"adm_sunday_gen_{date_str}",
+            ):
                 overlay = loading_overlay("LumenVia prépare la synthèse et l’audio…")
                 try:
                     _run_generate_sunday_flow(
@@ -1835,6 +2293,7 @@ def render_sunday() -> None:
                         pct=int(pct or 20),
                         include_takeaways=bool(include_takeaways),
                         include_catechese_bridge=bool(include_catechese_bridge_gen),
+                        generate_pdf=bool(auto_pdf),
                         debug=bool(debug),
                         cfg=cfg,
                     )
@@ -1864,7 +2323,7 @@ def render_sunday() -> None:
         _try_show_liturgy_illustration(gcs=gcs_top, cfg=cfg, date_str=date_str)
 
     st.subheader("Lectures")
-    st.caption(f"Total lectures : **{total_words} mots** (AELF)")
+    # (supprimé) Total lectures : non affiché
     render_liturgy_block("Première lecture", texts.premiere_lecture)
     render_liturgy_block("Psaume", texts.psaume)
     render_liturgy_block("Deuxième lecture", texts.deuxieme_lecture)
@@ -1881,6 +2340,7 @@ def _run_generate_sunday_flow(
     pct: int,
     include_takeaways: bool,
     include_catechese_bridge: bool,
+    generate_pdf: bool,
     debug: bool,
     cfg: object,
 ) -> None:
@@ -2206,25 +2666,108 @@ def _run_generate_sunday_flow(
         audio_mime=audio_mime_norm,
     )
 
-    st.subheader("Résumé du temps liturgique")
-    try:
-        dt0 = time.perf_counter()
-        txt_bytes = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=text_path)
-        txt = txt_bytes.decode("utf-8", errors="replace")
-        perf["download_text_verify_s"] = round(time.perf_counter() - dt0, 3)
-    except Exception as e:
-        txt = f"[Erreur lecture Cloud texte] {e}"
-    st.text_area("Synthèse", value=txt, height=320)
+    # Optimisation : les downloads de vérification (Cloud → UI) sont coûteux.
+    # On ne les fait que si debug est activé.
+    if debug:
+        st.subheader("Résumé du temps liturgique")
+        try:
+            dt0 = time.perf_counter()
+            txt_bytes = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=text_path)
+            txt = txt_bytes.decode("utf-8", errors="replace")
+            perf["download_text_verify_s"] = round(time.perf_counter() - dt0, 3)
+        except Exception as e:
+            txt = f"[Erreur lecture Cloud texte] {e}"
+        st.text_area("Synthèse", value=txt, height=320)
 
-    try:
-        da0 = time.perf_counter()
-        aud_bytes = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=audio_path)
-        aud_play, aud_mime_play, _ = normalize_audio_bytes(audio_bytes=aud_bytes, mime_type=audio_mime_norm)
-        perf["download_audio_verify_s"] = round(time.perf_counter() - da0, 3)
-        st.subheader("Écouter le résumé")
-        st.audio(aud_play, format=aud_mime_play)
-    except Exception as e:
-        st.error(f"Erreur lecture/lecture audio Cloud: {e}")
+        try:
+            da0 = time.perf_counter()
+            aud_bytes = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=audio_path)
+            aud_play, aud_mime_play, _ = normalize_audio_bytes(audio_bytes=aud_bytes, mime_type=audio_mime_norm)
+            perf["download_audio_verify_s"] = round(time.perf_counter() - da0, 3)
+            st.subheader("Écouter le résumé")
+            st.audio(aud_play, format=aud_mime_play)
+        except Exception as e:
+            st.error(f"Erreur lecture/lecture audio Cloud: {e}")
+
+    # Option : générer aussi le PDF juste après (mêmes sources, même overlay)
+    if generate_pdf and cfg.gcs_bucket_name:
+        try:
+            tpdf0 = time.perf_counter()
+            date_str = str(identity.date)
+            img_b = _fetch_liturgy_illustration_full_bytes(gcs=gcs, cfg=cfg, date_str=date_str)
+            back_cover_b = None
+            try:
+                y = str(date_str)[:4]
+                back_cover_b = download_bytes(
+                    gcs=gcs,
+                    bucket_name=str(cfg.gcs_bucket_name).strip(),
+                    path=f"Images/thumbs/montage_{y}.png",
+                )
+            except Exception:
+                back_cover_b = None
+
+            # Titre 2 lignes comme dans “Préparer le PDF…” (Psautier uniquement)
+            semaine_psautier = (getattr(identity, "semaine", None) or "").strip()
+            line1 = _liturgy_display_label(
+                (getattr(identity, "fete", None) or "").strip()
+                or (_jour_liturgique(identity) or "").strip()
+                or _liturgy_cover_pdf_title(identity)
+            )
+            line2 = ""
+            if semaine_psautier and ("psautier" in semaine_psautier.lower()):
+                lbl = _liturgy_display_label(semaine_psautier).strip()
+                line2 = f"({lbl})" if lbl else ""
+            week_title_pdf = (line1 + ("\n" + line2 if line2 else "")).strip()
+
+            # highlight index (best-effort)
+            highlight_idx = None
+            try:
+                manifest = json.loads(
+                    Path("data/manifests/illustration_pipeline.json").read_text(encoding="utf-8")
+                )
+                targets = manifest.get("targets") or []
+                year = str(date_str)[:4]
+                year_targets = [t for t in targets if str(t.get("date") or "").startswith(year)]
+                year_dates = [str(t.get("date") or "")[:10] for t in year_targets]
+                if str(date_str)[:10] in year_dates:
+                    highlight_idx = int(year_dates.index(str(date_str)[:10]))
+            except Exception:
+                highlight_idx = None
+
+            aud_url, aud_note = _public_app_listen_url(date_str=date_str)
+            pdf_b = build_liturgy_sunday_pdf_bytes(
+                image_bytes=img_b,
+                week_title=week_title_pdf,
+                date_line=_french_long_date_label(date_str),
+                meta_line=(
+                    f"{_liturgy_display_label(getattr(identity, 'periode', None))} · "
+                    f"Cycle {_cycle_year_display(getattr(identity, 'annee', None))} · "
+                    f"{_liturgy_display_label(getattr(identity, 'couleur', None))}"
+                ),
+                premiere_lecture=getattr(texts, "premiere_lecture", None),
+                psaume=getattr(texts, "psaume", None),
+                deuxieme_lecture=getattr(texts, "deuxieme_lecture", None),
+                evangile=getattr(texts, "evangile", None),
+                synthesis_text=gen.text,
+                audio_listen_url=aud_url,
+                audio_listen_note=aud_note,
+                about_markdown=_ABOUT_MARKDOWN,
+                back_cover_image_bytes=back_cover_b,
+                accent_hex=_liturgical_accent_hex(getattr(identity, "couleur", None)),
+                back_cover_highlight_cell_index=highlight_idx,
+            )
+            fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+            upload_bytes(
+                gcs=gcs,
+                bucket_name=str(cfg.gcs_bucket_name).strip(),
+                path=fasc_path,
+                data=pdf_b,
+                content_type="application/pdf",
+            )
+            st.session_state[f"liturgy_sunday_pdf_{date_str}"] = pdf_b
+            perf["pdf_auto_s"] = round(time.perf_counter() - tpdf0, 3)
+        except Exception as e:
+            st.warning(f"PDF non généré automatiquement : {e}")
     if debug:
         total_keys = (
             "vertex_text_s",
@@ -2297,7 +2840,7 @@ def render_memo() -> None:
         rows = [u for u in users if str(u.get("email", "")).strip().lower() == email_lc]
         if not rows:
             return None
-        # append-only: on prend la dernière ligne créée (created_at)
+        # On prend la dernière ligne créée (created_at)
         rows_sorted = sorted(rows, key=lambda r: str(r.get("created_at", "")), reverse=True)
         return rows_sorted[0]
 
@@ -2367,52 +2910,11 @@ def render_memo() -> None:
                 finally:
                     ov.empty()
 
-        with st.expander("Mot de passe oublié — définir un nouveau mot de passe"):
-            st.caption(
-                "Réservé à la récupération de **ton** compte. Une nouvelle ligne « utilisateur » "
-                "est ajoutée dans Sheets (append-only) avec le même identifiant ; la connexion utilise toujours la **dernière** ligne."
-            )
-            remail = st.text_input("E-mail du compte", key="pwd_reset_email").strip().lower()
-            rp1 = st.text_input("Nouveau mot de passe", type="password", key="pwd_reset_p1")
-            rp2 = st.text_input("Confirmer le mot de passe", type="password", key="pwd_reset_p2")
-            if st.button("Enregistrer le nouveau mot de passe", key="pwd_reset_submit"):
-                ov = loading_overlay("Mise à jour du mot de passe…")
-                try:
-                    if len(rp1) < 8:
-                        st.error("Minimum 8 caractères.")
-                    elif rp1 != rp2:
-                        st.error("Les deux saisies ne correspondent pas.")
-                    elif not remail:
-                        st.error("Indique ton e-mail.")
-                    else:
-                        rec = _latest_user_record(users, remail)
-                        if not rec:
-                            st.error("Aucun compte trouvé pour cet e-mail.")
-                        else:
-                            uid = str(rec.get("entity_id") or "").strip()
-                            if not uid:
-                                st.error("Identifiant utilisateur invalide.")
-                            else:
-                                salt_b64, hash_b64 = hash_password(rp1)
-                                append_immutable_row(
-                                    gspread_client=gs,
-                                    spreadsheet_id=cfg.gsheet_id,
-                                    table="users",
-                                    values_by_col={
-                                        "entity_id": uid,
-                                        "email": remail,
-                                        "source": "password_reset",
-                                        "password_salt_b64": salt_b64,
-                                        "password_hash_b64": hash_b64,
-                                    },
-                                )
-                                st.success("Nouveau mot de passe enregistré. Tu peux te connecter.")
-                finally:
-                    ov.empty()
+        # (supprimé) « Mot de passe oublié » : à refaire plus tard
 
     user_entity_id = str(st.session_state.auth_user_entity_id or "").strip()
     if not user_entity_id:
-        st.info("Connecte-toi pour accéder à tes mémos.")
+        # Message supprimé (peu utile / bruit)
         return
 
     # Liste des mémos existants
@@ -2650,8 +3152,190 @@ def render_memo() -> None:
         )
 
 
+def render_feedback() -> None:
+    """Questionnaire flash post-envoi (Sheets RSTN `experience_feedback`)."""
+    st.title("Donner votre avis")
+    st.markdown(
+        """
+**« LumenVia est un chemin que nous construisons ensemble.**  
+En tant que premier passager de cette aventure, votre retour nous est précieux pour ajuster nos pas. Pourriez-vous nous accorder environ **une minute** ? »
+        """.strip()
+    )
+
+    try:
+        q_campaign = str(st.query_params.get("campaign") or "").strip()
+    except Exception:
+        q_campaign = ""
+    try:
+        q_dim = str(st.query_params.get("date_dimanche") or "").strip()
+    except Exception:
+        q_dim = ""
+    try:
+        qp_email_fb = str(st.query_params.get("email") or "").strip().lower()
+    except Exception:
+        qp_email_fb = ""
+
+    cfg = load_config()
+    if not cfg.gcp_service_account or not cfg.gsheet_id:
+        st.warning("Enregistrement indisponible : configuration Google Sheets manquante.")
+        return
+
+    from core.sheets_db import TableSpec, ensure_table
+
+    gs = build_gspread_client(cfg.gcp_service_account)
+    ensure_table(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table=TableSpec(
+            name="experience_feedback",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "submitter_email",
+                    "emotion_global",
+                    "rating_illustration",
+                    "rating_synthesis",
+                    "rating_audio",
+                    "utility_liturgy",
+                    "touch_memorable",
+                    "wish_improve_one",
+                    "campaign_hint",
+                    "date_dimanche_hint",
+                    "source_route",
+                ]
+            ),
+        ),
+    )
+
+    auth_em = str(st.session_state.get("auth_email_lc") or "").strip().lower()
+
+    def _em_ok_feedback(e: str) -> bool:
+        em = (e or "").strip().lower()
+        return bool(em and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em))
+
+    # Préremplissage : lien e-mail (?email=) prioritaire ; sinon session connectée.
+    if _em_ok_feedback(qp_email_fb):
+        st.session_state.fb_email_in = qp_email_fb
+    else:
+        cur = str(st.session_state.get("fb_email_in") or "").strip()
+        if not _em_ok_feedback(cur) and _em_ok_feedback(auth_em):
+            st.session_state.fb_email_in = auth_em
+        elif not st.session_state.get("fb_email_in"):
+            st.session_state.fb_email_in = ""
+
+    st.subheader("Vos premiers pas avec LumenVia")
+    st.caption(
+        "Les trois évaluations suivantes utilisent une **échelle de 1 à 5** "
+        "(**1** = note la plus basse · **5** = note la plus haute)."
+    )
+
+    with st.form("experience_feedback_form", clear_on_submit=True):
+        em_in = st.text_input(
+            "E-mail (optionnel)",
+            placeholder="toi@domaine.fr",
+            help="Souvent prérempli depuis le lien reçu par e-mail ou depuis ta connexion au site ; tu peux modifier ou effacer.",
+            key="fb_email_in",
+        )
+        emotion = st.radio(
+            "Comment décririez-vous votre état d'esprit après avoir consulté cette synthèse ?",
+            options=("Apaisé", "Éclairé", "Curieux", "Indifférent"),
+            horizontal=True,
+            key="fb_emotion",
+        )
+        st.caption("Échelle 1–5 pour les trois critères ci-dessous (1 = plus faible · 5 = meilleure note).")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            r_illus = int(
+                st.slider(
+                    "L'illustration",
+                    1,
+                    5,
+                    4,
+                    key="fb_r_illus",
+                    help="1 = très insatisfaisant · 5 = très satisfaisant.",
+                )
+            )
+        with c2:
+            r_synth = int(
+                st.slider(
+                    "Le pdf de synthèse",
+                    1,
+                    5,
+                    4,
+                    key="fb_r_synth",
+                    help="1 = très insatisfaisant · 5 = très satisfaisant.",
+                )
+            )
+        with c3:
+            r_audio = int(
+                st.slider(
+                    "L'audio",
+                    1,
+                    5,
+                    4,
+                    key="fb_r_audio",
+                    help="1 = très insatisfaisant · 5 = très satisfaisant.",
+                )
+            )
+
+        utility = st.select_slider(
+            "Ce contenu vous aide-t-il réellement à vous préparer pour la célébration de dimanche ?",
+            options=("Pas vraiment", "Un peu", "Oui, beaucoup"),
+            value="Un peu",
+            key="fb_utility",
+        )
+        standout = st.text_area(
+            "Qu'est-ce qui vous a le plus touché ou semblé le plus utile dans cet envoi ?",
+            max_chars=480,
+            key="fb_standout",
+        )
+        wish = st.text_area(
+            "Une seule chose à améliorer ou à ajouter (musique d'ambiance, texte plus court, …) ?",
+            max_chars=480,
+            key="fb_wish",
+        )
+        submitted = st.form_submit_button("Envoyer mon avis")
+
+    if submitted:
+        em_clean = str(em_in or "").strip().lower()
+        overlay = loading_overlay("Enregistrement de votre retour…")
+        try:
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="experience_feedback",
+                values_by_col={
+                    "entity_id": sha256(f"fb|{utc_now_iso()}|{random.random()}".encode("utf-8")).hexdigest()[:28],
+                    "submitter_email": em_clean,
+                    "emotion_global": str(emotion),
+                    "rating_illustration": str(r_illus),
+                    "rating_synthesis": str(r_synth),
+                    "rating_audio": str(r_audio),
+                    "utility_liturgy": str(utility),
+                    "touch_memorable": (standout or "").strip(),
+                    "wish_improve_one": (wish or "").strip(),
+                    "campaign_hint": q_campaign or "",
+                    "date_dimanche_hint": q_dim[:10] if len(q_dim) >= 10 else q_dim,
+                    "source_route": "feedback",
+                },
+            )
+            st.success("Merci infiniment : ton avis nous aide à faire grandir LumenVia.")
+        except Exception as ex:
+            st.exception(ex)
+        finally:
+            overlay.empty()
+
+
 def render_join() -> None:
-    st.title("Nous rejoindre")
+    # Cette page sert à la fois à l'inscription newsletter et au "Mon compte" via lien e-mail.
+    # /?route=account&email=... pré-remplit l'email.
+    try:
+        qp_email = str(st.query_params.get("email") or "").strip().lower()
+    except Exception:
+        qp_email = ""
+    auth_em0 = str(st.session_state.get("auth_email_lc") or "").strip().lower()
+    is_account_view = bool(qp_email or auth_em0)
+    st.title("Mon compte" if is_account_view else "Nous rejoindre")
 
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
@@ -2669,6 +3353,9 @@ def render_join() -> None:
 
     if "join_email" not in st.session_state:
         st.session_state.join_email = ""
+    # Pré-remplissage via lien e-mailing: /?route=account&email=...
+    if qp_email and not str(st.session_state.join_email).strip():
+        st.session_state.join_email = qp_email
     auth_em = str(st.session_state.get("auth_email_lc") or "").strip()
     if auth_em and not str(st.session_state.join_email).strip():
         st.session_state.join_email = auth_em
@@ -2679,8 +3366,30 @@ def render_join() -> None:
             return None
         return sorted(rows, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
 
+    col_n1, col_n2 = st.columns([1, 1], gap="small")
+    with col_n1:
+        first_name = st.text_input("Prénom", key="join_first_name").strip()
+    with col_n2:
+        last_name = st.text_input("Nom", key="join_last_name").strip()
+
+    country = st.selectbox("Pays", options=["FR"], index=0, key="join_country")
+    phone_e164 = st.text_input(
+        "Téléphone (optionnel, format international)",
+        key="join_phone_e164",
+        placeholder="+33612345678",
+    ).strip()
+
     email_in = st.text_input("Email", key="join_email")
     email_lc = email_in.strip().lower()
+    # Validation format e-mail (syntaxe minimale)
+    is_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_lc)) if email_lc else False
+    if email_in.strip() and not is_email_ok:
+        st.error("Merci d’indiquer une adresse e-mail valide (ex. nom@domaine.fr).")
+    is_phone_ok = True
+    if phone_e164:
+        is_phone_ok = bool(re.match(r"^\+\d{8,15}$", phone_e164))
+        if not is_phone_ok:
+            st.error("Téléphone invalide. Utilise le format E.164, ex. +33612345678.")
     uid = sha256(email_lc.encode("utf-8")).hexdigest()[:24] if email_lc else ""
     latest_sub = _latest_subscription_record(subs, uid, "weekly_friday") if uid else None
     already_in = bool(uid) and _subscription_is_active(latest_sub)
@@ -2688,11 +3397,36 @@ def render_join() -> None:
     if already_in:
         st.success(f"Tu es déjà inscrit à la lettre du vendredi pour **{email_lc}**.")
         st.markdown(_next_newsletter_send_caption())
+        st.divider()
+        st.caption("Tu peux te désinscrire à tout moment (opt-out).")
+        if st.button("Se désinscrire", type="secondary", key="join_opt_out_btn"):
+            ov = loading_overlay("Désinscription…")
+            try:
+                # Append-only : une nouvelle ligne subscriptions marque l’opt-out.
+                sub_entity = sha256(f"sub|{uid}|optout|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+                append_immutable_row(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="subscriptions",
+                    values_by_col={
+                        "entity_id": sub_entity,
+                        "user_entity_id": uid,
+                        "type": "weekly_friday",
+                        "zone": "france",
+                        "length_pref": str((latest_sub or {}).get("length_pref") or "250"),
+                        "opt_in": "false",
+                        "active": "false",
+                    },
+                )
+                st.success("Désinscription enregistrée.")
+                st.rerun()
+            finally:
+                ov.empty()
         return
 
-    st.write("Laisse ton e-mail pour recevoir le vendredi en fin de journée la synthèse du dimanche à venir.")
+    st.write("Laisse tes informations pour recevoir le vendredi en fin de journée la synthèse du dimanche à venir.")
     consent = st.checkbox("J’accepte de recevoir ces e-mails (désinscription possible à tout moment).")
-    if st.button("S’abonner", type="primary", disabled=not (email_in.strip() and consent)):
+    if st.button("S’abonner", type="primary", disabled=not (is_email_ok and first_name and last_name and is_phone_ok and consent)):
         ov = loading_overlay("LumenVia enregistre ton inscription…")
         should_refresh = False
         try:
@@ -2708,6 +3442,10 @@ def render_join() -> None:
                     values_by_col={
                         "entity_id": user_entity_id,
                         "email": email_lc,
+                        "first_name": first_name.strip(),
+                        "last_name": last_name.strip(),
+                        "phone_e164": phone_e164.strip(),
+                        "country": str(country or "").strip(),
                         "source": "newsletter",
                     },
                 )
@@ -2726,6 +3464,7 @@ def render_join() -> None:
                         "type": "weekly_friday",
                         "zone": "france",
                         "length_pref": "250",
+                        "opt_in": "true",
                         "active": "true",
                     },
                 )
@@ -2735,20 +3474,7 @@ def render_join() -> None:
         if should_refresh:
             st.rerun()
 
-    with st.expander("Pourquoi plusieurs lignes dans Google Sheets ?"):
-        st.markdown(
-            """
-Les tables sont **append-only** : chaque événement peut créer une **nouvelle ligne** avec un nouvel historique,  
-sans effacer les anciennes versions.
-
-- **`users`** : identité stable par e-mail (`entity_id` = empreinte de l’e-mail).  
-  On **n’ajoute** une ligne « utilisateur » **que si** aucune ligne n’existe encore pour cet e-mail (ex. première inscription newsletter sans compte mémo).
-
-- **`subscriptions`** : préférences d’envoi (newsletter). C’est **ici** que l’abonnement hebdomadaire est stocké, relié à `user_entity_id`.
-
-Si tu testes plusieurs fois « S’abonner », tu ne devrais plus voir de doublons inutiles dans **`users`** ; seule la table **`subscriptions`** reçoit une nouvelle ligne si tu réactives un abonnement après désactivation (futur).
-            """.strip()
-        )
+    # (supprimé) bloc pédagogique « Pourquoi plusieurs lignes dans Google Sheets ? »
 
 
 def _admin_target_has_illustration(*, gcs: object, bucket_name: str, target: dict) -> bool:
@@ -3538,7 +4264,7 @@ def render_admin_vision_text() -> None:
             st.divider()
             st.subheader("Corrections (remplacer → régénérer → écraser sur Cloud)")
             st.caption(
-                "Flux économe : on journalise l’audit et les corrections dans Google Sheets (append-only), "
+                "Flux économe : on journalise l’audit et les corrections dans Google Sheets (historique), "
                 "puis on régénère l’image via Vertex en prenant l’image actuelle comme référence."
             )
 
@@ -4238,6 +4964,39 @@ def render_admin_plan_consolide() -> None:
       <td>Extensions possibles (autres médias) si le produit le demande.</td>
     </tr>
     <tr>
+      <td><strong>Automatisation envoi hebdomadaire (vendredi soir) — e-mail / SMS</strong></td>
+      <td><span class="lv-st-todo">À faire</span></td>
+      <td>
+        Objectif produit : « chaque vendredi soir votre préparation dominicale directement par e-mail, ou par SMS ».
+        Chantiers : templates éditables (admin), sélection opt-in (Sheets), génération/validation des contenus (PDF/audio),
+        module d’envoi (SMTP, Twilio), journal d’envoi (historique) + anti-doublons.
+        <strong>Mise en route du scheduler « temps réel » :</strong>
+        (1) hébergement qui reste actif (pas seulement lorsqu’un navigateur ouvre l’app) — ex. Streamlit Cloud avec
+        quota suffisant ou conteneur GCP/Cloud Run&nbsp;; (2) déclencheur planifié (ex. <strong>Google Cloud Scheduler</strong>
+        ou GitHub Actions cron) qui appelle un <strong>endpoint HTTP sécurisé</strong> ou un petit script utilisant le compte de service
+        pour lire CMPG/RUNS et lancer l’envoi pour les campagnes dont l’heure est due (fuseau <code>timezone</code> dans CMPG)&nbsp;;
+        (3) variables d’environnement / secrets alignés avec SMTP et Twilio comme en test manuel&nbsp;;
+        (4) idempotence anti-doublons (clé run + date dans RUNS).
+        L’UI «&nbsp;Scheduler&nbsp;» définit déjà les campagnes et le mode manuel&nbsp;; il manque le worker planifié hors session Streamlit.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Captation des retours après mailing (mini-questionnaire)</strong></td>
+      <td><span class="lv-st-partiel">Livré base</span></td>
+      <td>
+        Page publique «&nbsp;Donner votre avis&nbsp;» + route <code>?route=feedback</code>&nbsp;; table Sheets logique
+        <code>experience_feedback</code> (acronyme <strong>RSTN</strong> après <code>tools/init_sheets_db.py</code>) en append-only&nbsp;;
+        lien automatique dans les e-mails lorsque le template contient la phrase
+        <em>👉 Donner mon avis sur cette expérience</em> (éventuellement entre crochets). Reste&nbsp;: relier l’URL depuis le template
+        avec paramètres optionnels (campagne, dimanche ciblé), synthèse admin des réponses, ou export vers Google Forms si besoin terrain.
+      </td>
+    </tr>
+    <tr>
+      <td>Authentification — récupération « mot de passe oublié »</td>
+      <td><span class="lv-st-todo">À refaire</span></td>
+      <td>Section retirée (insatisfaisante). Reconcevoir plus tard (UX + sécurité + parcours).</td>
+    </tr>
+    <tr>
       <td>PDF page de garde (dimanche) + PDF mensuel « Graine de Parole » (encart résolutions)</td>
       <td><span class="lv-st-partiel">Livré v2</span></td>
       <td>
@@ -4317,7 +5076,7 @@ def render_admin_plan_consolide() -> None:
       <td>
         Page dédiée <strong>« Simulateur mobile »</strong> (troisième ligne du menu Administration) : préréglages 320–428&nbsp;px + slider,
         boutons d’accès Dimanche&nbsp;/&nbsp;Mémo&nbsp;/&nbsp;À&nbsp;propos avec cadre ; iframe optionnelle si <code>PUBLIC_APP_URL</code>
-        ou <code>st.context.url</code> disponible ; le toggle «&nbsp;Aperçu mobile&nbsp;» utilise la même largeur.
+        ou <code>st.context.url</code> disponible ; le même réglage de largeur s’applique au cadre téléphone si activé sur cette page.
         Complément recette&nbsp;: Chrome/Edge mode appareil pour clavier réaliste.
       </td>
     </tr>
@@ -4332,7 +5091,7 @@ def render_admin_plan_consolide() -> None:
     <strong>Iframe simulateur&nbsp;:</strong> <code>lumenvia_narrow_nav=1</code> dans l’URL (viewport parent). <strong>Téléphone déployé&nbsp;:</strong> même layout
     si <code>st.context.headers</code> («&nbsp;User-Agent&nbsp;» téléphone/Android/iPhone…) — sans cette détection, Streamlit peut laisser un viewport «&nbsp;bureau&nbsp;»
     où le CSS suffit rarement ; secours <code>lv_nav_five_cols</code> sous <code>max-width:&nbsp;1024px</code>.
-    Connexion / déconnexion&nbsp;: ligne sous la navigation. Grille admin / «&nbsp;Aperçu mobile&nbsp;» masqués ou sautés selon compact.
+    Connexion / déconnexion&nbsp;: ligne sous la navigation. Grille admin masquée ou sautée selon compact&nbsp;; le cadre mobile se pilote depuis la tuile Simulateur.
   </dd>
   <dd>
     <strong>2 — Clavier vs saisie / expander.</strong> Ajouter un <code>padding-bottom</code> substantiel au conteneur principal lorsqu’un champ
@@ -4356,7 +5115,7 @@ def render_admin_plan_consolide() -> None:
   <dt>Priorités rapides (key list)</dt>
   <dd>Cahier des charges : génération automatique d’une version « livrable », visualisation admin, export PDF.</dd>
   <dd>Responsive : media queries &lt; 1024&nbsp;px, navigation empilée ou menu alternatif, tests réels tablette / téléphone.</dd>
-  <dd>Admin : page Simulateur mobile + toggle « Aperçu mobile » (largeur réglable).</dd>
+  <dd>Admin : page Simulateur mobile (+ cadre téléphone pour la session, largeur réglable).</dd>
   <dd>Stabiliser Vision sur le bon projet GCP et valider une analyse complète sans 403.</dd>
   <dd>Repasser sur le PDF mensuel et la couverture si tu veux un gabarit « fascicule » multi-pages.</dd>
   <dd>PWA : choix d’hébergement et socle technique pour exposer le manifest au navigateur.</dd>
@@ -4387,13 +5146,13 @@ _CDC_MARKDOWN_PATH = Path("data/cahier_des_charges.md")
 
 
 def render_admin_cahier_charges() -> None:
-    """Document Markdown versionné + journal append-only Sheets."""
+    """Document Markdown versionné + journal Sheets."""
     st.title("Cahier des charges")
     st.markdown(
         """
 **Document principal** : fichier Markdown dans le dépôt (`data/cahier_des_charges.md`), éditable ci-dessous puis sauvegardé sur le serveur qui exécute Streamlit.
 
-**Journal des évolutions** : entrées **append-only** dans la table Google Sheets `admin_changelog` (traçabilité des décisions sans effacer l’historique).
+**Journal des évolutions** : entrées dans la table Google Sheets `admin_changelog` (traçabilité des décisions sans effacer l’historique).
         """.strip()
     )
 
@@ -4700,8 +5459,14 @@ def render_admin_test_resources() -> None:
     st.subheader("Mes prompts à l’IA (secret sauce)")
     st.caption(
         "Le prompt final est composé de deux parties : "
-        "A) un **socle + des surcouches** versionnés dans Sheets (`Paramètres_IA`) ; "
-        "B) une partie confidentielle (secret sauce) dans `st.secrets` (`IA_SECRET_SAUCE_MD`)."
+        "A) un **socle + surcouches** versionnés dans Sheets (`Paramètres_IA`) ; "
+        "B) une partie confidentielle (secret sauce) dans `st.secrets` (`IA_SECRET_SAUCE_MD`).\n\n"
+        "Règles importantes :\n"
+        "- **Append-only** : chaque modification crée une nouvelle ligne (Version + 1).\n"
+        "- **Par Clé_Prompt, ce n’est pas cumulatif** : une seule version est **effective** (la dernière marquée Actif).\n"
+        "- **Cumulatif entre clés uniquement si le code les assemble** : par exemple, `instructions_base_md` (socle) + "
+        "`overlay_takeaways` / `overlay_no_takeaways` (selon options) + `overlay_catechese_bridge` (si coché). "
+        "Ajouter une nouvelle Clé_Prompt ne change rien tant qu’elle n’est pas consommée dans `_build_prompt()`."
     )
 
     # Secret sauce : on n’affiche jamais le contenu en clair dans l’admin, seulement l’état.
@@ -4907,7 +5672,7 @@ def render_admin_test_resources() -> None:
                 }
                 ws.append_rows([[row_map.get(c, "") for c in header]], value_input_option="RAW")
 
-                st.success("Paramètre IA enregistré (append-only).")
+                st.success("Paramètre IA enregistré.")
                 # Force refresh du cache prompt
                 try:
                     _load_prompt_templates_cached.clear()  # type: ignore[attr-defined]
@@ -5064,6 +5829,1944 @@ def render_admin_readings_cache() -> None:
             )
             st.success(f"Préchargement terminé : **{added}** ligne(s) ajoutée(s).")
         finally:
+            ov.empty()
+
+
+def render_admin_accounts() -> None:
+    st.title("Comptes inscrits")
+    st.caption("Vue HTML (sans tableaux Streamlit) des comptes et de leur origine.")
+
+    cfg = load_config()
+    if not cfg.gcp_service_account or not cfg.gsheet_id:
+        st.warning("Configuration Google Sheets manquante (`gcp_service_account`, `gsheet_id`).")
+        return
+
+    gs = build_gspread_client(cfg.gcp_service_account)
+    try:
+        users = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
+    except Exception as e:
+        st.error(f"Lecture `users` impossible : {e}")
+        return
+    try:
+        subs = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=6000)
+    except Exception:
+        subs = []
+
+    # Filtre simple (côté UI) : sous-chaîne e-mail
+    q = st.text_input("Filtrer (e-mail contient)", value="", key="adm_accounts_filter").strip().lower()
+
+    # Admin canonical : login secret (si présent)
+    try:
+        adm_login, _adm_pwd = _admin_login_and_password()
+    except Exception:
+        adm_login = ""
+
+    def _latest_by_email(rows: list[dict]) -> list[dict]:
+        by: dict[str, dict] = {}
+        for r in rows:
+            em = str(r.get("email") or "").strip().lower()
+            if not em:
+                continue
+            prev = by.get(em)
+            if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+                by[em] = r
+        return sorted(by.values(), key=lambda x: str(x.get("created_at") or ""), reverse=True)
+
+    latest = _latest_by_email(users)
+    if q:
+        latest = [u for u in latest if q in str(u.get("email") or "").strip().lower()]
+
+    def _latest_sub_by_user_entity_id(sub_rows: list[dict]) -> dict[str, dict]:
+        by: dict[str, dict] = {}
+        for r in sub_rows:
+            if str(r.get("type") or "").strip() != "weekly_friday":
+                continue
+            uid = str(r.get("user_entity_id") or "").strip()
+            if not uid:
+                continue
+            prev = by.get(uid)
+            if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+                by[uid] = r
+        return by
+
+    latest_sub = _latest_sub_by_user_entity_id(subs)
+
+    def _kind(u: dict) -> str:
+        em = str(u.get("email") or "").strip().lower()
+        src = str(u.get("source") or "").strip().lower()
+        has_pwd = bool(str(u.get("password_hash_b64") or "").strip())
+        if adm_login and em == adm_login:
+            return "ADMIN"
+        if src in ("dry_run", "test_emailing", "test"):
+            return "TEST (DRY-RUN)"
+        if src == "newsletter":
+            return "NOUS REJOINDRE"
+        if has_pwd:
+            return "COMPTE"
+        return "AUTRE"
+
+    buckets: dict[str, list[dict]] = {"NOUS REJOINDRE": [], "ADMIN": [], "TEST (DRY-RUN)": [], "COMPTE": [], "AUTRE": []}
+    for u in latest:
+        buckets[_kind(u)].append(u)
+
+    st.markdown(
+        f"""
+<div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;margin:0.5rem 0 0.75rem;">
+  <div style="border:1px solid rgba(212,175,55,0.35);padding:0.5rem 0.75rem;background:rgba(255,255,255,0.65);">
+    <div style="text-align:center;font-weight:600;color:#6b5918;">Nous rejoindre</div>
+    <div style="text-align:center;font-size:1.25rem;color:var(--liturgie-text);">{len(buckets['NOUS REJOINDRE'])}</div>
+  </div>
+  <div style="border:1px solid rgba(212,175,55,0.35);padding:0.5rem 0.75rem;background:rgba(255,255,255,0.65);">
+    <div style="text-align:center;font-weight:600;color:#6b5918;">Admin</div>
+    <div style="text-align:center;font-size:1.25rem;color:var(--liturgie-text);">{len(buckets['ADMIN'])}</div>
+  </div>
+  <div style="border:1px solid rgba(212,175,55,0.35);padding:0.5rem 0.75rem;background:rgba(255,255,255,0.65);">
+    <div style="text-align:center;font-weight:600;color:#6b5918;">Test (dry-run)</div>
+    <div style="text-align:center;font-size:1.25rem;color:var(--liturgie-text);">{len(buckets['TEST (DRY-RUN)'])}</div>
+  </div>
+  <div style="border:1px solid rgba(212,175,55,0.35);padding:0.5rem 0.75rem;background:rgba(255,255,255,0.65);">
+    <div style="text-align:center;font-weight:600;color:#6b5918;">Comptes</div>
+    <div style="text-align:center;font-size:1.25rem;color:var(--liturgie-text);">{len(buckets['COMPTE'])}</div>
+  </div>
+  <div style="border:1px solid rgba(212,175,55,0.35);padding:0.5rem 0.75rem;background:rgba(255,255,255,0.65);">
+    <div style="text-align:center;font-weight:600;color:#6b5918;">Total</div>
+    <div style="text-align:center;font-size:1.25rem;color:var(--liturgie-text);">{len(latest)}</div>
+  </div>
+</div>
+        """.strip(),
+        unsafe_allow_html=True,
+    )
+
+    def _render_table(title: str, rows: list[dict]) -> None:
+        def esc(s: object) -> str:
+            return html_escape(str(s or ""))
+
+        body_rows = []
+        for u in rows[:400]:
+            em = str(u.get("email") or "").strip().lower()
+            created = str(u.get("created_at") or "").strip()
+            src = str(u.get("source") or "").strip()
+            uid = str(u.get("entity_id") or "").strip()
+            opt_txt = "—"
+            if uid and title.lower().startswith("nous rejoindre"):
+                rec = latest_sub.get(uid)
+                # Colonne dédiée si présente, sinon fallback sur `active`
+                if rec and str(rec.get("opt_in") or "").strip():
+                    opt_txt = "Oui" if str(rec.get("opt_in") or "").strip().lower() in ("true", "1", "oui", "yes") else "Non"
+                else:
+                    opt_txt = "Oui" if _subscription_is_active(rec) else "Non"
+            body_rows.append(
+                "<tr>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);'>{esc(em)}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{esc(src or '—')}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{esc(opt_txt)}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{esc(created or '—')}</td>"
+                "</tr>"
+            )
+        html = f"""
+<div style="margin:0.75rem 0 0.25rem;font-weight:700;color:#6b5918;text-align:center;">{esc(title)}</div>
+<div style="overflow:auto;border:1px solid rgba(212,175,55,0.35);background:rgba(255,255,255,0.72);">
+<table style="width:100%;border-collapse:collapse;font-size:0.95rem;">
+  <thead>
+    <tr style="background:rgba(212,175,55,0.10);">
+      <th style="text-align:left;padding:9px 10px;">E-mail</th>
+      <th style="text-align:left;padding:9px 10px;">Source</th>
+      <th style="text-align:left;padding:9px 10px;">Opt-in</th>
+      <th style="text-align:left;padding:9px 10px;">Créé le</th>
+    </tr>
+  </thead>
+  <tbody>
+    {''.join(body_rows) if body_rows else '<tr><td colspan="4" style="padding:10px;opacity:0.75;">Aucun.</td></tr>'}
+  </tbody>
+</table>
+</div>
+        """.strip()
+        st.markdown(html, unsafe_allow_html=True)
+
+    _render_table("Nous rejoindre", buckets["NOUS REJOINDRE"])
+    _render_table("Admin", buckets["ADMIN"])
+    _render_table("Test (dry-run)", buckets["TEST (DRY-RUN)"])
+    _render_table("Comptes (mot de passe)", buckets["COMPTE"])
+    if buckets["AUTRE"]:
+        _render_table("Autres", buckets["AUTRE"])
+
+
+def render_admin_emailing() -> None:
+    st.title("Emailing — templates & automatisation")
+    st.caption("Édite le contenu de l’e-mail hebdomadaire (vendredi soir).")
+
+    cfg = load_config()
+    if not cfg.gcp_service_account or not cfg.gsheet_id:
+        st.warning("Configuration Google Sheets manquante (`gcp_service_account`, `gsheet_id`).")
+        return
+
+    gs = build_gspread_client(cfg.gcp_service_account)
+    from core.sheets_db import TableSpec, ensure_table
+
+    ensure_table(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table=TableSpec(
+            name="email_templates",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "template_key",
+                    "channel",
+                    "language",
+                    "subject",
+                    "body",
+                    "status_note",
+                ]
+            ),
+        ),
+    )
+
+    template_key = "weekly_friday_lumenvia"
+    with st.expander("Paramètres du template (clé/canal/langue)", expanded=False):
+        st.caption(f"Template : `{template_key}` (canal: email, langue: fr)")
+
+    from core.emailing import EmailTemplate, render_template, supported_tags, french_day_month_year
+
+    try:
+        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=4000)
+    except Exception:
+        rows = []
+
+    eff = [
+        r
+        for r in rows
+        if str(r.get("template_key") or "").strip() == template_key
+        and str(r.get("channel") or "").strip().lower() == "email"
+        and str(r.get("language") or "").strip().lower() in ("fr", "fr-fr", "france", "")
+        and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+        and str(r.get("active") or "true").strip().lower() not in ("false", "0", "no", "non", "inactive")
+    ]
+    eff_sorted = sorted(eff, key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    current = eff_sorted[0] if eff_sorted else {}
+
+    default_subject = "🕯️ Votre halte LumenVia : Préparez la célébration du dimanche {{date_dimanche}}"
+    default_body = ""
+    try:
+        p = Path("data/emailing_template_raw.txt")
+        if p.is_file():
+            default_body = p.read_text(encoding="utf-8").strip()
+    except Exception:
+        default_body = ""
+
+    with st.expander("Paramètres du template (clé/canal/langue)", expanded=False):
+        subject = st.text_input(
+            "Objet",
+            value=str(current.get("subject") or default_subject).strip(),
+            key="adm_email_tpl_subject",
+        )
+        body = st.text_area(
+            "Corps (texte, avec balises {{...}})",
+            value=str(current.get("body") or default_body).strip(),
+            height=320,
+            key="adm_email_tpl_body",
+        )
+        note = st.text_input("Note (optionnel)", value="", key="adm_email_tpl_note")
+
+    with st.expander("Balises supportées", expanded=False):
+        st.code("\n".join([f"{{{{{t}}}}}" for t in supported_tags()]), language="text")
+
+    st.divider()
+    with st.expander("Dimanche de référence (aperçu + envoi manuel)", expanded=False):
+        # Dimanche cible (par défaut : prochain dimanche)
+        try:
+            today = date.today()
+            next_sun = today + timedelta(days=(6 - today.weekday()) % 7)
+        except Exception:
+            next_sun = date.today()
+        d_pick = st.date_input("Dimanche ciblé", value=next_sun, key="adm_email_sunday_pick")
+        date_str = d_pick.isoformat()[:10]
+
+        # Identité AELF
+        try:
+            ident0, _texts0 = cached_aelf(date_str, zone="france", _identity_schema=4)
+        except Exception:
+            ident0 = None
+
+        # Liens signés (si objets présents)
+        origin = _lumenvia_app_origin_url() or ""
+        url_app = (origin.rstrip("/") + "/?sunday=" + date_str) if origin else ""
+        url_pdf = ""
+        url_audio = ""
+        url_illu = ""
+        try:
+            gcs = build_gcs_client(cfg.gcp_service_account)
+            # PDF
+            p_pdf = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+            s_pdf = _gcs_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), path=p_pdf) if cfg.gcs_bucket_name else None
+            url_pdf = s_pdf or ""
+            # Illustration (multi-extensions, comme ailleurs)
+            year = date_str[:4]
+            if cfg.gcs_bucket_name:
+                cand = [f"Images/illustrations/{year}/{date_str}{ext}" for ext in (".webp", ".png", ".jpg", ".jpeg")]
+                url_illu = (
+                    _gcs_first_signed_url(
+                        gcs=gcs,
+                        bucket_name=str(cfg.gcs_bucket_name).strip(),
+                        candidate_paths=cand,
+                    )
+                    or ""
+                )
+        except Exception:
+            pass
+
+        # Audio : on cherche la dernière génération puis son audio associé
+        try:
+            gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=6000)
+            gens_d = [g for g in gens if str(g.get("date") or "").strip()[:10] == date_str and str(g.get("zone") or "").strip() == "france"]
+            gens_d.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            gen_id = str((gens_d[0] or {}).get("entity_id") or "").strip() if gens_d else ""
+            aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=6000)
+            aud_d = [a for a in aud_rows if str(a.get("gen_entity_id") or "").strip() == gen_id]
+            aud_d.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            p_audio = str((aud_d[0] or {}).get("gcs_path") or "").strip() if aud_d else ""
+            if p_audio and cfg.gcs_bucket_name:
+                try:
+                    gcs = build_gcs_client(cfg.gcp_service_account)
+                    url_audio = _gcs_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), path=p_audio) or ""
+                except Exception:
+                    url_audio = ""
+        except Exception:
+            pass
+
+        # Valeurs exemple (issues d'un dimanche réel)
+        values = {
+            "prenom": "Jean",
+            "nom": "Dupont",
+            "origin": origin,
+            "date_dimanche": french_day_month_year(d_pick),
+            "nom_du_dimanche": _liturgy_display_label(
+                (getattr(ident0, "fete", None) or "").strip()
+                or (_jour_liturgique(ident0) if ident0 else "")  # type: ignore[arg-type]
+                or ""
+            )
+            or "—",
+            "url_pdf": url_pdf,
+            "url_audio": url_audio,
+            "url_illustration": url_illu,
+            "url_app": url_app,
+            "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
+        }
+        rendered = render_template(EmailTemplate(subject=subject, body=body), values=values)
+        st.markdown(f"**Objet :** {rendered.subject}")
+        st.code((rendered.body or "")[:4000] or "—")
+
+    st.caption(
+        "Astuce : pour rendre les CTA cliquables, mets directement des URLs dans le corps, par ex. "
+        "`{{url_pdf}}`, `{{url_audio}}`, `{{url_app}}`."
+    )
+
+    st.divider()
+    if st.button("Enregistrer le template", type="primary", disabled=not (subject.strip() and body.strip())):
+        ov = loading_overlay("Enregistrement du template emailing…")
+        try:
+            # Inactivation (historique) de la version précédente active (si elle existe)
+            try:
+                rows2 = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=4000)
+            except Exception:
+                rows2 = []
+            prev_eff = [
+                r
+                for r in rows2
+                if str(r.get("template_key") or "").strip() == template_key
+                and str(r.get("channel") or "").strip().lower() == "email"
+                and str(r.get("language") or "").strip().lower() in ("fr", "fr-fr", "france", "")
+                and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                and str(r.get("active") or "true").strip().lower() not in ("false", "0", "no", "non", "inactive")
+            ]
+            prev_eff_sorted = sorted(prev_eff, key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            prev = prev_eff_sorted[0] if prev_eff_sorted else None
+            if prev and (str(prev.get("subject") or "").strip() != subject.strip() or str(prev.get("body") or "").strip() != body.strip()):
+                append_immutable_row(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="email_templates",
+                    values_by_col={
+                        "entity_id": sha256(f"tpl|inactive|{template_key}|{prev.get('entity_id')}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                        "template_key": template_key,
+                        "channel": "email",
+                        "language": "fr",
+                        "subject": str(prev.get("subject") or "").strip(),
+                        "body": str(prev.get("body") or "").strip(),
+                        "active": "false",
+                        "status_note": f"superseded_by_next ({str(prev.get('entity_id') or '')[:12]})",
+                    },
+                )
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="email_templates",
+                values_by_col={
+                    "entity_id": sha256(f"tpl|{template_key}|{subject}|{body}".encode("utf-8")).hexdigest()[:24],
+                    "template_key": template_key,
+                    "channel": "email",
+                    "language": "fr",
+                    "subject": subject.strip(),
+                    "body": body.strip(),
+                    "active": "true",
+                    "status_note": note.strip(),
+                },
+            )
+            st.success("Template enregistré.")
+            st.rerun()
+        finally:
+            ov.empty()
+
+    st.divider()
+    st.subheader("Déclencher un envoi (manuel)")
+    st.caption(
+        "Par défaut, c’est un **dry-run** : envoi uniquement vers les coordonnées de test (secrets). "
+        "Coche l’option pour envoyer à tous les inscrits opt-in."
+    )
+
+    # UI simplifiée : 3 cases uniquement
+    send_email = st.checkbox("Envoyer e-mail", value=True, key="adm_email_send_email")
+    send_sms = st.checkbox("Envoyer SMS", value=False, key="adm_email_send_sms")
+    send_to_all = st.checkbox(
+        "Envoyer à tous les inscrits opt-in (désactivé par défaut)",
+        value=False,
+        key="adm_email_send_to_all",
+    )
+
+    # Comportement implicite
+    send_email_as_html = True
+    use_lv_html_template = True
+    send_email_html_only = False
+    sms_short_mode = True
+    def _is_email_ok(email: str) -> bool:
+        email_lc = (email or "").strip().lower()
+        return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_lc)) if email_lc else False
+
+    # Dry-run : prioritaire depuis la table users (source = dry_run/test_emailing)
+    users_rows_for_dry = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
+    dry_candidates = [
+        u
+        for u in users_rows_for_dry
+        if str(u.get("source") or "").strip().lower() in ("dry_run", "test_emailing", "test")
+        and _is_email_ok(str(u.get("email") or "").strip())
+    ]
+    dry_candidates.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    dry_user = dry_candidates[0] if dry_candidates else {}
+    dry_email_in = str(dry_user.get("email") or "").strip()
+    dry_phone_in = str(dry_user.get("phone_e164") or "").strip()
+    # Fallback : secrets (option B à plat ou section [dry_run])
+    dry_email_secret = ""
+    dry_phone_secret = ""
+    try:
+        s = st.secrets
+        dry_email_secret = str(s.get("EMAIL_DRY_RUN_TO") or "").strip()
+        dry_phone_secret = str(s.get("SMS_DRY_RUN_TO") or "").strip()
+        if not dry_email_secret and isinstance(s.get("dry_run"), dict):
+            dry_email_secret = str((s.get("dry_run") or {}).get("EMAIL_DRY_RUN_TO") or "").strip()
+        if not dry_phone_secret and isinstance(s.get("dry_run"), dict):
+            dry_phone_secret = str((s.get("dry_run") or {}).get("SMS_DRY_RUN_TO") or "").strip()
+    except Exception:
+        pass
+
+    if not dry_email_in and _is_email_ok(dry_email_secret):
+        dry_email_in = dry_email_secret
+    if not dry_phone_in and dry_phone_secret:
+        dry_phone_in = dry_phone_secret
+
+    if not dry_email_in and not dry_phone_in:
+        st.warning(
+            "Aucun destinataire de test trouvé. "
+            "Soit ajoute une ligne `users` avec `source=dry_run` + un e‑mail valide, "
+            "soit configure `EMAIL_DRY_RUN_TO` / `SMS_DRY_RUN_TO` dans les secrets."
+        )
+    st.markdown("**Destinataire dry-run (depuis `users`)**")
+    st.code(f"email: {dry_email_in or '—'}\nphone_e164: {dry_phone_in or '—'}\nsource: {str(dry_user.get('source') or '').strip() or '—'}")
+    debug_verbose = False
+
+    if st.button("Lancer l’envoi", type="primary", key="adm_email_send_run", disabled=not (send_email or send_sms)):
+        ov = loading_overlay("Préparation de l’envoi…")
+        try:
+            import traceback
+
+            # recipients
+            users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
+            subs_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=6000)
+
+            def _latest_sub_by_uid() -> dict[str, dict]:
+                by: dict[str, dict] = {}
+                for r in subs_rows:
+                    if str(r.get("type") or "").strip() != "weekly_friday":
+                        continue
+                    uid0 = str(r.get("user_entity_id") or "").strip()
+                    if not uid0:
+                        continue
+                    prev = by.get(uid0)
+                    if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+                        by[uid0] = r
+                return by
+
+            latest_sub = _latest_sub_by_uid()
+
+            by_uid_user: dict[str, dict] = {}
+            for u in users_rows:
+                uid0 = str(u.get("entity_id") or "").strip()
+                if not uid0:
+                    continue
+                prev = by_uid_user.get(uid0)
+                if not prev or str(u.get("created_at") or "") > str(prev.get("created_at") or ""):
+                    by_uid_user[uid0] = u
+
+            recipients: list[tuple[str, dict]] = []
+            if send_to_all:
+                for uid0, subr in latest_sub.items():
+                    if str(subr.get("status") or "").strip().lower() in ("inactive", "deleted"):
+                        continue
+                    if str(subr.get("opt_in") or "").strip().lower() not in ("true", "1", "oui", "yes"):
+                        continue
+                    if str(subr.get("active") or "").strip().lower() not in ("true", "1", "oui", "yes", "active"):
+                        continue
+                    recipients.append((uid0, by_uid_user.get(uid0) or {}))
+            else:
+                recipients = [
+                    (
+                        "dry_run",
+                        {
+                            "email": dry_email_in.strip(),
+                            "phone_e164": dry_phone_in.strip(),
+                            "first_name": "Test",
+                            "last_name": "JOPAI",
+                        },
+                    )
+                ]
+
+            from core.outbound import SmtpConfig, TwilioConfig, send_smtp_email, send_twilio_sms
+            from core.sheets_db import TableSpec, ensure_table
+
+            def _secret_get(*keys: str) -> str:
+                """
+                Lit une valeur depuis st.secrets en supportant:
+                - clés racine (ex: SMTP_HOST)
+                - sous-sections (ex: [smtp] SMTP_HOST=...)
+                """
+                try:
+                    s = st.secrets
+                except Exception:
+                    return ""
+                # 1) racine
+                for k in keys:
+                    try:
+                        v = s.get(k)  # type: ignore[attr-defined]
+                    except Exception:
+                        v = None
+                    if v is not None and str(v).strip():
+                        return str(v).strip()
+                # 2) sous-sections connues
+                sections = ("smtp", "twilio", "dry_run")
+                for sec in sections:
+                    try:
+                        block = s.get(sec)  # type: ignore[attr-defined]
+                    except Exception:
+                        block = None
+                    if not isinstance(block, dict):
+                        continue
+                    for k in keys:
+                        v = block.get(k)
+                        if v is not None and str(v).strip():
+                            return str(v).strip()
+                return ""
+
+            # Outbound log
+            ensure_table(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table=TableSpec(
+                    name="outbound_messages",
+                    columns=with_concat(
+                        [
+                            *BASE_COLUMNS,
+                            "channel",
+                            "template_key",
+                            "user_entity_id",
+                            "email",
+                            "phone_e164",
+                            "date_dimanche",
+                            "status_detail",
+                            "scheduled_at",
+                            "sent_at",
+                            "error",
+                        ]
+                    ),
+                ),
+            )
+
+            # SMTP config
+            try:
+                smtp_cfg = SmtpConfig(
+                    host=_secret_get("SMTP_HOST"),
+                    port=int(_secret_get("SMTP_PORT") or 587),
+                    username=_secret_get("SMTP_USER"),
+                    password=_secret_get("SMTP_PASSWORD"),
+                    from_email=_secret_get("SMTP_FROM"),
+                    use_tls=str(_secret_get("SMTP_USE_TLS") or "true").strip().lower()
+                    not in ("0", "false", "no", "off"),
+                )
+            except Exception:
+                smtp_cfg = SmtpConfig(host="", port=587, username="", password="", from_email="")
+
+            # Twilio config
+            try:
+                tw_cfg = TwilioConfig(
+                    account_sid=_secret_get("TWILIO_ACCOUNT_SID"),
+                    auth_token=_secret_get("TWILIO_AUTH_TOKEN"),
+                    from_phone_e164=_secret_get("TWILIO_FROM", "TWILIO_FROM_NUMBER"),
+                )
+            except Exception:
+                tw_cfg = TwilioConfig(account_sid="", auth_token="", from_phone_e164="")
+
+            ok = 0
+            err = 0
+            debug_rows: list[dict[str, str]] = []
+
+            def _linkify_html(text: str) -> str:
+                def repl(m: re.Match) -> str:
+                    u = m.group(0)
+                    return f'<a href="{u}" target="_blank" rel="noopener noreferrer">{u}</a>'
+
+                return re.sub(r"(https?://[^\s<]+)", repl, text or "")
+
+            def _body_to_html(body0: str) -> str:
+                b = (body0 or "").strip()
+                if re.search(r"(?is)<\s*(html|body|div|p|table|br|a)\b", b):
+                    return b
+                b = _linkify_html(b)
+                paras = [p.strip() for p in b.split("\n\n") if p.strip()]
+                out: list[str] = []
+                for p in paras:
+                    out.append("<p>" + p.replace("\n", "<br>\n") + "</p>")
+                inner = ("\n".join(out) if out else "<p></p>")
+                return (
+                    "<!doctype html>\n"
+                    "<html><head><meta charset=\"utf-8\">"
+                    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+                    "<style>"
+                    "body{font-family:Arial,Helvetica,sans-serif;line-height:1.45;color:#0b2745;}"
+                    "p{margin:0 0 12px 0;}"
+                    "a{color:#0d9488;text-decoration:underline;}"
+                    "img{max-width:100%;height:auto;display:block;margin:10px 0;}"
+                    "</style>"
+                    "</head><body>\n"
+                    f"{inner}\n"
+                    "</body></html>"
+                )
+
+            def _lv_email_html(*, subject0: str, values0: dict[str, str], intro_text: str) -> str:
+                prenom = (values0.get("prenom") or "").strip() or "—"
+                nom = (values0.get("nom") or "").strip() or ""
+                origin0 = (values0.get("origin") or "").strip()
+                date_dim = (values0.get("date_dimanche") or "").strip()
+                nom_dim = (values0.get("nom_du_dimanche") or "").strip()
+                url_pdf0 = (values0.get("url_pdf") or "").strip()
+                url_audio0 = (values0.get("url_audio") or "").strip()
+                url_app0 = (values0.get("url_app") or "").strip()
+                url_illu0 = (values0.get("url_illustration") or "").strip()
+                optout0 = (values0.get("optout_url") or "").strip()
+                email0 = (values0.get("email") or "").strip().lower()
+
+                pref_url = ""
+                if origin0 and email0:
+                    try:
+                        from urllib.parse import quote_plus as _q
+                    except Exception:  # pragma: no cover
+                        _q = None  # type: ignore[assignment]
+                    enc = _q(email0) if _q else email0
+                    pref_url = origin0.rstrip("/") + "/?route=account&email=" + enc
+
+                def btn(label: str, url: str) -> str:
+                    if not url:
+                        return ""
+                    return (
+                        f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
+                        'style="display:inline-block;background:#0d9488;color:white;'
+                        'padding:10px 14px;border-radius:10px;text-decoration:none;'
+                        'font-weight:700;margin:6px 0;">'
+                        f"{label}</a>"
+                    )
+
+                who = f"{prenom} {nom}".strip()
+                # On retire les lignes techniques / URLs signées du corps (l'illustration est rendue dans une card).
+                raw_lines = [ln.strip() for ln in (intro_text or "").replace("\r\n", "\n").split("\n")]
+                raw_lines = [ln for ln in raw_lines if ln]
+                filtered: list[str] = []
+                for ln in raw_lines:
+                    if re.match(r"(?i)^bonjour\b", ln):
+                        continue
+                    if re.match(r"(?i)^illustration\s*:\s*https?://", ln):
+                        continue
+                    # Évite d'afficher des URLs signées interminables en clair
+                    if "X-Goog-Algorithm=" in ln or "X-Goog-Credential=" in ln or "X-Goog-Signature=" in ln:
+                        continue
+                    if "{{affichage_de_l_illustration_de_la_semaine" in ln:
+                        continue
+                    filtered.append(ln)
+                if not filtered:
+                    filtered = ["La fin de semaine approche : voici votre préparation dominicale."]
+
+                # Mise en forme: paragraphes + liste à puces pour les points clés
+                bullets: list[str] = []
+                paras: list[str] = []
+                for ln in filtered:
+                    if re.match(r"(?i)^(la synth[eè]se|l['’]exp[eé]rience|l['’]illustration)\b", ln) or ln.startswith(("-", "•")):
+                        bullets.append(ln.lstrip("-• ").strip())
+                    else:
+                        paras.append(ln)
+
+                intro_html = ""
+                for p in paras[:4]:
+                    pp = lumenvia_wrap_feedback_cta_with_link(
+                        (p or "").strip(),
+                        origin_for_href=origin0,
+                        recipient_email=email0 or None,
+                    )
+                    pp = _linkify_html(pp)
+                    for kw in ("LumenVia", "JOPAI", "PDF", "Audio", "Illustration", "messe", "Parole"):
+                        pp = re.sub(rf"(?i)\b{re.escape(kw)}\b", lambda m: f"<strong>{m.group(0)}</strong>", pp)
+                    intro_html += f"<p>{pp}</p>"
+                if bullets:
+                    def _esc(s: str) -> str:
+                        return (
+                            (s or "")
+                            .replace("&", "&amp;")
+                            .replace("<", "&lt;")
+                            .replace(">", "&gt;")
+                            .replace('"', "&quot;")
+                        )
+
+                    def _bullet_html(b: str) -> str:
+                        bb0 = (b or "").strip()
+                        if "👉" in bb0:
+                            left, right = bb0.split("👉", 1)
+                            left = left.strip()
+                            right = right.strip()
+                            href = ""
+                            if url_pdf0 and re.search(r"(?i)synth[èe]se.*pdf|pdf", bb0):
+                                href = url_pdf0
+                            elif url_audio0 and re.search(r"(?i)audio|[ée]couter", bb0):
+                                href = url_audio0
+                            elif url_illu0 and re.search(r"(?i)image|illustration", bb0):
+                                href = url_illu0
+                            fb_url = lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None)
+                            if (
+                                not href
+                                and fb_url
+                                and re.search(r"(?i)donner\s+mon\s+avis\s+sur\s+cette\s+expérience", right)
+                            ):
+                                href = fb_url
+                            # Soft return: texte puis retour doux puis CTA
+                            if href:
+                                return (
+                                    f"{_esc(left)}<br>"
+                                    f"👉 <a href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\"><strong>{_esc(right)}</strong></a>"
+                                ).strip()
+                            return f"{_esc(left)}<br>👉 <strong>{_esc(right)}</strong>".strip()
+                        # Sans CTA: texte simple, sans linkify (évite de casser des URLs)
+                        return _esc(bb0)
+
+                    items = "".join([f"<li style=\"margin:8px 0;\">{_bullet_html(b)}</li>" for b in bullets[:8]])
+                    intro_html += f"<ul style=\"margin:10px 0 6px 18px;padding:0;\">{items}</ul>"
+
+                # Citation mise en valeur (couleur compatible LumenVia)
+                quote_txt = (
+                    "LumenVia n'est pas là pour remplacer la rencontre, mais pour la préparer, "
+                    "afin que chaque messe devienne une rencontre plus consciente avec le Christ."
+                )
+                intro_html += (
+                    "<p style=\"margin-top:14px;padding:10px 12px;border-left:4px solid #0d9488;"
+                    "background:#f0fdfa;color:#0b2745;border-radius:10px;\">"
+                    f"<em>{quote_txt}</em></p>"
+                )
+
+                cards = []
+                if url_pdf0:
+                    cards.append(
+                        "<div style=\"border:1px solid #e7e5e4;border-radius:14px;padding:14px;margin:12px 0;\">"
+                        "<div style=\"font-size:16px;font-weight:800;\">Synthèse illustrée (PDF)</div>"
+                        "<div style=\"color:#334155;margin:6px 0;\">Retrouvez le fil rouge qui relie les textes.</div>"
+                        f"{btn('Télécharger le PDF', url_pdf0)}"
+                        "</div>"
+                    )
+                if url_audio0:
+                    cards.append(
+                        "<div style=\"border:1px solid #e7e5e4;border-radius:14px;padding:14px;margin:12px 0;\">"
+                        "<div style=\"font-size:16px;font-weight:800;\">Expérience sonore (Audio)</div>"
+                        "<div style=\"color:#334155;margin:6px 0;\">Écoutez la synthèse en chemin.</div>"
+                        f"{btn('Écouter l’audio', url_audio0)}"
+                        "</div>"
+                    )
+                if url_illu0:
+                    cards.append(
+                        "<div style=\"border:1px solid #e7e5e4;border-radius:14px;padding:14px;margin:12px 0;\">"
+                        "<div style=\"font-size:16px;font-weight:800;\">Illustration de la semaine</div>"
+                        f"<div style=\"margin:14px 0;text-align:center;\">"
+                        f"<a href=\"{url_app0 or url_illu0}\" target=\"_blank\" rel=\"noopener noreferrer\">"
+                        f"<img src=\"{url_illu0}\" alt=\"Illustration\" style=\"border-radius:12px;max-width:260px;width:100%;\">"
+                        "</a></div>"
+                        f"{btn('Voir l’illustration', url_illu0)}"
+                        "</div>"
+                    )
+
+                footer_links = []
+                # Liens de footer (cibles fixes)
+                if origin0:
+                    footer_links.append(
+                        f'<a href="{origin0.rstrip("/")}/?route=about" target="_blank" rel="noopener noreferrer">Accéder à LumenVia</a>'
+                    )
+                if pref_url:
+                    footer_links.append(f'<a href="{pref_url}" target="_blank" rel="noopener noreferrer">Gérer mes préférences</a>')
+                footer_html = " • ".join(footer_links)
+
+                h2 = (nom_dim + (" — " + date_dim if date_dim else "")).strip(" —")
+                parts: list[str] = []
+                parts.append("<!doctype html>")
+                parts.append("<html><head><meta charset=\"utf-8\">")
+                parts.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
+                parts.append("<style>")
+                parts.append("body{font-family:Montserrat,Helvetica,Arial,sans-serif;line-height:1.55;color:#2F3640;background:#ffffff;}")
+                parts.append(".wrap{max-width:640px;margin:0 auto;padding:18px;}")
+                parts.append(".title{font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:20px;font-weight:900;margin:0 0 6px 0;color:#2F3640;}")
+                parts.append(".sub{color:#334155;margin:0 0 14px 0;}")
+                parts.append(".hr{height:1px;background:#e7e5e4;margin:14px 0;}")
+                parts.append("a{color:#2F3640;}")
+                # Identité JOPAI© (immuable) dans l'e-mail
+                parts.append(".jopai{font-family:Montserrat,Helvetica,Arial,sans-serif;font-size:12px;letter-spacing:0.3px;}")
+                parts.append(".jopai .jop{font-weight:800;color:#0d9488;}")
+                parts.append(".jopai .ai{font-style:italic;color:#0b2745;}")
+                parts.append(".jopai .rest{color:#0b2745;}")
+                parts.append("</style></head><body><div class=\"wrap\">")
+                parts.append(f"<div class=\"title\">{subject0}</div>")
+                if h2:
+                    parts.append(f"<div class=\"sub\">{h2}</div>")
+                parts.append("<div class=\"hr\"></div>")
+                parts.append(f"<p>Bonjour {who},</p>")
+                parts.append(intro_html)
+                parts.append("".join(cards))
+                if footer_html:
+                    parts.append("<div class=\"hr\"></div>")
+                    parts.append(f"<p style=\"color:#475569;font-size:12px;\">{footer_html}</p>")
+                parts.append("<div class=\"hr\"></div>")
+                parts.append(
+                    "<div class=\"jopai\">"
+                    "<span class=\"jop\">JOP</span><span class=\"ai\">AI</span><sup class=\"ai\">©</sup>"
+                    "<span class=\"rest\"> LumenVia - 2026 | TOUS DROITS RESERVES</span>"
+                    "</div>"
+                )
+                parts.append("</div></body></html>")
+                return "".join(parts)
+
+            def _inject_illustration_placeholder(*, text: str, url_illustration: str, as_html: bool) -> str:
+                """
+                Remplace le placeholder libre du template docx par un rendu concret.
+                - HTML: injecte <img> + lien
+                - texte: injecte l'URL si dispo
+                """
+                s = str(text or "")
+                # Tolère plusieurs variantes observées (apostrophes différentes / espaces).
+                variants = (
+                    "{{affichage de l’illustration de la semaine}}",
+                    "{{affichage de l'illustration de la semaine}}",
+                    "{{affichage de l’illustration de la semaine }}",
+                    "{{affichage de l'illustration de la semaine }}",
+                )
+                if not any(v in s for v in variants):
+                    return s
+                u = (url_illustration or "").strip()
+                if not u:
+                    rep = "" if as_html else ""
+                else:
+                    if as_html:
+                        rep = (
+                            f'<p><a href="{u}" target="_blank" rel="noopener noreferrer">Voir l’illustration de la semaine</a></p>'
+                            f'<p><img src="{u}" alt="Illustration de la semaine"></p>'
+                        )
+                    else:
+                        rep = f"Illustration : {u}"
+                for v in variants:
+                    s = s.replace(v, rep)
+                return s
+            for uid0, urec in recipients[:500]:
+                to_email = str(urec.get("email") or "").strip()
+                to_phone = str(urec.get("phone_e164") or "").strip()
+                values2 = dict(values)
+                values2["prenom"] = str(urec.get("first_name") or "—").strip() or "—"
+                values2["nom"] = str(urec.get("last_name") or "—").strip() or "—"
+                values2["email"] = to_email
+                # Lien préférences: pré-remplit l'email sur "Nous rejoindre"
+                try:
+                    from urllib.parse import quote_plus
+                except Exception:  # pragma: no cover
+                    quote_plus = None  # type: ignore[assignment]
+                if values2.get("origin") and to_email:
+                    enc = quote_plus(to_email) if quote_plus else to_email
+                    values2["optout_url"] = values2["origin"].rstrip("/") + "/?route=account&email=" + enc
+                rendered2 = render_template(EmailTemplate(subject=subject, body=body), values=values2)
+                # Placeholder "docx" (non-tag) : illustration
+                rendered2 = EmailTemplate(
+                    subject=rendered2.subject,
+                    body=_inject_illustration_placeholder(
+                        text=rendered2.body,
+                        url_illustration=str(values2.get("url_illustration") or ""),
+                        as_html=False,
+                    ),
+                )
+                # Nettoyage des artefacts du template (souvent issus d’un copier/coller mail)
+                body_clean = (rendered2.body or "").replace("\r\n", "\n").strip()
+                body_clean = re.sub(r"(?im)^\s*Objet\s*:\s*.*\n+", "", body_clean)
+                body_clean = re.sub(r"(?im)^\s*Corps du message\s*:\s*\n*", "", body_clean)
+                rendered2 = EmailTemplate(subject=rendered2.subject, body=body_clean.strip())
+
+                if send_email:
+                    try:
+                        if not smtp_cfg.host or not smtp_cfg.from_email:
+                            raise RuntimeError("SMTP non configuré (SMTP_HOST/SMTP_FROM).")
+                        if not to_email:
+                            raise RuntimeError("E-mail destinataire manquant.")
+                        html_src = _inject_illustration_placeholder(
+                            text=rendered2.body,
+                            url_illustration=str(values2.get("url_illustration") or ""),
+                            as_html=True,
+                        )
+                        if send_email_as_html and use_lv_html_template:
+                            html2 = _lv_email_html(
+                                subject0=rendered2.subject,
+                                values0={k: str(v) for k, v in values2.items()},
+                                intro_text=rendered2.body,
+                            )
+                        else:
+                            html2 = _body_to_html(html_src) if send_email_as_html else None
+                        send_smtp_email(
+                            cfg=smtp_cfg,
+                            to_email=to_email,
+                            subject=rendered2.subject,
+                            body_text=rendered2.body,
+                            body_html=html2,
+                            html_only=bool(send_email_html_only and send_email_as_html),
+                        )
+                        ok += 1
+                        if debug_verbose:
+                            debug_rows.append(
+                                {
+                                    "channel": "email",
+                                    "status": "ok",
+                                    "uid": str(uid0),
+                                    "to": to_email,
+                                    "detail": "sent",
+                                }
+                            )
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="outbound_messages",
+                            values_by_col={
+                                "entity_id": sha256(f"msg|email|{uid0}|{date_str}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                                "channel": "email",
+                                "template_key": template_key,
+                                "user_entity_id": uid0,
+                                "email": to_email,
+                                "phone_e164": "",
+                                "date_dimanche": date_str,
+                                "status_detail": "sent",
+                                "scheduled_at": utc_now_iso(),
+                                "sent_at": utc_now_iso(),
+                                "error": "",
+                            },
+                        )
+                    except Exception as e:
+                        err += 1
+                        tb = traceback.format_exc()
+                        debug_rows.append(
+                            {
+                                "channel": "email",
+                                "status": "error",
+                                "uid": str(uid0),
+                                "to": (to_email or "—"),
+                                "detail": f"{type(e).__name__}: {str(e)}",
+                            }
+                        )
+                        if debug_verbose:
+                            st.error(f"Erreur EMAIL → {to_email or '—'}")
+                            st.code(tb[:8000] or (str(e)[:2000] or "—"))
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="outbound_messages",
+                            values_by_col={
+                                "entity_id": sha256(f"msg|email|{uid0}|{date_str}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                                "channel": "email",
+                                "template_key": template_key,
+                                "user_entity_id": uid0,
+                                "email": to_email,
+                                "phone_e164": "",
+                                "date_dimanche": date_str,
+                                "status_detail": "error",
+                                "scheduled_at": utc_now_iso(),
+                                "sent_at": "",
+                                "error": str(e)[:900],
+                            },
+                        )
+
+                if send_sms:
+                    try:
+                        if not tw_cfg.account_sid or not tw_cfg.from_phone_e164:
+                            raise RuntimeError("Twilio non configuré (TWILIO_*).")
+                        if not to_phone:
+                            raise RuntimeError("Téléphone destinataire manquant.")
+                        if not re.match(r"^\+[1-9]\d{6,14}$", to_phone):
+                            raise RuntimeError("Téléphone invalide (format E.164 attendu, ex: +33612345678).")
+                        from core.outbound import fetch_twilio_message_status
+
+                        sms_body = rendered2.body
+                        if sms_short_mode:
+                            # SMS ultra-minimaliste pour éviter tout filtrage opérateur (Twilio 30044).
+                            # Aucun lien, pas d’emoji, pas de ponctuation exotique.
+                            sms_body = "Message de JOPAI LumenVia"
+
+                        sid = send_twilio_sms(cfg=tw_cfg, to_phone_e164=to_phone, body_text=sms_body)
+                        st_tw = fetch_twilio_message_status(cfg=tw_cfg, sid=sid) if sid else {"status": "", "error_code": "", "error_message": ""}
+                        if debug_verbose and st_tw.get("status") == "not_found":
+                            st.warning(
+                                "Twilio: SID introuvable via l'API. "
+                                "Tu consultes probablement un autre projet/compte dans la console Twilio. "
+                                f"Compte utilisé par l'app: …{str(tw_cfg.account_sid or '')[-6:]} "
+                                f"(from: {tw_cfg.from_phone_e164 or '—'})."
+                            )
+                        ok += 1
+                        if debug_verbose:
+                            debug_rows.append(
+                                {
+                                    "channel": "sms",
+                                    "status": "ok",
+                                    "uid": str(uid0),
+                                    "to": to_phone,
+                                    "detail": (
+                                        f"sid={sid} status={st_tw.get('status') or '—'}"
+                                        + (f" err={st_tw.get('error_code')}" if st_tw.get("error_code") else "")
+                                        + (f" msg={st_tw.get('error_message')}" if st_tw.get("error_message") else "")
+                                    )
+                                    if sid
+                                    else "sent",
+                                }
+                            )
+                            st.caption(f"SMS envoyé (contenu) : {sms_body}")
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="outbound_messages",
+                            values_by_col={
+                                "entity_id": sha256(f"msg|sms|{uid0}|{date_str}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                                "channel": "sms",
+                                "template_key": template_key,
+                                "user_entity_id": uid0,
+                                "email": "",
+                                "phone_e164": to_phone,
+                                "date_dimanche": date_str,
+                                "status_detail": (
+                                    f"sid={sid} status={st_tw.get('status') or '—'}"
+                                    + (f" err={st_tw.get('error_code')}" if st_tw.get("error_code") else "")
+                                    + (f" msg={st_tw.get('error_message')}" if st_tw.get("error_message") else "")
+                                )
+                                if sid
+                                else "sent",
+                                "scheduled_at": utc_now_iso(),
+                                "sent_at": utc_now_iso(),
+                                "error": "",
+                            },
+                        )
+                    except Exception as e:
+                        err += 1
+                        tb = traceback.format_exc()
+                        debug_rows.append(
+                            {
+                                "channel": "sms",
+                                "status": "error",
+                                "uid": str(uid0),
+                                "to": (to_phone or "—"),
+                                "detail": f"{type(e).__name__}: {str(e)}",
+                            }
+                        )
+                        if debug_verbose:
+                            st.error(f"Erreur SMS → {to_phone or '—'}")
+                            st.code(tb[:8000] or (str(e)[:2000] or "—"))
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="outbound_messages",
+                            values_by_col={
+                                "entity_id": sha256(f"msg|sms|{uid0}|{date_str}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                                "channel": "sms",
+                                "template_key": template_key,
+                                "user_entity_id": uid0,
+                                "email": "",
+                                "phone_e164": to_phone,
+                                "date_dimanche": date_str,
+                                "status_detail": "error",
+                                "scheduled_at": utc_now_iso(),
+                                "sent_at": "",
+                                "error": str(e)[:900],
+                            },
+                        )
+
+            st.success(f"Terminé : {ok} envoi(s) OK, {err} erreur(s).")
+            if debug_verbose and debug_rows:
+                st.markdown("**Debug (résumé)**")
+                st.code(
+                    ("\n".join([f"{r['channel']}\t{r['status']}\t{r['to']}\t{r['detail']}" for r in debug_rows])[:9000])
+                    or "—"
+                )
+        finally:
+            ov.empty()
+
+
+def lumenvia_manual_broadcast_users(
+    *,
+    users_rows: list[dict],
+    subs_rows: list[dict],
+    send_to_all: bool,
+) -> list[dict]:
+    """Feuilles `users` + `subscriptions` → liste des utilisateurs potentiels pour l’expédition manuelle (dry-run inclus)."""
+
+    def _latest_sub_by_uid() -> dict[str, dict]:
+        by: dict[str, dict] = {}
+        for r in subs_rows:
+            if str(r.get("type") or "").strip() != "weekly_friday":
+                continue
+            uid0 = str(r.get("user_entity_id") or "").strip()
+            if not uid0:
+                continue
+            prev = by.get(uid0)
+            if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+                by[uid0] = r
+        return by
+
+    latest_sub = _latest_sub_by_uid()
+    by_uid_user: dict[str, dict] = {}
+    for u in users_rows:
+        uid0 = str(u.get("entity_id") or "").strip()
+        if not uid0:
+            continue
+        prev = by_uid_user.get(uid0)
+        if not prev or str(u.get("created_at") or "") > str(prev.get("created_at") or ""):
+            by_uid_user[uid0] = u
+
+    if send_to_all:
+        ordered: list[dict] = []
+        for uid0, subr in latest_sub.items():
+            if str(subr.get("opt_in") or "").strip().lower() not in ("true", "1", "oui", "yes"):
+                continue
+            if str(subr.get("active") or "").strip().lower() not in ("true", "1", "oui", "yes", "active"):
+                continue
+            urec = by_uid_user.get(uid0) or {}
+            if urec:
+                ordered.append(urec)
+        return ordered
+
+    dry_users = [
+        u for u in users_rows if str(u.get("source") or "").strip().lower() == "dry_run" and str(u.get("email") or "").strip()
+    ]
+    dry_users.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    u0 = dry_users[0] if dry_users else {}
+    return [u0] if u0 else []
+
+
+def render_admin_scheduler() -> None:
+    st.title("Scheduler")
+    st.markdown(
+        """
+<div style="text-align:center;margin-top:0.85rem;margin-bottom:12px;padding-top:4px;color:#0b2745;opacity:0.92;line-height:1.45;">
+<em>Planifie et déclenche des envois (structure générique pour hebdo/quotidien).</em>
+</div>
+        """.strip(),
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Tant que le **déclenchement automatique dans le cloud** n’est pas câblé, rien ne part au créneau tout seul. "
+        "Pour **tester** : tuiles **Emailing** (envoi manuel, jeu d’options plus simple) ou **Exécuter maintenant** dans "
+        "**Déclencher une campagne (manuel)** ci-dessous."
+    )
+    with st.expander("Précision sur les statuts des campagnes", expanded=False):
+        st.markdown(
+            """
+**`enabled`** — la campagne est en service ou non pour la prévision et les interrupteurs dans la liste.  
+**`status`** — statut **de cette ligne** dans Sheets (historique immutable) ; **l’app affiche toujours la ligne la plus récente**
+par identifiant de campagne.
+            """.strip()
+        )
+
+    cfg = load_config()
+    if not cfg.gcp_service_account or not cfg.gsheet_id:
+        st.warning("Configuration Google Sheets manquante.")
+        return
+
+    from core.sheets_db import TableSpec, ensure_table, with_concat, BASE_COLUMNS
+
+    gs = build_gspread_client(cfg.gcp_service_account)
+
+    # Assure les tables
+    ensure_table(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table=TableSpec(
+            name="AliasTables",
+            columns=["#ID", "Statut", "Version", "Nom Complet Table", "Acronyme Table", "Description"],
+        ),
+    )
+    ensure_table(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table=TableSpec(
+            name="CMPG",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "campaign_key",
+                    "name",
+                    "enabled",
+                    "timezone",
+                    "schedule_kind",
+                    "schedule_spec",
+                    "audience_kind",
+                    "audience_spec",
+                    "send_email",
+                    "send_sms",
+                    "email_template_key",
+                    "sms_template_key",
+                    "content_pdf",
+                    "content_audio",
+                    "content_illustration",
+                    "content_app_link",
+                ]
+            ),
+        ),
+    )
+    ensure_table(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table=TableSpec(
+            name="RUNS",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "campaign_key",
+                    "run_kind",
+                    "status_detail",
+                    "started_at",
+                    "finished_at",
+                    "recipients_ok",
+                    "recipients_err",
+                    "error",
+                ]
+            ),
+        ),
+    )
+    ensure_table(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table=TableSpec(
+            name="AUDC",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "audience_key",
+                    "libelle",
+                    "description",
+                    "spec_aide",
+                ]
+            ),
+        ),
+    )
+
+    # Seed audiences si table vide
+    try:
+        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="AUDC", limit=2000)
+    except Exception:
+        aud_rows = []
+    if not aud_rows:
+        seed = [
+            {
+                "entity_id": sha256(f"audc|dry_run|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                "audience_key": "dry_run",
+                "libelle": "Test (dry-run)",
+                "description": "Envoi uniquement au compte de test (source=dry_run), ou au destinataire de test des secrets si disponible.",
+                "spec_aide": "",
+            },
+            {
+                "entity_id": sha256(f"audc|weekly_friday_optin|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                "audience_key": "weekly_friday_optin",
+                "libelle": "Tous les inscrits opt-in",
+                "description": "Envoi à tous les inscrits ayant opt-in=true et active=true (lettre du vendredi).",
+                "spec_aide": "",
+            },
+            {
+                "entity_id": sha256(f"audc|by_country|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                "audience_key": "by_country",
+                "libelle": "Filtrer par pays",
+                "description": "Envoi uniquement aux utilisateurs dont country correspond.",
+                "spec_aide": "Ex: FR",
+            },
+            {
+                "entity_id": sha256(f"audc|by_source|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                "audience_key": "by_source",
+                "libelle": "Filtrer par source",
+                "description": "Envoi aux utilisateurs dont source est dans la liste.",
+                "spec_aide": "Ex: newsletter,admin,dry_run",
+            },
+            {
+                "entity_id": sha256(f"audc|by_email_list|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                "audience_key": "by_email_list",
+                "libelle": "Liste d’e-mails",
+                "description": "Envoi aux e-mails listés (1 par ligne).",
+                "spec_aide": "Ex:\nnom@domaine.fr\nprenom@domaine.fr",
+            },
+        ]
+        append_immutable_rows_bulk(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="AUDC", values_by_col_list=seed)
+        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="AUDC", limit=2000)
+
+    st.subheader("Campagnes")
+    try:
+        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="CMPG", limit=2000)
+    except Exception:
+        rows = []
+
+    default_key = "weekly_friday_lumenvia"
+    with st.expander("Campagnes (activer / désactiver)", expanded=False):
+        # Dernière version par campaign_key
+        latest_by_key: dict[str, dict] = {}
+        for r in rows:
+            k = str(r.get("campaign_key") or "").strip()
+            if not k:
+                continue
+            prev = latest_by_key.get(k)
+            if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+                latest_by_key[k] = r
+
+        keys = sorted(latest_by_key.keys())
+        def _is_true(v: object) -> bool:
+            return str(v or "").strip().lower() in ("true", "1", "yes", "oui", "active")
+
+        def _next_trigger_label(camp: dict) -> str:
+            try:
+                from datetime import datetime, time as dtime, timedelta
+                try:
+                    from zoneinfo import ZoneInfo  # py3.9+
+                except Exception:
+                    ZoneInfo = None  # type: ignore[assignment]
+
+                tz = str(camp.get("timezone") or "Europe/Paris").strip() or "Europe/Paris"
+                tzinfo = ZoneInfo(tz) if ZoneInfo else None
+                now = datetime.now(tzinfo) if tzinfo else datetime.now()
+
+                kind = str(camp.get("schedule_kind") or "").strip().lower()
+                spec = str(camp.get("schedule_spec") or "").strip().lower()
+                if kind == "weekly":
+                    # ex: "ven 19:00"
+                    day = (spec.split(" ", 1)[0] if " " in spec else "").strip() or "ven"
+                    hm = (spec.split(" ", 1)[1] if " " in spec else "19:00").strip()
+                    hh, mm = (hm.split(":", 1) + ["0"])[:2]
+                    target_t = dtime(int(hh), int(mm))
+                    day_map = {"lun": 0, "mar": 1, "mer": 2, "jeu": 3, "ven": 4, "sam": 5, "dim": 6}
+                    target_wd = day_map.get(day, 4)
+                    # prochain jour cible
+                    delta_days = (target_wd - now.weekday()) % 7
+                    cand = now.replace(hour=target_t.hour, minute=target_t.minute, second=0, microsecond=0) + timedelta(days=delta_days)
+                    if cand <= now:
+                        cand = cand + timedelta(days=7)
+                    return cand.strftime("%a %d/%m %H:%M")
+                if kind == "daily":
+                    # ex: "19:00"
+                    hm = spec or "19:00"
+                    hh, mm = (hm.split(":", 1) + ["0"])[:2]
+                    target_t = dtime(int(hh), int(mm))
+                    cand = now.replace(hour=target_t.hour, minute=target_t.minute, second=0, microsecond=0)
+                    if cand <= now:
+                        cand = cand + timedelta(days=1)
+                    return cand.strftime("%d/%m %H:%M")
+                return "—"
+            except Exception:
+                return "—"
+
+        def _clone_campaign(*, base: dict, enabled_value: bool) -> None:
+            k0 = str(base.get("campaign_key") or "").strip()
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="CMPG",
+                values_by_col={
+                    "entity_id": sha256(f"cmpg|{k0}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                    "campaign_key": k0,
+                    "name": str(base.get("name") or k0).strip(),
+                    "enabled": "true" if enabled_value else "false",
+                    "timezone": str(base.get("timezone") or "Europe/Paris").strip(),
+                    "schedule_kind": str(base.get("schedule_kind") or "manual").strip(),
+                    "schedule_spec": str(base.get("schedule_spec") or "").strip(),
+                    "audience_kind": str(base.get("audience_kind") or "dry_run").strip(),
+                    "audience_spec": str(base.get("audience_spec") or "").strip(),
+                    "send_email": str(base.get("send_email") or "true").strip(),
+                    "send_sms": str(base.get("send_sms") or "false").strip(),
+                    "email_template_key": str(base.get("email_template_key") or "weekly_friday_lumenvia").strip(),
+                    "sms_template_key": str(base.get("sms_template_key") or "").strip(),
+                    "content_pdf": str(base.get("content_pdf") or "true").strip(),
+                    "content_audio": str(base.get("content_audio") or "true").strip(),
+                    "content_illustration": str(base.get("content_illustration") or "true").strip(),
+                    "content_app_link": str(base.get("content_app_link") or "true").strip(),
+                },
+            )
+
+        st.caption(
+            "Note : le déclenchement automatique n’est pas encore branché côté cloud. "
+            "La “prochaine fois” affichée est une prévision basée sur la règle."
+        )
+
+        for k in keys[:80]:
+            camp = latest_by_key.get(k) or {}
+            name = str(camp.get("name") or k).strip() or k
+            enabled0 = _is_true(camp.get("enabled") or "false")
+            nxt = _next_trigger_label(camp) if enabled0 else "—"
+
+            c_left, c_right = st.columns([5, 1], gap="small")
+            with c_left:
+                st.markdown(
+                    f"**{name}**  \n<small style='color:#475569'>Prochain déclenchement (prévision) : <strong>{nxt}</strong></small>",
+                    unsafe_allow_html=True,
+                )
+            with c_right:
+                # Toggle: si changement, on écrit une nouvelle version CMPG.
+                cur = st.toggle("On/Off", value=enabled0, key=f"adm_sched_onoff_{k}", label_visibility="collapsed")
+                if cur != enabled0:
+                    _clone_campaign(base=camp, enabled_value=bool(cur))
+                    st.rerun()
+
+    # Dernière version par campaign_key (reutilisé ci-dessous)
+    latest_by_key: dict[str, dict] = {}
+    for r in rows:
+        k = str(r.get("campaign_key") or "").strip()
+        if not k:
+            continue
+        prev = latest_by_key.get(k)
+        if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+            latest_by_key[k] = r
+    keys = sorted(latest_by_key.keys()) or [default_key]
+
+    with st.expander("Créer une nouvelle campagne", expanded=False):
+        st.caption("Crée une campagne si elle n’existe pas encore. Ensuite, tu peux la paramétrer et la déclencher.")
+        new_key = st.text_input(
+            "Identifiant campagne",
+            value="",
+            key="adm_sched_new_key",
+            placeholder="ex. hebdom_vendredi_2026",
+        ).strip()
+        new_name = st.text_input(
+            "Nom (affiché)",
+            value="",
+            key="adm_sched_new_name",
+            placeholder="ex. Hebdo — préparation dominicale",
+        ).strip()
+        if st.button("Créer la campagne", type="secondary"):
+            if not new_key:
+                st.error("Saisis un identifiant campagne (champ obligatoire).")
+            else:
+                exists = str(new_key) in latest_by_key
+                if exists:
+                    st.info("Cette campagne existe déjà.")
+                else:
+                    append_immutable_row(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="CMPG",
+                        values_by_col={
+                            "entity_id": sha256(f"cmpg|{new_key}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                            "campaign_key": new_key,
+                            "name": new_name or new_key,
+                            "enabled": "true",
+                            "timezone": "Europe/Paris",
+                            "schedule_kind": "weekly",
+                            "schedule_spec": "ven 19:00",
+                            "audience_kind": "weekly_friday_optin",
+                            "audience_spec": "",
+                            "send_email": "true",
+                            "send_sms": "true",
+                            "email_template_key": "weekly_friday_lumenvia",
+                            "sms_template_key": "weekly_friday_lumenvia_sms",
+                            "content_pdf": "true",
+                            "content_audio": "true",
+                            "content_illustration": "true",
+                            "content_app_link": "true",
+                        },
+                    )
+                    st.success("Campagne créée.")
+            st.rerun()
+
+    with st.expander("Paramétrer une campagne", expanded=False):
+        camp_sel = st.selectbox("Choisir une campagne", options=keys, index=0, key="adm_sched_pick")
+        camp = latest_by_key.get(camp_sel) or {}
+
+        st.markdown("**Réglages**")
+        c1, c2, c3 = st.columns([1, 1, 1], gap="small")
+        with c1:
+            enabled = st.checkbox("Activée", value=str(camp.get("enabled") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_enabled")
+            timezone = st.text_input("Fuseau horaire", value=str(camp.get("timezone") or "Europe/Paris"), key="adm_sched_tz").strip()
+        with c2:
+            kind_code = str(camp.get("schedule_kind") or "weekly").strip() or "weekly"
+            kind_labels = {"manual": "Manuel", "weekly": "Hebdomadaire", "daily": "Quotidien"}
+            kind_order = ["manual", "weekly", "daily"]
+            kind_pick = st.selectbox(
+                "Fréquence",
+                options=kind_order,
+                format_func=lambda k: kind_labels.get(k, k),
+                index=kind_order.index(kind_code) if kind_code in kind_order else 1,
+                key="adm_sched_kind",
+            )
+            schedule_kind = kind_pick
+            # Règle: guidée (pas de saisie libre)
+            _days = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"]
+            _day_labels = {
+                "lun": "Lundi",
+                "mar": "Mardi",
+                "mer": "Mercredi",
+                "jeu": "Jeudi",
+                "ven": "Vendredi",
+                "sam": "Samedi",
+                "dim": "Dimanche",
+            }
+            spec0 = str(camp.get("schedule_spec") or "ven 19:00").strip().lower()
+            day0 = spec0.split(" ", 1)[0] if spec0 else "ven"
+            if day0 not in _days:
+                day0 = "ven"
+            import datetime as _dt
+
+            t0 = _dt.time(19, 0)
+            try:
+                if ":" in spec0:
+                    hhmm = spec0.split(" ", 1)[1].strip() if " " in spec0 else "19:00"
+                    hh, mm = hhmm.split(":", 1)
+                    t0 = _dt.time(int(hh), int(mm))
+            except Exception:
+                t0 = _dt.time(19, 0)
+
+            if schedule_kind == "weekly":
+                d_pick = st.selectbox("Jour d’envoi", options=_days, index=_days.index(day0), format_func=lambda d: _day_labels.get(d, d), key="adm_sched_day")
+                t_pick = st.time_input("Heure d’envoi", value=t0, key="adm_sched_time")
+                try:
+                    from datetime import datetime
+                    import time as _time
+
+                    now_loc = datetime.now().strftime("%H:%M:%S")
+                    tz_name = _time.tzname[0] if _time.tzname else "—"
+                    st.caption(f"Actuellement : {now_loc} ({tz_name})")
+                except Exception:
+                    st.caption("Actuellement : —")
+                schedule_spec = f"{d_pick} {t_pick.hour:02d}:{t_pick.minute:02d}"
+            elif schedule_kind == "daily":
+                t_pick = st.time_input("Heure d’envoi", value=t0, key="adm_sched_time_d")
+                try:
+                    from datetime import datetime
+                    import time as _time
+
+                    now_loc = datetime.now().strftime("%H:%M:%S")
+                    tz_name = _time.tzname[0] if _time.tzname else "—"
+                    st.caption(f"Actuellement : {now_loc} ({tz_name})")
+                except Exception:
+                    st.caption("Actuellement : —")
+                schedule_spec = f"{t_pick.hour:02d}:{t_pick.minute:02d}"
+            else:
+                schedule_spec = ""
+        with c3:
+            send_email = st.checkbox("Envoyer e‑mail", value=str(camp.get("send_email") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_send_email")
+            send_sms = st.checkbox("Envoyer SMS", value=str(camp.get("send_sms") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_send_sms")
+
+    with st.expander("Audience (qui reçoit ?)", expanded=False):
+        aud_active = [r for r in aud_rows if str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")]
+        aud_latest: dict[str, dict] = {}
+        for r in aud_active:
+            k = str(r.get("audience_key") or "").strip()
+            if not k:
+                continue
+            prev = aud_latest.get(k)
+            if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+                aud_latest[k] = r
+        aud_keys = sorted(aud_latest.keys())
+        default_aud = str(camp.get("audience_kind") or "dry_run").strip() or "dry_run"
+        aud_kind = st.selectbox(
+            "Critère principal",
+            options=aud_keys or ["dry_run"],
+            index=(aud_keys.index(default_aud) if default_aud in aud_keys else 0),
+            key="adm_sched_aud_kind",
+            format_func=lambda k: str((aud_latest.get(k) or {}).get("libelle") or k),
+        )
+        aud_meta = aud_latest.get(aud_kind) or {}
+        desc_txt = str(aud_meta.get("description") or "").strip()
+        if desc_txt:
+            st.markdown(
+                f"""
+<div style="border-left:4px solid #0d9488;background:#f0fdfa;color:#0b2745;
+padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
+{desc_txt}
+</div>
+                """.strip(),
+                unsafe_allow_html=True,
+            )
+
+        # Valeurs du critère : assistées (pas de saisie libre)
+        aud_spec = ""
+        if aud_kind in ("by_country", "by_source", "by_email_list"):
+            try:
+                users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
+            except Exception:
+                users_rows = []
+            if aud_kind == "by_country":
+                countries = sorted({str(u.get("country") or "").strip() for u in users_rows if str(u.get("country") or "").strip()})
+                pick = st.selectbox("Pays", options=countries or ["FR"], index=0, key="adm_sched_country")
+                aud_spec = pick
+            elif aud_kind == "by_source":
+                sources = sorted({str(u.get("source") or "").strip() for u in users_rows if str(u.get("source") or "").strip()})
+                picks = st.multiselect("Source(s)", options=sources, default=[], key="adm_sched_sources")
+                aud_spec = ",".join(picks)
+            elif aud_kind == "by_email_list":
+                emails = sorted({str(u.get("email") or "").strip().lower() for u in users_rows if str(u.get("email") or "").strip()})
+                picks = st.multiselect("E‑mails (multi‑sélection)", options=emails[:100], default=[], key="adm_sched_emails")
+                aud_spec = "\n".join(picks)
+
+        # Affichage explicite du destinataire dry-run (comme la page emailing)
+        if aud_kind == "dry_run":
+            try:
+                users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
+            except Exception:
+                users_rows = []
+
+            def _is_email_ok(email: str) -> bool:
+                em = (email or "").strip().lower()
+                return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em)) if em else False
+
+            dry_users = [
+                u
+                for u in users_rows
+                if str(u.get("source") or "").strip().lower() in ("dry_run", "test_emailing", "test")
+                and _is_email_ok(str(u.get("email") or "").strip())
+            ]
+            dry_users.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            u0 = dry_users[0] if dry_users else {}
+            dry_email = str(u0.get("email") or "").strip()
+            dry_phone = str(u0.get("phone_e164") or "").strip()
+            if not dry_email:
+                try:
+                    s = st.secrets
+                    dry_email = str(s.get("EMAIL_DRY_RUN_TO") or "").strip()
+                    dry_phone = str(s.get("SMS_DRY_RUN_TO") or "").strip()
+                except Exception:
+                    pass
+            st.markdown("**Destinataire de test (dry-run)**")
+            st.code(f"email: {dry_email or '—'}\nphone_e164: {dry_phone or '—'}")
+
+    with st.expander("Contenu (quoi envoyer ?)", expanded=False):
+        k1, k2, k3, k4 = st.columns([1, 1, 1, 1], gap="small")
+        with k1:
+            content_pdf = st.checkbox("PDF", value=str(camp.get("content_pdf") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_c_pdf")
+        with k2:
+            content_audio = st.checkbox("Audio", value=str(camp.get("content_audio") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_c_audio")
+        with k3:
+            content_illustration = st.checkbox("Illustration", value=str(camp.get("content_illustration") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_c_illu")
+        with k4:
+            content_app = st.checkbox("Lien app", value=str(camp.get("content_app_link") or "true").strip().lower() in ("true", "1", "yes", "oui"), key="adm_sched_c_app")
+
+        st.markdown("**Templates (formats)**")
+        # Templates e-mail: sélection parmi les clés existantes
+        try:
+            tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=6000)
+        except Exception:
+            tpl_rows = []
+        email_keys = sorted({str(r.get("template_key") or "").strip() for r in tpl_rows if str(r.get("channel") or "").strip().lower() == "email" and str(r.get("template_key") or "").strip()})
+        sms_keys = sorted({str(r.get("template_key") or "").strip() for r in tpl_rows if str(r.get("channel") or "").strip().lower() == "sms" and str(r.get("template_key") or "").strip()})
+        cur_email_key = str(camp.get("email_template_key") or "weekly_friday_lumenvia").strip()
+        cur_sms_key = str(camp.get("sms_template_key") or "weekly_friday_lumenvia_sms").strip()
+        email_tpl_key = st.selectbox(
+            "Template e‑mail",
+            options=email_keys or [cur_email_key],
+            index=(email_keys.index(cur_email_key) if cur_email_key in email_keys else 0),
+            key="adm_sched_tpl_email",
+        ).strip()
+        sms_tpl_key = st.selectbox(
+            "Template SMS",
+            options=sms_keys or [cur_sms_key],
+            index=(sms_keys.index(cur_sms_key) if cur_sms_key in sms_keys else 0),
+            key="adm_sched_tpl_sms",
+            help="Si aucun template SMS n’existe encore, on garde la clé actuelle.",
+        ).strip()
+
+        if st.button("Enregistrer les réglages", type="primary"):
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="CMPG",
+                values_by_col={
+                    "entity_id": sha256(f"cmpg|{camp_sel}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                    "campaign_key": camp_sel,
+                    "name": str(camp.get("name") or camp_sel),
+                    "enabled": "true" if enabled else "false",
+                    "timezone": timezone or "Europe/Paris",
+                    "schedule_kind": schedule_kind,
+                    "schedule_spec": schedule_spec,
+                    "audience_kind": aud_kind,
+                    "audience_spec": aud_spec,
+                    "send_email": "true" if send_email else "false",
+                    "send_sms": "true" if send_sms else "false",
+                    "email_template_key": email_tpl_key,
+                    "sms_template_key": sms_tpl_key,
+                    "content_pdf": "true" if content_pdf else "false",
+                    "content_audio": "true" if content_audio else "false",
+                    "content_illustration": "true" if content_illustration else "false",
+                    "content_app_link": "true" if content_app else "false",
+                },
+            )
+            st.success("Réglages enregistrés.")
+            st.rerun()
+
+    def _manual_campaign_snapshot_fr(cp: dict) -> str:
+        """Une ligne lisible pour l’admin (sans empiler tous les champs en colonne)."""
+        if not cp or not str(cp.get("campaign_key") or "").strip():
+            return "Aucune version en Sheets pour cet identifiant — crée ou paramètre une campagne d’abord."
+        ck = str(cp.get("campaign_key") or "").strip()
+        nm = str(cp.get("name") or ck).strip()
+        tf = lambda v: str(v or "").strip().lower() in ("true", "1", "oui", "yes")
+        en = tf(cp.get("enabled"))
+        tz = str(cp.get("timezone") or "Europe/Paris").strip()
+        kind = str(cp.get("schedule_kind") or "manual").strip().lower()
+        kind_fr = {"manual": "manuel", "weekly": "hebdomadaire", "daily": "quotidien"}.get(kind, kind)
+        spec = str(cp.get("schedule_spec") or "").strip()
+        aud_k = str(cp.get("audience_kind") or "").strip() or "—"
+        raw_aud = str(cp.get("audience_spec") or "").strip().replace("\n", ", ")
+        if len(raw_aud) > 140:
+            raw_aud = raw_aud[:137].rstrip() + "…"
+        row_st = str(cp.get("status") or "").strip()
+        chunks = [
+            f"nom « {nm} »",
+            f"identifiant `{ck}`",
+            "en service (`enabled`=oui)" if en else "hors service (`enabled`=non)",
+            f"fuseau {tz}",
+            f"cadence {kind_fr}",
+        ]
+        if spec:
+            chunks.append(f"créneau `{spec}`")
+        chunks.append(f"audience `{aud_k}`")
+        if raw_aud:
+            chunks.append(f"paramètre audience « {raw_aud} »")
+        chunks.append(f"envoi mail {'oui' if tf(cp.get('send_email')) else 'non'}")
+        chunks.append(f"envoi SMS {'oui' if tf(cp.get('send_sms')) else 'non'}")
+        ek = str(cp.get("email_template_key") or "").strip()
+        sk = str(cp.get("sms_template_key") or "").strip()
+        if ek:
+            chunks.append(f"modèle mail `{ek}`")
+        if sk:
+            chunks.append(f"modèle SMS `{sk}`")
+        media: list[str] = []
+        if tf(cp.get("content_pdf")):
+            media.append("PDF")
+        if tf(cp.get("content_audio")):
+            media.append("audio")
+        if tf(cp.get("content_illustration")):
+            media.append("illustration")
+        if tf(cp.get("content_app_link")):
+            media.append("lien app")
+        chunks.append("contenus : " + (", ".join(media) if media else "aucun coché en base"))
+        if row_st:
+            chunks.append(f"statut de cette ligne Sheets `{row_st}` (historique immutable)")
+        return ", ".join(chunks)
+
+    with st.expander("Déclencher une campagne (manuel)", expanded=False):
+        camp_key = st.selectbox(
+            "Campagne",
+            options=keys or [default_key],
+            index=(keys.index(camp_sel) if camp_sel in keys else 0),
+            key="adm_sched_key_sel",
+        )
+        camp_snap = latest_by_key.get(str(camp_key).strip()) or {}
+
+        mode = st.selectbox(
+            "Mode d’envoi",
+            options=["test_dry_run", "tous_opt_in"],
+            index=0,
+            format_func=lambda x: "Test (dry-run)" if x == "test_dry_run" else "Tous les inscrits opt-in",
+            key="adm_sched_mode",
+        )
+        send_to_all = mode == "tous_opt_in"
+
+        # Dimanche ciblé : force un dimanche
+        today = date.today()
+        next_sun = today + timedelta(days=(6 - today.weekday()) % 7)
+        sunday = st.date_input("Dimanche ciblé", value=next_sun, key="adm_sched_sunday")
+        if sunday.weekday() != 6:
+            fixed = sunday + timedelta(days=(6 - sunday.weekday()) % 7)
+            st.warning(f"Date ajustée au dimanche suivant : {fixed.isoformat()}")
+            sunday = fixed
+        date_str = sunday.isoformat()[:10]
+
+        _tf_mail = lambda v: str(v or "").strip().lower() in ("true", "1", "oui", "yes")
+        users_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
+        subs_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
+        rec_preview = lumenvia_manual_broadcast_users(
+            users_rows=users_preview, subs_rows=subs_preview, send_to_all=send_to_all
+        )
+        chan_em = _tf_mail(camp_snap.get("send_email"))
+        chan_sm = _tf_mail(camp_snap.get("send_sms"))
+        n_em = (
+            sum(1 for u in rec_preview if str(u.get("email") or "").strip())
+            if chan_em
+            else 0
+        )
+        n_sm = (
+            sum(1 for u in rec_preview if str(u.get("phone_e164") or "").strip())
+            if chan_sm
+            else 0
+        )
+        n_touch = len(rec_preview)
+        mode_lbl = "tous les inscrits opt-in actifs (abonnement hebdo vendredi)" if send_to_all else "dry-run (compte source=dry_run)"
+        recap = (
+            _manual_campaign_snapshot_fr(camp_snap)
+            + f"\n\n**Portée (mode actuel · {mode_lbl}) : {n_touch} destinataire(s) visé(s), "
+            f"**{n_em}** envoi(s) e-mail prévu(x) et **{n_sm}** envoi(s) SMS prévu(x) "
+            f"**(chaînes « envoi » de la campagne + coordonnée renseignée).**"
+        )
+        st.info(recap)
+
+        if st.button("Exécuter maintenant", type="primary"):
+            # Exécution : réutilise la logique d’envoi (hebdo opt-in)
+            started = utc_now_iso()
+            ok0 = 0
+            err0 = 0
+            run_id = sha256(f"run|{camp_key}|{date_str}|{started}".encode("utf-8")).hexdigest()[:24]
+            ov = loading_overlay("Envoi en cours…")
+            # Récupère campagne (dernière)
+            camp_rows = [r for r in rows if str(r.get("campaign_key") or "").strip() == camp_key]
+            camp_rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            camp = camp_rows[0] if camp_rows else {}
+            do_email = str(camp.get("send_email") or "true").strip().lower() in ("true", "1", "oui", "yes")
+            do_sms = str(camp.get("send_sms") or "true").strip().lower() in ("true", "1", "oui", "yes")
+            email_tpl_key = str(camp.get("email_template_key") or "weekly_friday_lumenvia").strip()
+
+            users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
+            subs_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
+            recipients = lumenvia_manual_broadcast_users(
+                users_rows=users_rows, subs_rows=subs_rows, send_to_all=send_to_all
+            )
+
+            # template actif
+            tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=4000)
+            eff = [
+                r
+                for r in tpl_rows
+                if str(r.get("template_key") or "").strip() == email_tpl_key
+                and str(r.get("channel") or "").strip().lower() == "email"
+                and str(r.get("status") or "").strip().lower() not in ("inactive", "deleted")
+                and str(r.get("active") or "true").strip().lower() not in ("false", "0", "no", "non", "inactive")
+            ]
+            eff.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            tpl = eff[0] if eff else {}
+            subj = str(tpl.get("subject") or "").strip()
+            body = str(tpl.get("body") or "").strip()
+
+            # Liens (signés)
+            origin = _lumenvia_app_origin_url() or ""
+            url_app = (origin.rstrip("/") + "/?route=about") if origin else ""
+            url_pdf = ""
+            url_audio = ""
+            url_illu = ""
+            try:
+                gcs = build_gcs_client(cfg.gcp_service_account)
+                p_pdf = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+                url_pdf = _gcs_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), path=p_pdf) or ""
+                year = date_str[:4]
+                cand = [f"Images/illustrations/{year}/{date_str}{ext}" for ext in (".webp", ".png", ".jpg", ".jpeg")]
+                url_illu = _gcs_first_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), candidate_paths=cand) or ""
+            except Exception:
+                pass
+
+            # SMTP/Twilio config réutilise _secret_get de la page Emailing (simple)
+            def _secret_get(*keys: str) -> str:
+                try:
+                    s = st.secrets
+                except Exception:
+                    return ""
+                for k in keys:
+                    v = s.get(k)
+                    if v is not None and str(v).strip():
+                        return str(v).strip()
+                return ""
+
+            from core.outbound import SmtpConfig, TwilioConfig, send_smtp_email, send_twilio_sms
+            smtp_cfg = SmtpConfig(
+                host=_secret_get("SMTP_HOST"),
+                port=int(_secret_get("SMTP_PORT") or 587),
+                username=_secret_get("SMTP_USER"),
+                password=_secret_get("SMTP_PASSWORD"),
+                from_email=_secret_get("SMTP_FROM"),
+                use_tls=str(_secret_get("SMTP_USE_TLS") or "true").strip().lower() not in ("0", "false", "no", "off"),
+            )
+            tw_cfg = TwilioConfig(
+                account_sid=_secret_get("TWILIO_ACCOUNT_SID"),
+                auth_token=_secret_get("TWILIO_AUTH_TOKEN"),
+                from_phone_e164=_secret_get("TWILIO_FROM", "TWILIO_FROM_NUMBER"),
+            )
+
+            from core.emailing import EmailTemplate, render_template, french_day_month_year
+            vals_base = {
+                "origin": origin,
+                "date_dimanche": french_day_month_year(sunday),
+                "url_pdf": url_pdf,
+                "url_audio": url_audio,
+                "url_illustration": url_illu,
+                "url_app": url_app,
+            }
+
+            for urec in recipients[:2000]:
+                uid0 = str(urec.get("entity_id") or "").strip() or "recipient"
+                em = str(urec.get("email") or "").strip()
+                ph = str(urec.get("phone_e164") or "").strip()
+                vals = dict(vals_base)
+                vals["prenom"] = str(urec.get("first_name") or "—").strip() or "—"
+                vals["nom"] = str(urec.get("last_name") or "—").strip() or "—"
+                vals["email"] = em
+                rendered = render_template(EmailTemplate(subject=subj, body=body), values={k: str(v) for k, v in vals.items()})
+
+                # Envoi email (HTML gabarit)
+                if do_email and em and smtp_cfg.host and smtp_cfg.from_email:
+                    try:
+                        html2 = ""  # le gabarit est généré dans render_admin_emailing; ici simple fallback texte
+                        send_smtp_email(cfg=smtp_cfg, to_email=em, subject=rendered.subject, body_text=rendered.body, body_html=html2 or None)
+                        ok0 += 1
+                    except Exception:
+                        err0 += 1
+
+                # Envoi SMS (minimaliste)
+                if do_sms and ph and tw_cfg.account_sid and tw_cfg.from_phone_e164:
+                    try:
+                        send_twilio_sms(cfg=tw_cfg, to_phone_e164=ph, body_text="Message de JOPAI LumenVia")
+                        ok0 += 1
+                    except Exception:
+                        err0 += 1
+
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="RUNS",
+                values_by_col={
+                    "entity_id": run_id,
+                    "campaign_key": camp_key,
+                    "run_kind": "manual",
+                    "status_detail": "done",
+                    "started_at": started,
+                    "finished_at": utc_now_iso(),
+                    "recipients_ok": str(ok0),
+                    "recipients_err": str(err0),
+                    "error": "",
+                },
+            )
+            st.success(f"Terminé : {ok0} OK, {err0} erreur(s).")
             ov.empty()
 
 
@@ -5240,6 +7943,23 @@ def _gcs_signed_url(
         return None
 
 
+def _gcs_first_signed_url(
+    *,
+    gcs: object,
+    bucket_name: str,
+    candidate_paths: list[str],
+    expires_s: int = 7 * 24 * 3600,
+) -> str | None:
+    for p in candidate_paths:
+        path = str(p or "").strip()
+        if not path:
+            continue
+        u = _gcs_signed_url(gcs=gcs, bucket_name=bucket_name, path=path, expires_s=expires_s)
+        if u:
+            return u
+    return None
+
+
 def _inject_admin_phone_preview_css() -> None:
     """Admin uniquement : largeur réglable + cadre arrondi type smartphone pour recette bureau."""
     if not st.session_state.get("admin_authenticated"):
@@ -5254,7 +7974,7 @@ def _inject_admin_phone_preview_css() -> None:
     st.markdown(
         f"""
 <style>
-/* Aperçu smartphone — activé par le toggle Administration ou la page Simulateur mobile */
+/* Aperçu smartphone — activé depuis la tuile Simulateur mobile (cadre téléphone) */
 [data-testid="stAppViewContainer"] {{
   background: linear-gradient(165deg, #4a4a52 0%, #1e1e22 55%, #121214 100%) !important;
   min-height: 100vh !important;
@@ -5321,8 +8041,62 @@ def _lumenvia_app_origin_url() -> str | None:
     return None
 
 
+_FEEDBACK_SURVEY_CTA_RE = re.compile(
+    r"👉\s*(?:\[\s*)?Donner\s+mon\s+avis\s+sur\s+cette\s+expérience(?:\s*\])?",
+    flags=re.IGNORECASE,
+)
+
+
+def lumenvia_feedback_survey_abs_url(origin: str | None, *, recipient_email: str | None = None) -> str:
+    """URL absolue page « Donner votre avis » (lien depuis e-mails).
+
+    Si ``recipient_email`` est un e-mail plausible, ajoute ``&email=`` pour préremplir le formulaire.
+    """
+    base_raw = ((origin or "").strip() if origin else "") or (_lumenvia_app_origin_url() or "").strip()
+    base = base_raw.rstrip("/")
+    if not base:
+        return ""
+    em = str(recipient_email or "").strip().lower()
+    try:
+        from urllib.parse import quote_plus
+    except Exception:  # pragma: no cover
+        quote_plus = None  # type: ignore[assignment]
+    url = f"{base}/?route=feedback"
+    try:
+        if em and bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em)) and quote_plus:
+            url += f"&email={quote_plus(em)}"
+    except Exception:
+        pass
+    return url
+
+
+def lumenvia_wrap_feedback_cta_with_link(
+    fragment: str, *, origin_for_href: str | None = None, recipient_email: str | None = None
+) -> str:
+    """Encapsule la phrase 👉 … Donner mon avis … en lien `<a>` (fragment HTML léger ou texte)."""
+    txt = fragment or ""
+    if not txt or "👉" not in txt or "avis" not in txt.lower():
+        return txt
+    url = lumenvia_feedback_survey_abs_url(origin_for_href, recipient_email=recipient_email)
+    if not url:
+        return txt
+
+    def repl(m: re.Match) -> str:
+        lbl = (m.group(0) or "").strip()
+        return (
+            f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
+            'style="color:#0d9488;font-weight:700;text-decoration:underline;">'
+            f"{lbl}</a>"
+        )
+
+    return _FEEDBACK_SURVEY_CTA_RE.sub(repl, txt)
+
+
 def render_admin_mobile_simulator() -> None:
     """Panneau recette : prévisualisation iframe + paramètres du cadre appliqué à toute la session."""
+    if _lumenvia_phone_like_user_agent():
+        st.info("Simulateur mobile masqué sur téléphone : utilise l’app directement sur cet écran.")
+        return
     st.title("Simulateur vision mobile")
     st.markdown(
         """
@@ -5336,6 +8110,11 @@ Recette depuis un **ordinateur** : même session Streamlit que l’écran suivan
 Le **clavier virtuel** réel du téléphone n’est pas reproductible ici ; pour un faux clavier utilise
 **Chrome / Edge → F12 → mode appareil** en complément si besoin.
         """.strip()
+    )
+    st.toggle(
+        "Cadre téléphone sur l’app (session)",
+        key="admin_phone_preview",
+        help="Réduit la zone principale comme sur un téléphone (largeur ci‑dessous). À activer ici puis naviguer dans l’admin ou les pages métier.",
     )
 
     if "admin_mobile_preview_width" not in st.session_state:
@@ -5361,21 +8140,18 @@ Le **clavier virtuel** réel du téléphone n’est pas reproductible ici ; pour
         max_value=560,
         value=int(st.session_state.get("admin_mobile_preview_width", 390)),
         step=2,
-        help="Utilisée par le cadre « Aperçu mobile » sous la grille Administration "
-        "ainsi que lorsque tu ouvres une page depuis les boutons ci-dessous.",
+        help="Largeur du cadre quand « Cadre téléphone sur l’app » est activé, et pour l’iframe ci‑dessous.",
     )
     st.session_state["admin_mobile_preview_width"] = int(w)
     st.caption(
-        "Pour activer le cadre avant de changer de page manuellement, utilise « Aperçu mobile » "
-        "(toggle situé sous la grille Administration)."
+        "Active d’abord **Cadre téléphone sur l’app** ci‑dessus, puis navigue ; ou utilise un bouton "
+        "**+ cadre** pour l’allumer automatiquement."
     )
 
     st.subheader("Ouvrir une page métier avec le cadre")
     oc1, oc2, oc3 = st.columns(3)
     with oc1:
         if st.button("La Lumière du Dimanche + cadre", key="adm_mob_go_sunday", use_container_width=True):
-            # Ne pas modifier `admin_phone_preview` après instanciation du toggle (même rerun) :
-            # drapeau consommé en tête de `main()` avant tout widget avec cette clé.
             st.session_state["_lumenvia_enable_phone_preview"] = True
             st.session_state["admin_mobile_preview_width"] = int(
                 st.session_state.get("admin_mobile_preview_width", 390)
@@ -5424,18 +8200,14 @@ Le **clavier virtuel** réel du téléphone n’est pas reproductible ici ; pour
 </div>
 """
         components.html(iframe_html, height=840, scrolling=True)
-        st.caption(
-            "L’iframe charge une nouvelle session : connexion utilisateur/admin non partagée avec cet onglet. "
-            "Le paramètre `lumenvia_narrow_nav=1` force le mode « Menu » seul (les media queries suivent souvent "
-            "la fenêtre parente, pas la largeur du cadre)."
-        )
+        # (supprimé) texte d’explication sous l’iframe
 
 
 def main() -> None:
     set_page_style()
     if _lumenvia_narrow_nav_from_query():
         st.session_state["lumenvia_narrow_nav"] = True
-    # À appliquer avant tout widget lié à `admin_phone_preview` (ex. toggle admin + simulateur).
+    # À appliquer avant tout widget lié à `admin_phone_preview` (ex. simulateur mobile).
     if st.session_state.pop("_lumenvia_enable_phone_preview", False):
         st.session_state["admin_phone_preview"] = True
     _inject_admin_phone_preview_css()
@@ -5482,6 +8254,13 @@ def main() -> None:
         except Exception:
             pass
 
+    try:
+        rte_q = str(params.get("route") or "").strip().lower()
+    except Exception:
+        rte_q = ""
+    if rte_q in ("feedback", "avis"):
+        st.session_state.route = "feedback"
+
     if adm in ("1", "login", "step3", "cdc", "mob", "mobile"):
         try:
             del st.query_params["admin"]
@@ -5498,6 +8277,10 @@ def main() -> None:
     elif route == "memo":
         render_memo()
     elif route == "join":
+        render_join()
+    elif route == "feedback":
+        render_feedback()
+    elif route == "account":
         render_join()
     elif route == "admin_login":
         render_admin_login()
@@ -5549,6 +8332,30 @@ def main() -> None:
                 st.rerun()
         else:
             render_admin_vision_text()
+    elif route == "admin_accounts":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_accounts"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_accounts()
+    elif route == "admin_emailing":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_emailing"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_emailing()
+    elif route == "admin_scheduler":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_scheduler"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_scheduler()
     elif route == "admin_readings_cache":
         if not st.session_state.get("admin_authenticated"):
             st.warning("Accès réservé — identifie-toi avec le compte administrateur.")

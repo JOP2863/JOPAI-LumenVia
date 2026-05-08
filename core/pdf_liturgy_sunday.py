@@ -2,7 +2,7 @@
 PDF « dimanche » complet : couverture + lectures AELF + synthèse + lien d’écoute.
 
 Fusionne la couverture (`pdf_liturgy_cover`) avec un corps multi-pages (ReportLab Platypus),
-pied de page **JOP AI Production** (aligné Memoria) sur chaque page.
+pied de page **JOPAI©** sur chaque page.
 """
 
 from __future__ import annotations
@@ -25,20 +25,21 @@ from reportlab.platypus import KeepInFrame, PageBreak, Paragraph, SimpleDocTempl
 from core.pdf_graine_parole_mensuel import strip_light_markdown_to_plain
 
 _CATECHESE_SECTION_TITLE = "Passerelle catéchèse — L’écho des paraboles"
-from core.pdf_liturgy_cover import build_liturgy_cover_pdf_bytes, draw_jopai_production_footer_bar
+from core.pdf_liturgy_cover import build_liturgy_cover_pdf_bytes, draw_jopai_footer_bar
 
 
 def _footer_every_page(canvas: object, doc: object) -> None:
-    # Liseré or (rappel UI, comme la couverture)
+    # Liseré (couleur liturgique si fournie via doc)
     try:
         canvas.saveState()
-        canvas.setFillColor(colors.HexColor("#D4AF37"))
+        hx = str(getattr(doc, "_lv_accent_hex", "") or "").strip() or "#D4AF37"
+        canvas.setFillColor(colors.HexColor(hx))
         # Bandeau pied de page un peu plus haut : on démarre au-dessus.
         canvas.rect(10 * mm, 9.5 * mm, 2.2 * mm, A4[1] - (9.5 * mm) - (14 * mm), fill=1, stroke=0)
         canvas.restoreState()
     except Exception:
         pass
-    draw_jopai_production_footer_bar(canvas, A4[0], A4[1])
+    draw_jopai_footer_bar(canvas, A4[0], A4[1])
 
 
 def _to_para_html(text: str | None) -> str:
@@ -199,6 +200,8 @@ def build_liturgy_body_pdf_bytes(
     audio_listen_note: str | None = None,
     about_markdown: str | None = None,
     back_cover_image_bytes: bytes | None = None,
+    accent_hex: str | None = None,
+    back_cover_highlight_cell_index: int | None = None,
 ) -> bytes:
     """Pages suivantes : lectures AELF + chapitres (Synthèse, Passerelle)."""
     buf = BytesIO()
@@ -212,7 +215,13 @@ def build_liturgy_body_pdf_bytes(
         onFirstPage=_footer_every_page,
         onLaterPages=_footer_every_page,
     )
+    # Hack simple : stocke l’accent sur doc pour le callback footer.
+    try:
+        doc._lv_accent_hex = str(accent_hex or "").strip() or "#D4AF37"
+    except Exception:
+        pass
     styles = getSampleStyleSheet()
+    hx = str(accent_hex or "").strip() or "#8B6914"
     h = ParagraphStyle(
         name="LVLecH",
         parent=styles["Heading2"],
@@ -262,6 +271,13 @@ def build_liturgy_body_pdf_bytes(
         spaceAfter=5,
         keepWithNext=True,
     )
+    try:
+        # Accentue la hiérarchie (proche du site) : titres + chapitres suivent l’accent.
+        h.textColor = colors.HexColor(hx)
+        chapter.textColor = colors.HexColor(hx)
+        sub.textColor = colors.HexColor(hx)
+    except Exception:
+        pass
 
     story: list = []
     # Lectures sur 2 pages (moins condensé) :
@@ -406,7 +422,12 @@ def build_liturgy_body_pdf_bytes(
             # Citation / phrase courte -> italique centré
             if "Ta Parole est une lampe" in blk:
                 q = xml_escape(blk.strip("“”\"' ").strip())
-                inner.append(Paragraph(f"<i>{q}</i>", ParagraphStyle(name="LVAboutQuote", parent=body, alignment=TA_CENTER)))
+                q_style = ParagraphStyle(name="LVAboutQuote", parent=body, alignment=TA_CENTER)
+                try:
+                    q_style.textColor = colors.HexColor(str(accent_hex or "").strip() or "#0d9488")
+                except Exception:
+                    pass
+                inner.append(Paragraph(f"<i>{q}</i>", q_style))
                 # Espace net après la citation (équivalent d’un retour chariot lisible avant le bloc suivant)
                 inner.append(Spacer(1, 5 * mm))
                 continue
@@ -437,7 +458,7 @@ def build_liturgy_body_pdf_bytes(
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFDF7")),
-                    ("BOX", (0, 0), (-1, -1), 1.3, colors.HexColor("#D4AF37")),
+                    ("BOX", (0, 0), (-1, -1), 1.3, colors.HexColor(str(accent_hex or "").strip() or "#D4AF37")),
                     ("LEFTPADDING", (0, 0), (-1, -1), 14),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 14),
                     ("TOPPADDING", (0, 0), (-1, -1), 12),
@@ -474,8 +495,46 @@ def build_liturgy_body_pdf_bytes(
             # Dimensionnement robuste : ReportLab peut lever LayoutError si l'image dépasse la frame.
             # On calcule à partir de l'image réelle + doc.width/doc.height.
             from PIL import Image as PILImage
+            from PIL import ImageDraw
 
-            pil = PILImage.open(BytesIO(back_cover_image_bytes))
+            pil = PILImage.open(BytesIO(back_cover_image_bytes)).convert("RGB")
+            # Liseré très fin autour du montage (accent liturgique si disponible)
+            try:
+                draw0 = ImageDraw.Draw(pil)
+                hx = str(accent_hex or "").strip() or "#D4AF37"
+                stroke = colors.HexColor(hx)
+                # ReportLab -> PIL RGB
+                rgb = (
+                    int(round(stroke.red * 255)),
+                    int(round(stroke.green * 255)),
+                    int(round(stroke.blue * 255)),
+                )
+                w, h0 = pil.size
+                # 1px : très fin, discret
+                draw0.rectangle([1, 1, max(1, w - 2), max(1, h0 - 2)], outline=rgb, width=1)
+            except Exception:
+                pass
+            # Encadre la vignette correspondant au dimanche du PDF (index dans la grille annuelle)
+            if isinstance(back_cover_highlight_cell_index, int) and back_cover_highlight_cell_index >= 0:
+                try:
+                    cols = 4
+                    cell = 200
+                    pad = 10
+                    title_cell = True
+                    start_i = 1 if title_cell else 0
+                    i = int(back_cover_highlight_cell_index) + start_i
+                    col = i % cols
+                    row = i // cols
+                    x_cell = pad + col * (cell + pad)
+                    y_cell = pad + row * (cell + pad)
+                    x1 = x_cell + cell
+                    y1 = y_cell + cell
+                    draw = ImageDraw.Draw(pil)
+                    stroke = (13, 148, 136)  # turquoise JOPAI
+                    for w in (7, 5, 3):
+                        draw.rectangle([x_cell + w, y_cell + w, x1 - w, y1 - w], outline=stroke, width=2)
+                except Exception:
+                    pass
             iw, ih = pil.size
             if iw <= 0 or ih <= 0:
                 raise RuntimeError("Image back_cover invalide (dimensions nulles).")
@@ -486,7 +545,9 @@ def build_liturgy_body_pdf_bytes(
             scale = min(max_w / float(iw), max_h / float(ih), 1.0)
             dw = float(iw) * scale
             dh = float(ih) * scale
-            img = RLImage(BytesIO(back_cover_image_bytes), width=dw, height=dh)
+            out_img = BytesIO()
+            pil.save(out_img, format="PNG", optimize=True)
+            img = RLImage(BytesIO(out_img.getvalue()), width=dw, height=dh)
             img.hAlign = "CENTER"
             story.append(Spacer(1, 4))
             story.append(img)
@@ -515,6 +576,8 @@ def build_liturgy_sunday_pdf_bytes(
     audio_listen_note: str | None = None,
     about_markdown: str | None = None,
     back_cover_image_bytes: bytes | None = None,
+    accent_hex: str | None = None,
+    back_cover_highlight_cell_index: int | None = None,
 ) -> bytes:
     """Couverture + corps fusionnés en un seul PDF."""
     cover = build_liturgy_cover_pdf_bytes(
@@ -523,6 +586,7 @@ def build_liturgy_sunday_pdf_bytes(
         date_line=date_line,
         meta_line=meta_line,
         audio_listen_url=audio_listen_url,
+        accent_hex=accent_hex,
     )
     body = build_liturgy_body_pdf_bytes(
         premiere_lecture=premiere_lecture,
@@ -534,6 +598,8 @@ def build_liturgy_sunday_pdf_bytes(
         audio_listen_note=audio_listen_note,
         about_markdown=about_markdown,
         back_cover_image_bytes=back_cover_image_bytes,
+        accent_hex=accent_hex,
+        back_cover_highlight_cell_index=back_cover_highlight_cell_index,
     )
     writer = PdfWriter()
     for page in PdfReader(BytesIO(cover)).pages:
