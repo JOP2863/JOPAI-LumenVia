@@ -22,6 +22,7 @@ Pour chaque table:
 ## Secrets
 - Ne jamais commiter `.streamlit/secrets.toml`.
 - Toujours charger via `st.secrets` en app, ou via lecture toml outillée en scripts.
+- **API AELF** : pas de clé ; URL de base facultative — `AELF_BASE_URL` (racine) ou `[aelf]` → `base_url` dans les secrets ; défaut `https://api.aelf.org`. Préemption : variable d’environnement `AELF_BASE_URL` si définie.
 
 ## Stockage GCS (structure)
 - `Images/illustrations/`

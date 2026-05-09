@@ -81,13 +81,28 @@ def main() -> None:
         default=Path("data/manifests/sundays_liturgy.json"),
         help="Chemin JSON de sortie (relatif à la racine du repo).",
     )
+    parser.add_argument(
+        "--secrets",
+        type=Path,
+        default=_REPO_ROOT / ".streamlit" / "secrets.toml",
+        help="secrets.toml pour AELF_BASE_URL / [aelf] (défaut : .streamlit/secrets.toml si absent, ignore).",
+    )
     args = parser.parse_args()
     out_path = args.out
     if not out_path.is_absolute():
         out_path = _REPO_ROOT / out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    client = AelfClient()
+    secrets_path = args.secrets
+    if not secrets_path.is_absolute():
+        secrets_path = _REPO_ROOT / secrets_path
+    if secrets_path.is_file():
+        from core.config import load_config_from_secrets_toml
+
+        cfg = load_config_from_secrets_toml(secrets_path)
+        client = AelfClient(base_url=cfg.aelf_base_url)
+    else:
+        client = AelfClient()
     entries: list[dict] = []
     for d in sundays_in_year(args.year):
         ds = d.isoformat()

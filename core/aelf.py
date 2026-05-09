@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 import requests
 
+from core.config import DEFAULT_AELF_BASE_URL, resolve_aelf_base_url
+
 
 AelfZone = Literal["france"]
 
@@ -32,8 +34,8 @@ class AelfTexts:
 
 
 class AelfClient:
-    def __init__(self, base_url: str = "https://api.aelf.org") -> None:
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str | None = None) -> None:
+        self.base_url = (base_url or resolve_aelf_base_url()).rstrip("/") or DEFAULT_AELF_BASE_URL
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": "JOPAI-LumenVia/0.1"})
 

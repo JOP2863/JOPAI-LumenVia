@@ -39,6 +39,7 @@ from core.sheets_db import (
     compute_concat,
     ensure_table,
     fetch_records,
+    get_table_spec,
     sheet_row_status_is_live,
     utc_now_iso,
     with_concat,
@@ -3714,7 +3715,6 @@ def render_join() -> None:
                     else:
                         ov = loading_overlay("Envoi de l’e-mail de réinitialisation…")
                         try:
-                            from core.sheets_db import TableSpec, ensure_table, with_concat, BASE_COLUMNS
                             from secrets import token_urlsafe
                             from datetime import datetime, timedelta, timezone
                             from core.outbound import SmtpConfig, send_smtp_email
@@ -3722,18 +3722,7 @@ def render_join() -> None:
                             ensure_table(
                                 gspread_client=gs,
                                 spreadsheet_id=cfg.gsheet_id,
-                                table=TableSpec(
-                                    name="password_resets",
-                                    columns=with_concat(
-                                        [
-                                            *BASE_COLUMNS,
-                                            "email",
-                                            "token_hash",
-                                            "expires_at",
-                                            "used",
-                                        ]
-                                    ),
-                                ),
+                                table=get_table_spec("password_resets"),
                             )
                             tok = token_urlsafe(32)
                             tok_h = sha256(tok.encode("utf-8")).hexdigest()
@@ -4121,16 +4110,13 @@ def render_reset_password() -> None:
             return
         ov = loading_overlay("Mise à jour du mot de passe…")
         try:
-            from core.sheets_db import TableSpec, ensure_table, with_concat, BASE_COLUMNS, fetch_records, append_immutable_row
+            from core.sheets_db import fetch_records, append_immutable_row
             from datetime import datetime, timezone
 
             ensure_table(
                 gspread_client=gs,
                 spreadsheet_id=cfg.gsheet_id,
-                table=TableSpec(
-                    name="password_resets",
-                    columns=with_concat([*BASE_COLUMNS, "email", "token_hash", "expires_at", "used"]),
-                ),
+                table=get_table_spec("password_resets"),
             )
             resets = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="password_resets", limit=8000)
             tok_h = sha256(tok.encode("utf-8")).hexdigest()
@@ -5657,16 +5643,16 @@ def render_admin_plan_consolide() -> None:
   <tbody>
     <tr>
       <td><strong>Déploiement public (Git + Streamlit Cloud) — sécurité</strong></td>
-      <td><span class="lv-st-partiel">À valider</span></td>
+      <td><span class="lv-st-ok">Livré</span></td>
       <td>
-        Objectif : dépôt public sans fuite de secrets. Déjà en place :
+        Déploiement réalisé après durcissement du dépôt et configuration Streamlit Cloud (Secrets). Socle maintenu :
         <ul>
-          <li><code>.gitignore</code> ignore <code>.streamlit/secrets.toml</code>, <code>.env*</code>, clés (<code>*.pem</code>, <code>*.key</code>, <code>*service*account*.json</code>…), <code>.venv/</code>, caches.</li>
-          <li>Admin login via <code>st.secrets</code> (pas d’identifiants par défaut en dur).</li>
-          <li>Prompts IA (structure) externalisés dans Sheets (<code>Paramètres_IA</code>) + “secret sauce” dans <code>st.secrets</code> (<code>IA_SECRET_SAUCE_MD</code>).</li>
-          <li>Fallback local <code>data/instructions_ia.md</code> réduit au minimum (repo public).</li>
+          <li><code>.gitignore</code> : <code>.streamlit/secrets.toml</code>, <code>.env*</code>, clés, comptes de service, <code>.venv/</code>, caches.</li>
+          <li>Admin via <code>st.secrets</code> (pas d’identifiants par défaut en dur).</li>
+          <li>Prompts IA dans Sheets (<code>Paramètres_IA</code> / <strong>AIP</strong>) + secret sauce (<code>IA_SECRET_SAUCE_MD</code>).</li>
+          <li>Fallback local <code>data/instructions_ia.md</code> minimal (repo public).</li>
         </ul>
-        Reste : scan final (repo + historique) avant publication, puis paramétrage Streamlit Cloud (Secrets).
+        Vigilance continue à chaque contribution ; révision historique Git ponctuelle si besoin d’audit.
       </td>
     </tr>
     <tr>
@@ -5687,7 +5673,10 @@ def render_admin_plan_consolide() -> None:
     <tr>
       <td>Cache local lectures AELF + synthèse / audio</td>
       <td><span class="lv-st-ok">Livré</span></td>
-      <td>Extensions possibles (autres médias) si le produit le demande.</td>
+      <td>
+        Extensions possibles (autres médias) si le produit le demande.
+        URL de base de l’API AELF surchargeable via secrets (<code>AELF_BASE_URL</code> ou section <code>[aelf]</code> ; défaut <code>api.aelf.org</code>, pas de clé API).
+      </td>
     </tr>
     <tr>
       <td><strong>Automatisation envoi hebdomadaire (vendredi soir) — e-mail / SMS</strong></td>
@@ -5708,19 +5697,22 @@ def render_admin_plan_consolide() -> None:
     </tr>
     <tr>
       <td><strong>Captation des retours après mailing (mini-questionnaire)</strong></td>
-      <td><span class="lv-st-partiel">Livré base</span></td>
+      <td><span class="lv-st-ok">Livré</span></td>
       <td>
-        Page publique «&nbsp;Donner votre avis&nbsp;» + route <code>?route=feedback</code>&nbsp;; table Sheets logique
-        <code>experience_feedback</code> (acronyme <strong>RSTN</strong> après <code>tools/init_sheets_db.py</code>) en append-only&nbsp;;
-        lien automatique dans les e-mails lorsque le template contient la phrase
-        <em>👉 Donner mon avis sur cette expérience</em> (éventuellement entre crochets). Reste&nbsp;: relier l’URL depuis le template
-        avec paramètres optionnels (campagne, dimanche ciblé), synthèse admin des réponses, ou export vers Google Forms si besoin terrain.
+        Page «&nbsp;Donner votre avis&nbsp;» (<code>?route=feedback</code>), table <code>experience_feedback</code> (<strong>RSTN</strong>), accès connecté ou lien <code>?email=</code>.
+        Lien cliquable dans l’e-mail lorsque le template contient la phrase <em>👉 Donner mon avis sur cette expérience</em>.
+        Admin <strong>Sondage synthèse</strong> : agrégat des réponses + IA Vertex → historique <code>feedback_insights</code> (<strong>FBIN</strong>), export Excel des bruts.
+        Optionnel plus tard : paramètres d’URL enrichis dans les campagnes (campagne, dimanche ciblé) ou export terrain type Forms.
       </td>
     </tr>
     <tr>
       <td>Authentification — récupération « mot de passe oublié »</td>
-      <td><span class="lv-st-todo">À refaire</span></td>
-      <td>Section retirée (insatisfaisante). Reconcevoir plus tard (UX + sécurité + parcours).</td>
+      <td><span class="lv-st-ok">Livré</span></td>
+      <td>
+        Flux opérationnel : demande depuis la connexion &rarr; e-mail SMTP &rarr; lien
+        <code>?route=reset_password&amp;email=&amp;token=</code> &rarr; saisie du nouveau mot de passe.
+        Jetons append-only dans <code>password_resets</code> (<strong>PWRT</strong>, aligné <code>AliasTables</code>), durée limitée, PBKDF2 (<code>hash_password</code> / <code>verify_password</code>).
+      </td>
     </tr>
     <tr>
       <td>PDF page de garde (dimanche) + PDF mensuel « Graine de Parole » (encart résolutions)</td>
@@ -5773,10 +5765,11 @@ def render_admin_plan_consolide() -> None:
     </tr>
     <tr>
       <td>CSS responsive <strong>mobile &amp; tablette</strong> (&lt; 1024&nbsp;px)</td>
-      <td><span class="lv-st-partiel">Partiel</span></td>
+      <td><span class="lv-st-ok">Livré</span></td>
       <td>
-        Voir <strong>points chirurgicaux</strong> ci-dessous (référence). Déjà dans <code>app.py</code> : popover <code>Menu</code>, viewport,
-        padding mémo + <code>:has(textarea:focus)</code>. Reste : extractions CSS dédiées, largeur max type « app » (~480–600&nbsp;px), simulateur admin, audit expander « Mes mémos ».
+        Version jugée <strong>bonne pour le service</strong> : navigation &lt; 1024&nbsp;px (popover <code>Menu</code>), viewport, lectures liturgiques,
+        mémos / clavier (<code>padding-bottom</code> + <code>:has(textarea:focus)</code>), simulateur admin pour recette.
+        Référence : <strong>points chirurgicaux</strong> ci-dessous. Améliorations futures possibles : extraction CSS dédiée, micro-ajustements largeur « app », polish ponctuel des expanders.
       </td>
     </tr>
     <tr>
@@ -5849,8 +5842,8 @@ def render_admin_plan_consolide() -> None:
 <dl class="lv-keylist">
   <dt>Priorités rapides (key list)</dt>
   <dd>Cahier des charges : génération automatique d’une version « livrable », visualisation admin, export PDF.</dd>
-  <dd>Responsive : media queries &lt; 1024&nbsp;px, navigation empilée ou menu alternatif, tests réels tablette / téléphone.</dd>
-  <dd>Admin : page Simulateur mobile (+ cadre téléphone pour la session, largeur réglable).</dd>
+  <dd>Responsive : considéré livré pour le service ; affiner au fil des retours terrain si besoin.</dd>
+  <dd>Admin : simulateur mobile livré ; compléter au besoin par Chrome / Edge mode appareil pour clavier réaliste.</dd>
   <dd>Stabiliser Vision sur le bon projet GCP et valider une analyse complète sans 403.</dd>
   <dd>Repasser sur le PDF mensuel et la couverture si tu veux un gabarit « fascicule » multi-pages.</dd>
   <dd>PWA : choix d’hébergement et socle technique pour exposer le manifest au navigateur.</dd>

@@ -17,6 +17,7 @@ def _suggest_aliases() -> dict[str, str]:
     return {
         "users": "USR",
         "subscriptions": "SUB",
+        "password_resets": "PWRT",
         "email_templates": "ETPL",
         "outbound_messages": "OUTM",
         "generations": "GEN",
@@ -70,6 +71,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
     desc = {
         "users": "Comptes utilisateurs (profil)",
         "subscriptions": "Préférences d’envoi (opt-in/opt-out)",
+        "password_resets": "Jetons réinitialisation mot de passe",
         "email_templates": "Templates e-mail (versions actives)",
         "outbound_messages": "Journal des messages sortants (email/sms)",
         "generations": "Synthèses générées (texte)",
@@ -92,6 +94,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
         "RUNS": "Exécutions (scheduler)",
         "RSTN": "Retours / mini-questionnaires post-envoi",
         "FBIN": "Synthèses IA (historique questionnaires)",
+        "PWRT": "Jetons réinitialisation mot de passe",
     }
 
     aliases = _suggest_aliases()

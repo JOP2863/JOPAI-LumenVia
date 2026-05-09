@@ -179,6 +179,18 @@ def default_tables() -> list[TableSpec]:
             ),
         ),
         TableSpec(
+            name="password_resets",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "email",
+                    "token_hash",
+                    "expires_at",
+                    "used",
+                ]
+            ),
+        ),
+        TableSpec(
             name="email_templates",
             columns=with_concat(
                 [
@@ -446,6 +458,15 @@ def default_tables() -> list[TableSpec]:
             ),
         ),
     ]
+
+
+def get_table_spec(name: str) -> TableSpec:
+    """Retourne le ``TableSpec`` du registre ``default_tables()`` (nom logique)."""
+    n = str(name or "").strip()
+    for t in default_tables():
+        if t.name == n:
+            return t
+    raise KeyError(f"TableSpec introuvable: {name!r}")
 
 
 def build_gspread_client(service_account_info: Mapping[str, Any]) -> gspread.Client:
