@@ -32,10 +32,12 @@ from core.sheets_db import (
     BASE_COLUMNS,
     SHEETS_ROW_STATUS_ACTIVE,
     SHEETS_ROW_STATUS_INACTIVE,
+    TableSpec,
     append_immutable_row,
     append_immutable_rows_bulk,
     build_gspread_client,
     compute_concat,
+    ensure_table,
     fetch_records,
     sheet_row_status_is_live,
     utc_now_iso,
@@ -1819,7 +1821,7 @@ def render_sunday() -> None:
         value=default,
     )
 
-    @st.cache_data(ttl=180, show_spinner=False, max_entries=24)
+    @st.cache_data(ttl=900, show_spinner=False, max_entries=48)
     def _month_content_status(
         *,
         gsheet_id: str,
@@ -1832,6 +1834,9 @@ def render_sunday() -> None:
         """
         Retourne un mapping date_iso -> {text,audio,pdf} pour les dimanches du mois.
         Objectif : affichage indicatif (encerclage) sans empêcher la régénération.
+
+        Optimisations : cache plus long (pas besoin temps réel), filtre rapide sur l’année affichée,
+        audio rattaché uniquement aux `generations` du mois concerné.
         """
         out: dict[str, dict[str, bool]] = {}
         try:
@@ -1841,13 +1846,14 @@ def render_sunday() -> None:
         except Exception:
             gens, aud = [], []
 
-        # Dernière génération par date
+        ypref = f"{int(year)}-"
+        # Dernière génération par date (uniquement l’année du mois affiché : réduit le travail sur la liste)
         gen_by_date: dict[str, dict] = {}
         for r in gens:
             if str(r.get("zone") or "").strip() != zone:
                 continue
             ds = str(r.get("date") or "").strip()[:10]
-            if len(ds) != 10:
+            if len(ds) != 10 or not ds.startswith(ypref):
                 continue
             try:
                 d = date.fromisoformat(ds)
@@ -1859,8 +1865,16 @@ def render_sunday() -> None:
             if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
                 gen_by_date[ds] = r
 
-        # Audio par gen_entity_id (au moins une ligne)
-        audio_gen_ids = {str(r.get("gen_entity_id") or "").strip() for r in aud if str(r.get("gen_entity_id") or "").strip()}
+        allowed_gen_ids = {
+            str((g or {}).get("entity_id") or "").strip()
+            for g in gen_by_date.values()
+            if str((g or {}).get("entity_id") or "").strip()
+        }
+        audio_gen_ids = {
+            str(r.get("gen_entity_id") or "").strip()
+            for r in aud
+            if str(r.get("gen_entity_id") or "").strip() in allowed_gen_ids
+        }
 
         # PDF : existence objet GCS (best-effort)
         pdf_exists: set[str] = set()
@@ -6555,13 +6569,29 @@ def render_admin_feedback_insights() -> None:
     st.title("Synthèse des retours (questionnaire)")
     st.caption(
         "À partir des lignes **Actif** de la table `experience_feedback`, génère une synthèse et des pistes d’action "
-        "via **Gemini (Vertex)** — sans afficher d’e-mails dans le prompt."
+        "via **Gemini (Vertex)** — sans afficher d’e-mails dans le prompt agrégé."
     )
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
         st.error("Configuration `gcp_service_account` / `gsheet_id` manquante.")
         return
     gs = build_gspread_client(cfg.gcp_service_account)
+    ensure_table(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table=TableSpec(
+            name="feedback_insights",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "n_sample",
+                    "bundle_sha256",
+                    "model_used",
+                    "synthesis_text",
+                ]
+            ),
+        ),
+    )
     try:
         rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="experience_feedback", limit=1200)
     except Exception as e:
@@ -6573,6 +6603,47 @@ def render_admin_feedback_insights() -> None:
     if not live_fb:
         st.info("Aucun retour à analyser pour l’instant.")
         return
+
+    # Export Excel des réponses brutes
+    try:
+        from openpyxl import Workbook
+        import io as _io
+
+        _cols = [
+            "created_at",
+            "status",
+            "submitter_email",
+            "emotion_global",
+            "rating_illustration",
+            "rating_synthesis",
+            "rating_audio",
+            "utility_liturgy",
+            "touch_memorable",
+            "wish_improve_one",
+            "campaign_hint",
+            "date_dimanche_hint",
+            "source_route",
+            "row_id",
+            "entity_id",
+        ]
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "retours"
+        ws.append(_cols)
+        for r in live_fb:
+            ws.append([str(r.get(c) or "") for c in _cols])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        st.download_button(
+            label="Télécharger les réponses brutes (.xlsx)",
+            data=buf.getvalue(),
+            file_name="lumenvia_retours_questionnaire.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="adm_fb_dl_xlsx",
+        )
+    except Exception as ex:
+        st.caption(f"Export Excel indisponible ({ex}).")
+
     ln_fb = len(live_fb)
     cap_n = min(200, ln_fb)
     if cap_n <= 10:
@@ -6599,6 +6670,44 @@ def render_admin_feedback_insights() -> None:
             f"souvenir={str(r.get('touch_memorable') or '')[:140]} | idée={str(r.get('wish_improve_one') or '')[:140]}"
         )
     bundle = "\n".join(lines)
+    bundle_sig = sha256(f"{n_sample}\n{bundle}".encode("utf-8")).hexdigest()
+
+    def _latest_saved_insight(sig: str) -> dict | None:
+        try:
+            ins_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="feedback_insights", limit=800)
+        except Exception:
+            return None
+        cand = [
+            r
+            for r in ins_rows
+            if sheet_row_status_is_live(r.get("status"))
+            and str(r.get("bundle_sha256") or "").strip() == sig
+        ]
+        if not cand:
+            return None
+        cand.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        return cand[0]
+
+    prev_ins = _latest_saved_insight(bundle_sig)
+    if prev_ins:
+        st.warning(
+            "Une synthèse **identique** (même agrégat et même nombre de réponses) est déjà enregistrée. "
+            "Tu peux la relire ci‑dessous sans refaire d’appel IA — coche **Forcer** uniquement si tu veux une nouvelle analyse.",
+            icon="📎",
+        )
+        with st.expander("Synthèse déjà enregistrée", expanded=False):
+            st.caption(
+                f"Enregistrée le **{str(prev_ins.get('created_at') or '')[:19]}** · modèle **{prev_ins.get('model_used') or '—'}**"
+            )
+            st.markdown(str(prev_ins.get("synthesis_text") or "") or "—")
+
+    force_regen = st.checkbox(
+        "Forcer un nouvel appel IA (refaire la synthèse même si une version existe pour ce périmètre)",
+        value=False,
+        key="adm_fb_insights_force",
+        disabled=not bool(prev_ins),
+    )
+
     prompt_fb = (
         "Tu es consultant pour LumenVia (préparation dominicale, textes AELF, ton bienveillant).\n\n"
         "Données : réponses utilisateurs au questionnaire flash (sans adresses e-mail).\n"
@@ -6609,7 +6718,13 @@ def render_admin_feedback_insights() -> None:
         "3) Trois questions ouvertes pour approfondir ensuite.\n\n"
         "Contraintes : pas de jargon SMTP/API ; pas inventer de citations ; rester factuel par rapport aux données."
     )
+
     if st.button("Générer la synthèse IA", type="primary", key="adm_fb_insights_run"):
+        if prev_ins and not force_regen:
+            st.info(
+                "Aucun appel IA lancé : ouvre l’expander « Synthèse déjà enregistrée » ou coche **Forcer** pour refaire une analyse."
+            )
+            return
         ov = loading_overlay("Analyse des retours…")
         try:
             vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
@@ -6618,7 +6733,22 @@ def render_admin_feedback_insights() -> None:
                 prompt=prompt_fb,
                 max_output_tokens=4096,
             )
-            st.markdown(out.text or "")
+            txt = out.text or ""
+            st.markdown(txt)
+            entity_ins = sha256(f"fbins|{bundle_sig}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:28]
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="feedback_insights",
+                values_by_col={
+                    "entity_id": entity_ins,
+                    "n_sample": str(int(n_sample)),
+                    "bundle_sha256": bundle_sig,
+                    "model_used": str(out.model or ""),
+                    "synthesis_text": txt[:47000],
+                },
+            )
+            st.success("Synthèse enregistrée dans la table `feedback_insights`.")
         except Exception as e:
             st.exception(e)
         finally:
@@ -7326,6 +7456,28 @@ def render_admin_emailing() -> None:
         key="adm_email_test_cmarsollat",
         disabled=bool(send_to_all),
     )
+    manual_extra_raw = st.text_area(
+        "Autres destinataires (saisie manuelle — une adresse par ligne, ou séparées par virgule / point-virgule)",
+        value="",
+        height=72,
+        key="adm_email_manual_extra",
+        disabled=bool(send_to_all),
+        placeholder="ex. prenom.nom@laposte.net , autre@yahoo.fr",
+    )
+
+    def _parse_extra_emails(raw: object) -> list[str]:
+        acc: list[str] = []
+        for part in re.split(r"[\n,;]+", str(raw or "")):
+            em = part.strip().lower()
+            if _is_email_ok(em):
+                acc.append(em)
+        seen: set[str] = set()
+        dedup: list[str] = []
+        for em in acc:
+            if em not in seen:
+                seen.add(em)
+                dedup.append(em)
+        return dedup
 
     def _latest_user_by_email(email_lc: str) -> dict:
         em0 = str(email_lc or "").strip().lower()
@@ -7352,6 +7504,9 @@ def render_admin_emailing() -> None:
         selected_test_emails.append("jop28gemini@gmail.com")
     if test_opt_cmarsollat:
         selected_test_emails.append("cmarsollat@hotmail.com")
+    for em in _parse_extra_emails(manual_extra_raw):
+        if em not in selected_test_emails:
+            selected_test_emails.append(em)
     # Si rien n'est coché, on retombe sur le destinataire dry-run automatique (users/secrets)
     if not selected_test_emails and _is_email_ok(dry_email_in):
         selected_test_emails = [dry_email_in.strip().lower()]

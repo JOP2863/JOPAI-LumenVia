@@ -254,6 +254,18 @@ def default_tables() -> list[TableSpec]:
             ),
         ),
         TableSpec(
+            name="feedback_insights",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "n_sample",
+                    "bundle_sha256",
+                    "model_used",
+                    "synthesis_text",
+                ]
+            ),
+        ),
+        TableSpec(
             name="outbound_messages",
             columns=with_concat(
                 [

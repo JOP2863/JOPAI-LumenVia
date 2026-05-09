@@ -34,6 +34,7 @@ def _suggest_aliases() -> dict[str, str]:
         "scheduler_runs": "RUNS",
         "audiences": "AUDC",
         "experience_feedback": "RSTN",
+        "feedback_insights": "FBIN",
         # AliasTables garde son nom long (table maître)
     }
 
@@ -86,9 +87,11 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
         "scheduler_runs": "Exécutions (scheduler)",
         "audiences": "Audiences (ciblage)",
         "experience_feedback": "Retours / mini-questionnaires post-envoi",
+        "feedback_insights": "Synthèses IA (historique questionnaires)",
         "CMPG": "Campagnes d’envoi (scheduler)",
         "RUNS": "Exécutions (scheduler)",
         "RSTN": "Retours / mini-questionnaires post-envoi",
+        "FBIN": "Synthèses IA (historique questionnaires)",
     }
 
     aliases = _suggest_aliases()
