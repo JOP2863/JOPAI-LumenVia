@@ -46,7 +46,7 @@ def _read_app_defaults() -> dict[str, str]:
 def _default_descriptions() -> dict[str, str]:
     return {
         "instructions_base_md": "Socle — consignes générales (structure du prompt)",
-        "overlay_takeaways": "Surcouche — inclure « Le Psaume : Ma réponse » + « À retenir »",
+        "overlay_takeaways": "Surcouche — inclure « Le Psaume » + « À retenir »",
         "overlay_no_takeaways": "Surcouche — ne pas inclure la section « À retenir »",
         "overlay_catechese_bridge": "Surcouche — ajouter une passerelle catéchèse (Stone Card)",
         "retry_hardened_prefix": "Surcouche — préfixe de relance (anti-hallucination renforcée)",

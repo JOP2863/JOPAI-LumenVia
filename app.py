@@ -77,7 +77,7 @@ _PROMPT_TEMPLATE_KEYS = {
 
 _PROMPT_TEMPLATE_LABELS: dict[str, str] = {
     "instructions_base_md": "Socle — consignes générales (structure du prompt)",
-    "overlay_takeaways": "Surcouche — inclure « Le Psaume : Ma réponse » + « À retenir »",
+    "overlay_takeaways": "Surcouche — inclure « Le Psaume » + « À retenir »",
     "overlay_no_takeaways": "Surcouche — sans section « À retenir »",
     "overlay_catechese_bridge": "Surcouche — passerelle catéchèse (Stone Card)",
     "retry_hardened_prefix": "Surcouche — préfixe de relance (anti-hallucination renforcée)",
@@ -970,6 +970,7 @@ _ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
     ("readings_cache", "Cache\nlectures", "admin_readings_cache"),
     ("accounts", "Comptes\ninscrits", "admin_accounts"),
     ("emailing", "Emailing", "admin_emailing"),
+    ("feedback_ai", "Sondage\nsynthèse", "admin_feedback_insights"),
     ("scheduler", "Planificateur", "admin_scheduler"),
     ("res", "Test\nressources", "admin_resources"),
     ("cdc", "Cahier\ndes\ncharges", "admin_cdc"),
@@ -1943,12 +1944,12 @@ def render_sunday() -> None:
                 rows_html.append("<tr>" + "".join(tds) + "</tr>")
 
             html = f"""
-<div style="margin:0.35rem auto 0.15rem;max-width:420px;">
+<div style="margin:0.35rem auto 0.15rem;max-width:min(420px,100%);width:100%;box-sizing:border-box;">
   <div style="text-align:center;color:#6b5918;font-weight:700;margin-bottom:0.25rem;font-size:0.95rem;">
     Dimanches déjà générés — {mois_fr} {chosen_any.year}
   </div>
-  <div style="border:1px solid rgba(212,175,55,0.30);background:rgba(255,255,255,0.62);padding:0.25rem 0.25rem 0.35rem;">
-    <table style="width:100%;border-collapse:collapse;text-align:center;font-size:0.85rem;">
+  <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid rgba(212,175,55,0.30);background:rgba(255,255,255,0.62);padding:0.25rem 0.25rem 0.35rem;">
+    <table style="width:100%;min-width:260px;border-collapse:collapse;text-align:center;font-size:0.85rem;table-layout:fixed;">
       <thead>
         <tr style="opacity:0.85;">
           <th style="padding:3px 0;">L</th><th>M</th><th>M</th><th>J</th><th>V</th><th>S</th><th>D</th>
@@ -1964,7 +1965,10 @@ def render_sunday() -> None:
   </div>
 </div>
 <style>
-.lv-day{{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;border-radius:9px;margin:1px auto;color:var(--liturgie-text);font-size:0.86rem;}}
+.lv-day{{position:relative;display:inline-flex;align-items:center;justify-content:center;width:26px;height:22px;border-radius:9px;margin:1px auto;color:var(--liturgie-text);font-size:0.82rem;}}
+@media (max-width:520px) {{
+  .lv-day{{width:22px;height:20px;font-size:0.76rem;}}
+}}
 .lv-sun{{color:#6b5918;font-weight:600;}}
 .lv-ring{{outline:1px solid var(--liturgie-accent);outline-offset:1px;border-radius:9px;}}
 .lv-daylink{{display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;color:inherit;text-decoration:none;}}
@@ -2926,7 +2930,7 @@ def render_memo() -> None:
 */
 @media (max-width: 1024px) {
   section[data-testid="stMain"] .block-container {
-    padding-bottom: max(14rem, calc(env(safe-area-inset-bottom, 0px) + 11rem)) !important;
+    padding-bottom: max(20rem, calc(env(safe-area-inset-bottom, 0px) + 14rem)) !important;
   }
 }
 </style>
@@ -3259,6 +3263,25 @@ En tant que premier passager de cette aventure, votre retour nous est précieux 
         em = (e or "").strip().lower()
         return bool(em and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em))
 
+    logged_in_fb = bool(str(st.session_state.get("auth_user_entity_id") or "").strip())
+    allow_feedback = logged_in_fb or _em_ok_feedback(qp_email_fb)
+    if not allow_feedback:
+        st.warning(
+            "Pour répondre au questionnaire, connecte-toi (**Mon compte**) ou ouvre le lien reçu dans ton e-mail "
+            "LumenVia — il préremplit ton adresse et permet de participer sans compte.",
+            icon="🔒",
+        )
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("Aller à Mon compte", type="primary", key="fb_need_login_account"):
+                st.session_state.route = "account"
+                st.rerun()
+        with b2:
+            if st.button("S'inscrire à la newsletter", type="secondary", key="fb_need_login_join"):
+                st.session_state.route = "join"
+                st.rerun()
+        return
+
     # Préremplissage : lien e-mail (?email=) prioritaire ; sinon session connectée.
     if _em_ok_feedback(qp_email_fb):
         st.session_state.fb_email_in = qp_email_fb
@@ -3452,6 +3475,118 @@ def render_join() -> None:
                     st.session_state.pop(k, None)
                 st.session_state.pop("admin_authenticated", None)
                 st.rerun()
+
+            st.divider()
+            st.subheader("Mes informations")
+            em_acct = str(st.session_state.get("auth_email_lc") or "").strip().lower()
+            adm_login0, _pw_adm = _admin_login_and_password()
+            is_admin_sess = bool(em_acct and em_acct == str(adm_login0 or "").strip().lower())
+
+            def _live_user_profile() -> dict:
+                rows = [
+                    u
+                    for u in users
+                    if str(u.get("email") or "").strip().lower() == em_acct
+                    and sheet_row_status_is_live(u.get("status"))
+                ]
+                if not rows:
+                    return {}
+                return sorted(rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
+
+            rp = _live_user_profile()
+            if is_admin_sess:
+                st.info("Session administrateur : pas de fiche « utilisateur » à éditer ici.")
+            elif not rp:
+                st.warning("Aucune fiche utilisateur active trouvée pour cet e-mail.")
+            else:
+                with st.form("acct_edit_profile"):
+                    e_fn = st.text_input("Prénom", value=str(rp.get("first_name") or "").strip(), key="acct_edit_fn")
+                    e_ln = st.text_input("Nom", value=str(rp.get("last_name") or "").strip(), key="acct_edit_ln")
+                    e_ph = st.text_input(
+                        "Téléphone (optionnel, format international)",
+                        value=str(rp.get("phone_e164") or "").strip(),
+                        key="acct_edit_ph",
+                        placeholder="+33612345678",
+                    )
+                    save_pf = st.form_submit_button("Enregistrer mes informations", type="primary")
+                if save_pf:
+                    ph_ok = True
+                    if e_ph.strip():
+                        ph_ok = bool(re.match(r"^\+\d{8,15}$", e_ph.strip()))
+                        if not ph_ok:
+                            st.error("Téléphone invalide. Format E.164, ex. +33612345678.")
+                    if ph_ok:
+                        ov_pf = loading_overlay("Enregistrement du profil…")
+                        try:
+                            try:
+                                next_ver = int(str(rp.get("version") or "1")) + 1
+                            except ValueError:
+                                next_ver = 2
+                            _supersede_users_by_email(em_acct)
+                            append_immutable_row(
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table="users",
+                                values_by_col={
+                                    "entity_id": str(rp.get("entity_id") or "").strip(),
+                                    "email": em_acct,
+                                    "first_name": e_fn.strip(),
+                                    "last_name": e_ln.strip(),
+                                    "phone_e164": e_ph.strip(),
+                                    "country": str(rp.get("country") or "FR").strip() or "FR",
+                                    "source": str(rp.get("source") or "compte").strip() or "compte",
+                                    "password_salt_b64": str(rp.get("password_salt_b64") or ""),
+                                    "password_hash_b64": str(rp.get("password_hash_b64") or ""),
+                                    "version": next_ver,
+                                },
+                                version=next_ver,
+                            )
+                            st.success("Informations enregistrées.")
+                            st.rerun()
+                        finally:
+                            ov_pf.empty()
+
+            if not is_admin_sess and rp:
+                st.divider()
+                st.subheader("Newsletter")
+                auth_uid_ac = str(user_entity_id).strip()
+                latest_ac_sub = _latest_subscription_record(subs, auth_uid_ac, "weekly_friday")
+                cur_o = str((latest_ac_sub or {}).get("opt_in") or "").strip().lower() in ("true", "1", "oui", "yes")
+                want_o = st.checkbox(
+                    "Je souhaite recevoir les e-mails du vendredi (opt-in)",
+                    value=bool(cur_o),
+                    key="acct_news_optin",
+                )
+                if st.button("Enregistrer les préférences newsletter", type="secondary", key="acct_news_save"):
+                    ov_n = loading_overlay("Enregistrement…")
+                    try:
+                        cur_act = str((latest_ac_sub or {}).get("active") or "").strip().lower() in (
+                            "true",
+                            "1",
+                            "oui",
+                            "yes",
+                            "active",
+                        )
+                        if (bool(want_o) != cur_o) or (bool(want_o) != cur_act):
+                            sub_ent = sha256(f"sub|{auth_uid_ac}|acct|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+                            append_immutable_row(
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table="subscriptions",
+                                values_by_col={
+                                    "entity_id": sub_ent,
+                                    "user_entity_id": auth_uid_ac,
+                                    "type": "weekly_friday",
+                                    "zone": "france",
+                                    "length_pref": str((latest_ac_sub or {}).get("length_pref") or "250"),
+                                    "opt_in": "true" if want_o else "false",
+                                    "active": "true" if want_o else "false",
+                                },
+                            )
+                        st.success("Préférences enregistrées.")
+                        st.rerun()
+                    finally:
+                        ov_n.empty()
         else:
             # Contrôle “standard” (pilotable) plutôt que `st.tabs` (qui ne permet pas de basculer via un bouton).
             mode = st.segmented_control(
@@ -3896,6 +4031,18 @@ def render_join() -> None:
 
 
 def render_reset_password() -> None:
+    st.markdown(
+        """
+<style>
+@media (max-width: 768px) {
+  section[data-testid="stMain"] .block-container {
+    padding-bottom: max(10rem, calc(env(safe-area-inset-bottom, 0px) + 8rem)) !important;
+  }
+}
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("Réinitialiser le mot de passe")
     st.caption("Saisis un nouveau mot de passe. Le lien est valide pendant une durée limitée.")
 
@@ -5582,7 +5729,7 @@ def render_admin_plan_consolide() -> None:
       <td>Couches hébergeur / reverse-proxy : HTTPS, en-têtes, injection manifest dans <code>&lt;head&gt;</code>.</td>
     </tr>
     <tr>
-      <td>Typologie biblique / Psaume « Ma réponse » (<code>data/instructions_ia.md</code>)</td>
+      <td>Typologie biblique / section « Le Psaume » (<code>data/instructions_ia.md</code>)</td>
       <td><span class="lv-st-ok">En données</span></td>
       <td>Pilotage éditorial continu ; pas de sources hors AELF.</td>
     </tr>
@@ -6399,6 +6546,81 @@ def render_admin_readings_cache() -> None:
                 chunk_size=120,
             )
             st.success(f"Préchargement terminé : **{added}** ligne(s) ajoutée(s).")
+        finally:
+            ov.empty()
+
+
+def render_admin_feedback_insights() -> None:
+    """Synthèse IA des réponses au questionnaire (`experience_feedback`)."""
+    st.title("Synthèse des retours (questionnaire)")
+    st.caption(
+        "À partir des lignes **Actif** de la table `experience_feedback`, génère une synthèse et des pistes d’action "
+        "via **Gemini (Vertex)** — sans afficher d’e-mails dans le prompt."
+    )
+    cfg = load_config()
+    if not cfg.gcp_service_account or not cfg.gsheet_id:
+        st.error("Configuration `gcp_service_account` / `gsheet_id` manquante.")
+        return
+    gs = build_gspread_client(cfg.gcp_service_account)
+    try:
+        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="experience_feedback", limit=1200)
+    except Exception as e:
+        st.error(f"Lecture `experience_feedback` impossible : {e}")
+        return
+    live_fb = [r for r in rows if sheet_row_status_is_live(r.get("status"))]
+    live_fb.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    st.metric("Réponses (lignes actives)", len(live_fb))
+    if not live_fb:
+        st.info("Aucun retour à analyser pour l’instant.")
+        return
+    ln_fb = len(live_fb)
+    cap_n = min(200, ln_fb)
+    if cap_n <= 10:
+        n_sample = cap_n
+        st.caption(f"Toutes les **{n_sample}** réponses seront incluses.")
+    else:
+        n_sample = int(
+            st.slider(
+                "Nombre de réponses récentes à inclure dans l’analyse",
+                min_value=10,
+                max_value=cap_n,
+                value=min(80, cap_n),
+                step=5,
+                key="adm_fb_insights_n",
+            )
+        )
+    sample = live_fb[:n_sample]
+    lines: list[str] = []
+    for i, r in enumerate(sample):
+        lines.append(
+            f"- {i + 1} | date={str(r.get('created_at') or '')[:16]} | "
+            f"humeur={r.get('emotion_global', '')} | illus={r.get('rating_illustration', '')} | "
+            f"pdf={r.get('rating_synthesis', '')} | audio={r.get('rating_audio', '')} | utile={r.get('utility_liturgy', '')} | "
+            f"souvenir={str(r.get('touch_memorable') or '')[:140]} | idée={str(r.get('wish_improve_one') or '')[:140]}"
+        )
+    bundle = "\n".join(lines)
+    prompt_fb = (
+        "Tu es consultant pour LumenVia (préparation dominicale, textes AELF, ton bienveillant).\n\n"
+        "Données : réponses utilisateurs au questionnaire flash (sans adresses e-mail).\n"
+        f"{bundle}\n\n"
+        "Tâche :\n"
+        "1) Synthèse en français (8 à 12 phrases) : tendances, forces, points de friction.\n"
+        "2) Liste **5 à 8 actions concrètes** numérotées (priorité décroissante), titre court + une phrase utile.\n"
+        "3) Trois questions ouvertes pour approfondir ensuite.\n\n"
+        "Contraintes : pas de jargon SMTP/API ; pas inventer de citations ; rester factuel par rapport aux données."
+    )
+    if st.button("Générer la synthèse IA", type="primary", key="adm_fb_insights_run"):
+        ov = loading_overlay("Analyse des retours…")
+        try:
+            vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
+            out = vx.generate_text_auto(
+                preferred_models=["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"],
+                prompt=prompt_fb,
+                max_output_tokens=4096,
+            )
+            st.markdown(out.text or "")
+        except Exception as e:
+            st.exception(e)
         finally:
             ov.empty()
 
@@ -9092,7 +9314,7 @@ def _build_prompt(
         ctx_block = f"\nRepères liturgiques (résumé pédagogique, à intégrer sans invention hors textes AELF):\n{ctx}\n"
     tpls = dict(templates or {})
     default_takeaways = (
-        "\nInclure une sous-section titrée exactement « Le Psaume : Ma réponse » : uniquement à partir du texte du psaume fourni, "
+        "\nInclure une sous-section titrée exactement « Le Psaume » : uniquement à partir du texte du psaume fourni, "
         "explique comment ce psaume permet de répondre en prière aux lectures (sans sources externes).\n"
         "Structurer aussi la synthèse pour mettre en relief la promesse / préfiguration (Première lecture, AT si applicable) "
         "et son accomplissement ou réponse dans l’Évangile, strictement à partir des textes fournis.\n"
@@ -9665,6 +9887,14 @@ def main() -> None:
                 st.rerun()
         else:
             render_admin_emailing()
+    elif route == "admin_feedback_insights":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_fb_ins"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_feedback_insights()
     elif route == "admin_scheduler":
         if not st.session_state.get("admin_authenticated"):
             st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
