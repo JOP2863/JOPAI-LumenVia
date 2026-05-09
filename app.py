@@ -7502,7 +7502,8 @@ def render_admin_emailing() -> None:
                         f"{label}</a>"
                     )
 
-                who = f"{prenom} {nom}".strip()
+                # Le template newsletter est rédigé "Bonjour {{prenom}}," : on force donc le prénom seul.
+                who = (prenom or "—").strip()
                 # On retire les lignes techniques / URLs signées du corps (l'illustration est rendue dans une card).
                 raw_lines = [ln.strip() for ln in (intro_text or "").replace("\r\n", "\n").split("\n")]
                 raw_lines = [ln for ln in raw_lines if ln]
