@@ -7098,6 +7098,12 @@ def render_admin_emailing() -> None:
         key="adm_email_test_gemini",
         disabled=bool(send_to_all),
     )
+    test_opt_cmarsollat = st.checkbox(
+        "Envoyer aussi à `cmarsollat@hotmail.com` (test)",
+        value=False,
+        key="adm_email_test_cmarsollat",
+        disabled=bool(send_to_all),
+    )
 
     def _latest_user_by_email(email_lc: str) -> dict:
         em0 = str(email_lc or "").strip().lower()
@@ -7122,6 +7128,8 @@ def render_admin_emailing() -> None:
         selected_test_emails.append("jop28@hotmail.com")
     if test_opt_gemini:
         selected_test_emails.append("jop28gemini@gmail.com")
+    if test_opt_cmarsollat:
+        selected_test_emails.append("cmarsollat@hotmail.com")
     # Si rien n'est coché, on retombe sur le destinataire dry-run automatique (users/secrets)
     if not selected_test_emails and _is_email_ok(dry_email_in):
         selected_test_emails = [dry_email_in.strip().lower()]
