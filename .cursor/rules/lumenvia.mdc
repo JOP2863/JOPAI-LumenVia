@@ -45,6 +45,10 @@ Assets marque : répertoire `assets/branding/` (`logo_mark.svg`, optionnel `favi
 - S’inspirer du pattern Memoria (`loading_glass` / overlay fixe, `st.empty()` pour lever le calque).
 - Préférer ce calque **en plus** d’un `st.spinner` local lorsque l’opération couvre tout le flux visible.
 
+## UX — contenu des messages (public)
+- Les messages affichés aux utilisateurs ne doivent pas contenir de mentions **techniques** (SMTP, API, tokens, détails d’infra, etc.).  
+  Si une explication technique est utile au debug, elle doit rester côté admin/logs, pas dans l’interface publique.
+
 ## Produit — protocole d’évolution (référence)
 - **Étape 2 (livré)** : script `tools/sunday_calendar_manifest.py` → manifeste JSON des dimanches + métadonnées AELF + mots-clés cycle (`data/manifests/`).
 - **Étape 3 (livré)** : script `tools/step3_illustration_pipeline.py` → `data/manifests/illustration_pipeline.json` (chemins GCS `Images/illustrations/{année}/{date}.webp` + prompt type Midjourney). L’app affiche l’image si l’objet existe dans le bucket (voir `app.py`, `_try_show_liturgy_illustration`).

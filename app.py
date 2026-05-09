@@ -556,6 +556,35 @@ button[kind="secondary"] p {
   overflow-wrap: normal !important;
   hyphens: none !important;
 }
+/* Parfois Streamlit rend le label dans un <span> */
+button[kind="secondary"] span {
+  white-space: pre-line !important;
+  text-align: center !important;
+  line-height: 1.15 !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  hyphens: none !important;
+  color: var(--liturgie-text) !important;
+}
+
+/* Navigation web : jamais de débordement de texte hors tuile (max 2 lignes) */
+div[class*="st-key-lv_nav_web_one_row"] button[kind="secondary"] p {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+div[class*="st-key-lv_nav_web_one_row"] button[kind="secondary"] span {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+div[class*="st-key-lv_nav_web_one_row"] button[kind="secondary"] {
+  min-height: 70px !important;
+}
 
 button[kind="primary"]:hover {
   background-color: #B8952D !important; /* Or plus profond */
@@ -941,7 +970,7 @@ _ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
     ("readings_cache", "Cache\nlectures", "admin_readings_cache"),
     ("accounts", "Comptes\ninscrits", "admin_accounts"),
     ("emailing", "Emailing", "admin_emailing"),
-    ("scheduler", "Scheduler", "admin_scheduler"),
+    ("scheduler", "Planificateur", "admin_scheduler"),
     ("res", "Test\nressources", "admin_resources"),
     ("cdc", "Cahier\ndes\ncharges", "admin_cdc"),
     ("plan", "Plan\nconsolidé", "admin_plan"),
@@ -1032,11 +1061,14 @@ def top_nav() -> str:
         with mid:
             st.image(str(logo_path), width=56)
 
+    nbsp = "\u00A0"
     labels = [
-        ("about", "JOPAI LumenVia :\nC’est quoi ?"),
-        ("sunday", "La Lumière du\nDimanche"),
-        ("memo", "Mon Aide-\nMémoire"),
-        ("join", "Nous\nrejoindre"),
+        # Évite le markdown dans les labels (peut décaler le rendu). "𝗟𝘂𝗺𝗲𝗻𝗩𝗶𝗮" = LumenVia en gras unicode.
+        ("about", f"𝗟𝘂𝗺𝗲𝗻𝗩𝗶𝗮{nbsp}:\nc'est quoi?"),
+        ("sunday", "La lumière\ndu dimanche"),
+        ("memo", f"Mon\nAide‑Mémoire"),
+        ("join", "S'inscrire à la Newsletter"),
+        ("account", "Mon Compte"),
     ]
 
     def _nav_popover_body() -> None:
@@ -1045,7 +1077,7 @@ def top_nav() -> str:
             if st.button(short, key=f"nav_m_{route}", use_container_width=True, type="secondary"):
                 st.session_state.route = route
                 st.rerun()
-        if st.button("Donner votre avis", key="nav_m_feedback", use_container_width=True, type="secondary"):
+        if st.button("Donner\nVotre avis", key="nav_m_feedback", use_container_width=True, type="secondary"):
             st.session_state.route = "feedback"
             st.rerun()
         if is_admin:
@@ -1055,19 +1087,54 @@ def top_nav() -> str:
     _menu_pop_key = f"lv_menu_pop_{str(st.session_state.route)}"
 
     if compact_nav:
-        # iframe (?lumenvia_narrow_nav=1) ou téléphone réel : pas de rangée « tuiles » dupliquant le Menu.
+        # Téléphone / iframe étroit : un seul “Menu”
         with st.popover("Menu", use_container_width=True, key=_menu_pop_key):
             _nav_popover_body()
     else:
-        with st.container(key="lv_nav_five_cols"):
+        # Tuile active : on colore l'entrée correspondant à la route courante.
+        try:
+            cur = str(st.session_state.get("route") or "").strip().lower()
+        except Exception:
+            cur = ""
+        # Styles d'état actif (tuile courante) + bouton “Donner votre avis”
+        active_tile_css = ""
+        if cur in {r for r, _ in labels}:
+            active_tile_css = f"""
+div[class*="st-key-nav_w_{cur}"] button[kind="secondary"] {{
+  background: rgba(212, 175, 55, 0.16) !important;
+  border-color: rgba(212, 175, 55, 0.65) !important;
+}}
+            """.strip()
+        # “Donner votre avis” (hors tuiles) : actif si route feedback
+        feedback_bg = "rgba(212, 175, 55, 0.16)" if cur == "feedback" else "white"
+        feedback_border = "rgba(212, 175, 55, 0.65)" if cur == "feedback" else "var(--liturgie-gold)"
+        st.markdown(
+            f"""
+<style>
+{active_tile_css}
+div[class*="st-key-nav_feedback_beside_logout"] button[kind="secondary"] {{
+  background: {feedback_bg} !important;
+  border-color: {feedback_border} !important;
+}}
+/* Force le retour à la ligne “Donner / Votre avis” */
+div[class*="st-key-nav_feedback_beside_logout"] button[kind="secondary"] p,
+div[class*="st-key-nav_feedback_beside_logout"] button[kind="secondary"] span {{
+  white-space: pre-line !important;
+  color: var(--liturgie-text) !important;
+}}
+</style>
+            """.strip(),
+            unsafe_allow_html=True,
+        )
+        # Version web : pas de tuile “Menu”, uniquement les entrées directes sur une seule ligne.
+        # Les libellés peuvent avoir au plus 2 lignes via '\n' (CSS: white-space: pre-line).
+        with st.container(key="lv_nav_web_one_row"):
             cols = st.columns([1, 1, 1, 1, 1], gap="small")
-            with cols[0]:
-                with st.popover("Menu", use_container_width=True, key=_menu_pop_key):
-                    _nav_popover_body()
             for i, (route, label) in enumerate(labels):
-                with cols[i + 1]:
-                    if st.button(label, key=f"nav_d_{route}", use_container_width=True, type="secondary"):
+                with cols[i]:
+                    if st.button(label, key=f"nav_w_{route}", use_container_width=True, type="secondary"):
                         st.session_state.route = route
+                        st.rerun()
 
     if uid:
         b1, b2, b3 = st.columns([3.35, 1.45, 1.95], gap="small")
@@ -1075,7 +1142,7 @@ def top_nav() -> str:
             st.caption(f"🟢 Connecté · {email or 'session active'}")
         with b2:
             if st.button(
-                "Donner votre avis",
+                "Donner\nVotre avis",
                 key="nav_feedback_beside_logout",
                 type="secondary",
                 use_container_width=True,
@@ -1145,6 +1212,7 @@ div[class*="st-key-auth_logout_nav"] button p,
 div[class*="auth_logout_nav"] button p,
 div[id*="auth_logout_nav"] button p,
 div[data-anchor-streamlit*="auth_logout_nav"] button p {
+  color: #ffffff !important;
   text-align: center !important;
   white-space: normal !important;
   overflow: visible !important;
@@ -1153,6 +1221,12 @@ div[data-anchor-streamlit*="auth_logout_nav"] button p {
   hyphens: none !important;
   width: 100% !important;
   line-height: 1.2 !important;
+}
+div[class*="st-key-auth_logout_nav"] button span,
+div[class*="auth_logout_nav"] button span,
+div[id*="auth_logout_nav"] button span,
+div[data-anchor-streamlit*="auth_logout_nav"] button span {
+  color: #ffffff !important;
 }
 div[class*="st-key-auth_logout_nav"] button:hover,
 div[class*="auth_logout_nav"] button:hover,
@@ -1170,6 +1244,12 @@ div[data-anchor-streamlit*="adm_nav_logout"] button {
   color: #ffffff !important;
   border-color: #654d0f !important;
 }
+div[class*="st-key-adm_nav_logout"] button p,
+div[class*="adm_nav_logout"] button p,
+div[id*="adm_nav_logout"] button p,
+div[data-anchor-streamlit*="adm_nav_logout"] button p {
+  color: #ffffff !important;
+}
 div[class*="st-key-adm_nav_logout"] button:hover,
 div[class*="adm_nav_logout"] button:hover,
 div[id*="adm_nav_logout"] button:hover,
@@ -1184,6 +1264,12 @@ div[data-anchor-streamlit*="adm_p_logout"] button {
   background-color: #8b6914 !important;
   color: #ffffff !important;
   border-color: #654d0f !important;
+}
+div[class*="st-key-adm_p_logout"] button p,
+div[class*="adm_p_logout"] button p,
+div[id*="adm_p_logout"] button p,
+div[data-anchor-streamlit*="adm_p_logout"] button p {
+  color: #ffffff !important;
 }
 div[class*="st-key-adm_p_logout"] button:hover,
 div[class*="adm_p_logout"] button:hover,
@@ -1811,6 +1897,10 @@ def render_sunday() -> None:
     # Mini-calendrier HTML : dimanches encerclés si contenu déjà présent
     if cfg.gcp_service_account and cfg.gsheet_id:
         try:
+            try:
+                qp_open_cal = str(st.query_params.get("open_cal") or "").strip().lower() in ("1", "true", "oui", "yes", "on")
+            except Exception:
+                qp_open_cal = False
             fp = _service_account_fingerprint(getattr(cfg, "gcp_service_account", {}) or {})
             bucket = str(cfg.gcs_bucket_name or "").strip() or None
             st_map = _month_content_status(
@@ -1840,8 +1930,15 @@ def render_sunday() -> None:
                     has_any = bool(st0.get("text") or st0.get("audio") or st0.get("pdf"))
                     ring = "lv-ring" if (in_month and is_sun and has_any) else ("lv-sun" if (in_month and is_sun) else "")
                     muted = "lv-muted" if not in_month else ""
+                    # Clique sur un dimanche avec contenu → charge ce dimanche (comme si sélectionné au date_input).
+                    href = f"?sunday={ds}&open_cal=1" if (in_month and is_sun and has_any) else ""
+                    inner = (
+                        f"<a class='lv-daylink' href='{href}' target='_self'>{d.day}</a>"
+                        if href
+                        else str(d.day)
+                    )
                     tds.append(
-                        f"<td class='{muted}'><div class='lv-day {ring}'>{d.day}</div></td>"
+                        f"<td class='{muted}'><div class='lv-day {ring}'>{inner}</div></td>"
                     )
                 rows_html.append("<tr>" + "".join(tds) + "</tr>")
 
@@ -1870,11 +1967,16 @@ def render_sunday() -> None:
 .lv-day{{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:24px;border-radius:9px;margin:1px auto;color:var(--liturgie-text);font-size:0.86rem;}}
 .lv-sun{{color:#6b5918;font-weight:600;}}
 .lv-ring{{outline:1px solid var(--liturgie-accent);outline-offset:1px;border-radius:9px;}}
+.lv-daylink{{display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;color:inherit;text-decoration:none;}}
+.lv-daylink:hover{{text-decoration:underline;}}
 .lv-muted .lv-day{{opacity:0.35;}}
 .lv-legend-ring{{display:inline-block;width:9px;height:9px;border-radius:3px;outline:1px solid var(--liturgie-accent);outline-offset:1px;margin-right:0.25rem;vertical-align:middle;}}
 </style>
             """.strip()
-            with st.expander(f"Voir les contenus déjà disponibles — {mois_fr} {chosen_any.year}", expanded=False):
+            with st.expander(
+                f"Voir les contenus déjà disponibles — {mois_fr} {chosen_any.year}",
+                expanded=bool(qp_open_cal),
+            ):
                 st.markdown(html, unsafe_allow_html=True)
         except Exception:
             pass
@@ -2832,7 +2934,8 @@ def render_memo() -> None:
         unsafe_allow_html=True,
     )
     st.title("Mon Aide-Mémoire")
-    st.write("Crée et conserve tes mémos pour retrouver ce qui a touché ton cœur.")
+    # Accès réservé : l'aide-mémoire nécessite une session utilisateur (compte).
+    st.write("Espace réservé aux utilisateurs connectés.")
 
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
@@ -2848,96 +2951,12 @@ def render_memo() -> None:
         st.session_state.auth_email_lc = ""
 
     user_entity_id = str(st.session_state.auth_user_entity_id or "").strip()
-
-    st.subheader("Connexion")
-    if user_entity_id:
-        email_disp = str(st.session_state.get("auth_email_lc") or "").strip()
-        st.caption(f"Session active pour **{email_disp or 'ton compte'}**.")
-        if st.button("Se déconnecter", type="secondary"):
-            for k in ("auth_user_entity_id", "auth_email_lc"):
-                if k in st.session_state:
-                    del st.session_state[k]
-            st.session_state.pop("admin_authenticated", None)
-            st.rerun()
-    else:
-        email = st.text_input("Email", key="auth_email").strip().lower()
-        password = st.text_input("Mot de passe", type="password", key="auth_password")
-
-    def _latest_user_record(users: list[dict], email_lc: str) -> dict | None:
-        rows = [u for u in users if str(u.get("email", "")).strip().lower() == email_lc]
-        if not rows:
-            return None
-        # On prend la dernière ligne créée (created_at)
-        rows_sorted = sorted(rows, key=lambda r: str(r.get("created_at", "")), reverse=True)
-        return rows_sorted[0]
-
-    users = []
-    try:
-        users = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=2000)
-    except Exception:
-        users = []
-
     if not user_entity_id:
-        col_a, col_b = st.columns(2, gap="small")
-        with col_a:
-            if st.button("Se connecter", type="primary", disabled=not (email and password)):
-                ov = loading_overlay("LumenVia vérifie tes identifiants…")
-                try:
-                    adm_login, adm_pwd = _admin_login_and_password()
-                    if email.strip().lower() == adm_login and password == adm_pwd:
-                        admin_canon = f"{adm_login}@admin.lumenvia"
-                        st.session_state.auth_user_entity_id = sha256(
-                            admin_canon.encode("utf-8")
-                        ).hexdigest()[:24]
-                        st.session_state.auth_email_lc = adm_login
-                        st.session_state.admin_authenticated = True
-                        st.success("Connecté (administrateur).")
-                        st.rerun()
-                    rec = _latest_user_record(users, email)
-                    if not rec or not rec.get("password_salt_b64") or not rec.get("password_hash_b64"):
-                        st.error("Compte introuvable ou mot de passe non défini. Utilise “Créer un compte”.")
-                        return
-                    ok = verify_password(
-                        password,
-                        salt_b64=str(rec.get("password_salt_b64")),
-                        hash_b64=str(rec.get("password_hash_b64")),
-                    )
-                    if not ok:
-                        st.error("Mot de passe incorrect.")
-                        return
-                    st.session_state.auth_user_entity_id = sha256(email.encode("utf-8")).hexdigest()[:24]
-                    st.session_state.auth_email_lc = email
-                    st.session_state.pop("admin_authenticated", None)
-                    st.success("Connecté.")
-                    st.rerun()
-                finally:
-                    ov.empty()
-        with col_b:
-            if st.button("Créer un compte", type="secondary", disabled=not (email and password)):
-                ov = loading_overlay("LumenVia crée ton compte…")
-                try:
-                    salt_b64, hash_b64 = hash_password(password)
-                    new_uid = sha256(email.encode("utf-8")).hexdigest()[:24]
-                    append_immutable_row(
-                        gspread_client=gs,
-                        spreadsheet_id=cfg.gsheet_id,
-                        table="users",
-                        values_by_col={
-                            "entity_id": new_uid,
-                            "email": email,
-                            "source": "streamlit",
-                            "password_salt_b64": salt_b64,
-                            "password_hash_b64": hash_b64,
-                        },
-                    )
-                    st.session_state.auth_user_entity_id = new_uid
-                    st.session_state.auth_email_lc = email
-                    st.success("Compte créé et connecté.")
-                    st.rerun()
-                finally:
-                    ov.empty()
-
-        # (supprimé) « Mot de passe oublié » : à refaire plus tard
+        st.warning("Pour accéder à **Mon Aide‑Mémoire**, il faut être connecté.", icon="🔒")
+        if st.button("Aller à Mon compte", type="primary", key="memo_go_account"):
+            st.session_state.route = "account"
+            st.rerun()
+        return
 
     user_entity_id = str(st.session_state.auth_user_entity_id or "").strip()
     if not user_entity_id:
@@ -3361,8 +3380,11 @@ def render_join() -> None:
     except Exception:
         qp_email = ""
     auth_em0 = str(st.session_state.get("auth_email_lc") or "").strip().lower()
-    is_account_view = bool(qp_email or auth_em0)
-    st.title("Mon compte" if is_account_view else "Nous rejoindre")
+    # "Mon compte" doit être accessible via route dédiée,
+    # et ne doit pas remplacer l'écran newsletter quand l'utilisateur est connecté.
+    cur_route = str(st.session_state.get("route") or "").strip().lower()
+    is_account_view = cur_route == "account"
+    st.title("Mon compte" if is_account_view else "S'inscrire à la newsletter")
 
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
@@ -3370,6 +3392,41 @@ def render_join() -> None:
         return
 
     gs = build_gspread_client(cfg.gcp_service_account)
+    # Supersession immuable : avant d'ajouter une nouvelle ligne `users` pour un email,
+    # on marque les lignes précédentes encore Actives comme Inactif (append-only + “une seule version live”).
+    def _supersede_users_by_email(email_lc: str) -> None:
+        em0 = str(email_lc or "").strip().lower()
+        if not em0:
+            return
+        try:
+            from core.sheets_db import _resolve_table_name, compute_concat, SHEETS_ROW_STATUS_INACTIVE
+        except Exception:
+            return
+        try:
+            sh0 = gs.open_by_key(cfg.gsheet_id)
+            ws0 = sh0.worksheet(_resolve_table_name(sh=sh0, table="users"))
+            header0 = ws0.row_values(1)
+            if not header0 or "status" not in header0:
+                return
+            col_status = header0.index("status") + 1
+            col_concat = header0.index("concat") + 1 if "concat" in header0 else 0
+            recs = ws0.get_all_records(numericise_ignore=["all"])
+        except Exception:
+            return
+        for ix, r in enumerate(recs):
+            if str(r.get("email") or "").strip().lower() != em0:
+                continue
+            if not sheet_row_status_is_live(r.get("status")):
+                continue
+            merged = dict(r)
+            merged["status"] = SHEETS_ROW_STATUS_INACTIVE
+            row_num = ix + 2
+            try:
+                ws0.update_cell(row_num, col_status, SHEETS_ROW_STATUS_INACTIVE)
+                if col_concat:
+                    ws0.update_cell(row_num, col_concat, compute_concat(merged, header=header0))
+            except Exception:
+                continue
     users: list[dict] = []
     subs: list[dict] = []
     try:
@@ -3378,14 +3435,352 @@ def render_join() -> None:
     except Exception:
         pass
 
+    # --- Mon compte : connexion / création / activation (newsletter → compte) ---
+    if is_account_view:
+        if "auth_user_entity_id" not in st.session_state:
+            st.session_state.auth_user_entity_id = ""
+        if "auth_email_lc" not in st.session_state:
+            st.session_state.auth_email_lc = ""
+
+        user_entity_id = str(st.session_state.get("auth_user_entity_id") or "").strip()
+        st.subheader("Connexion")
+        if user_entity_id:
+            email_disp = str(st.session_state.get("auth_email_lc") or "").strip()
+            st.caption(f"Session active pour **{email_disp or 'ton compte'}**.")
+            if st.button("Se déconnecter", type="secondary", key="acct_logout"):
+                for k in ("auth_user_entity_id", "auth_email_lc"):
+                    st.session_state.pop(k, None)
+                st.session_state.pop("admin_authenticated", None)
+                st.rerun()
+        else:
+            # Contrôle “standard” (pilotable) plutôt que `st.tabs` (qui ne permet pas de basculer via un bouton).
+            mode = st.segmented_control(
+                " ",
+                options=["login", "signup"],
+                default=str(st.session_state.get("acct_mode") or "login"),
+                key="acct_mode",
+                format_func=lambda x: "Se connecter" if x == "login" else "Créer / activer un compte",
+            )
+
+            def _latest_user_record(users0: list[dict], email_lc: str) -> dict | None:
+                rows0 = [u for u in users0 if str(u.get("email", "")).strip().lower() == email_lc]
+                if not rows0:
+                    return None
+                rows_sorted0 = sorted(rows0, key=lambda r: str(r.get("created_at", "")), reverse=True)
+                return rows_sorted0[0]
+
+            if mode == "login":
+                email_login = st.text_input("Email", key="acct_email_login").strip().lower()
+                password_login = st.text_input("Mot de passe", type="password", key="acct_password_login")
+            else:
+                # Pré-remplissage (avant instanciation des widgets) via on_change sur l'e-mail.
+                def _prefill_acct_profile_from_existing() -> None:
+                    em0 = str(st.session_state.get("acct_email_signup") or "").strip().lower()
+                    if not em0:
+                        return
+                    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em0):
+                        return
+                    ex0 = _latest_user_record(users, em0)
+                    if not ex0:
+                        return
+                    # Ne pré-remplit que si l'utilisateur n'a rien saisi
+                    st.session_state.setdefault("acct_first_name", str(ex0.get("first_name") or "").strip())
+                    st.session_state.setdefault("acct_last_name", str(ex0.get("last_name") or "").strip())
+                    st.session_state.setdefault("acct_phone_e164", str(ex0.get("phone_e164") or "").strip())
+
+                email_signup = st.text_input(
+                    "Email",
+                    key="acct_email_signup",
+                    on_change=_prefill_acct_profile_from_existing,
+                ).strip().lower()
+                password_signup = st.text_input("Mot de passe", type="password", key="acct_password_signup")
+                c1, c2 = st.columns([1, 1], gap="small")
+                with c1:
+                    first_name_su = st.text_input("Prénom", key="acct_first_name").strip()
+                with c2:
+                    last_name_su = st.text_input("Nom", key="acct_last_name").strip()
+                phone_e164_su = st.text_input(
+                    "Téléphone (optionnel, format international)",
+                    key="acct_phone_e164",
+                    placeholder="+33612345678",
+                ).strip()
+                want_opt_in_su = st.checkbox(
+                    "Je souhaite recevoir les e-mails du vendredi (opt-in)",
+                    value=True,
+                    key="acct_optin",
+                )
+
+                is_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_signup)) if email_signup else False
+                if email_signup.strip() and not is_email_ok:
+                    st.error("Merci d’indiquer une adresse e-mail valide (ex. nom@domaine.fr).")
+                is_phone_ok = True
+                if phone_e164_su:
+                    is_phone_ok = bool(re.match(r"^\+\d{8,15}$", phone_e164_su))
+                    if not is_phone_ok:
+                        st.error("Téléphone invalide. Utilise le format E.164, ex. +33612345678.")
+
+            if mode == "login":
+                if st.button("Se connecter", type="primary", disabled=not (email_login and password_login), use_container_width=True, key="acct_login_btn"):
+                    ov = loading_overlay("LumenVia vérifie tes identifiants…")
+                    try:
+                        adm_login, adm_pwd = _admin_login_and_password()
+                        if email_login.strip().lower() == adm_login and password_login == adm_pwd:
+                            admin_canon = f"{adm_login}@admin.lumenvia"
+                            st.session_state.auth_user_entity_id = sha256(admin_canon.encode("utf-8")).hexdigest()[:24]
+                            st.session_state.auth_email_lc = adm_login
+                            st.session_state.admin_authenticated = True
+                            st.success("Connecté (administrateur).")
+                            st.rerun()
+                        rec = _latest_user_record(users, email_login)
+                        if not rec or not rec.get("password_salt_b64") or not rec.get("password_hash_b64"):
+                            st.error("Compte introuvable ou mot de passe non défini. Clique sur « Créer / activer un compte ».")
+                            if email_login.strip():
+                                if st.button("Créer / activer avec cet email", key="acct_go_signup_from_login"):
+                                    st.session_state["acct_mode"] = "signup"
+                                    st.session_state["acct_email_signup"] = email_login.strip().lower()
+                                    st.rerun()
+                            return
+                        ok = verify_password(
+                            password_login,
+                            salt_b64=str(rec.get("password_salt_b64")),
+                            hash_b64=str(rec.get("password_hash_b64")),
+                        )
+                        if not ok:
+                            st.error("Mot de passe incorrect.")
+                            return
+                        st.session_state.auth_user_entity_id = sha256(email_login.encode("utf-8")).hexdigest()[:24]
+                        st.session_state.auth_email_lc = email_login
+                        st.session_state.pop("admin_authenticated", None)
+                        st.success("Connecté.")
+                        st.rerun()
+                    finally:
+                        ov.empty()
+
+                # Réinitialisation mot de passe (envoi e-mail)
+                st.caption("Réinitialisation : tu recevras un lien valable **2 heures**.")
+                if st.button("Réinitialiser le mot de passe", type="secondary", disabled=not bool(email_login.strip()), key="acct_pwd_reset_btn"):
+                    em0 = email_login.strip().lower()
+                    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em0):
+                        st.error("Merci d’indiquer un e-mail valide.")
+                    else:
+                        ov = loading_overlay("Envoi de l’e-mail de réinitialisation…")
+                        try:
+                            from core.sheets_db import TableSpec, ensure_table, with_concat, BASE_COLUMNS
+                            from secrets import token_urlsafe
+                            from datetime import datetime, timedelta, timezone
+                            from core.outbound import SmtpConfig, send_smtp_email
+
+                            ensure_table(
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table=TableSpec(
+                                    name="password_resets",
+                                    columns=with_concat(
+                                        [
+                                            *BASE_COLUMNS,
+                                            "email",
+                                            "token_hash",
+                                            "expires_at",
+                                            "used",
+                                        ]
+                                    ),
+                                ),
+                            )
+                            tok = token_urlsafe(32)
+                            tok_h = sha256(tok.encode("utf-8")).hexdigest()
+                            exp = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(timespec="seconds")
+                            append_immutable_row(
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table="password_resets",
+                                values_by_col={
+                                    "entity_id": sha256(f"pwdreset|{em0}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                                    "email": em0,
+                                    "token_hash": tok_h,
+                                    "expires_at": exp,
+                                    "used": "false",
+                                },
+                            )
+
+                            origin = _lumenvia_app_origin_url() or ""
+                            link = (origin.rstrip("/") + "/?route=reset_password&email=" + em0 + "&token=" + tok) if origin else ""
+
+                            # SMTP
+                            def _secret_get(*keys: str) -> str:
+                                try:
+                                    s = st.secrets
+                                except Exception:
+                                    return ""
+                                for k in keys:
+                                    v = s.get(k)
+                                    if v is not None and str(v).strip():
+                                        return str(v).strip()
+                                return ""
+
+                            smtp_cfg = SmtpConfig(
+                                host=_secret_get("SMTP_HOST"),
+                                port=int(_secret_get("SMTP_PORT") or 587),
+                                username=_secret_get("SMTP_USER"),
+                                password=_secret_get("SMTP_PASSWORD"),
+                                from_email=_secret_get("SMTP_FROM"),
+                                use_tls=str(_secret_get("SMTP_USE_TLS") or "true").strip().lower() not in ("0", "false", "no", "off"),
+                            )
+                            if not smtp_cfg.host or not smtp_cfg.from_email:
+                                raise RuntimeError("SMTP non configuré (SMTP_HOST/SMTP_FROM).")
+                            if not link:
+                                raise RuntimeError("URL publique introuvable (PUBLIC_APP_URL requis) pour générer le lien.")
+
+                            subj = "LumenVia — Réinitialisation du mot de passe"
+                            body_txt = (
+                                "Voici le lien pour réinitialiser ton mot de passe (valide 2 heures) :\n"
+                                f"{link}\n\n"
+                                "Si tu n'es pas à l'origine de cette demande, ignore cet e-mail."
+                            )
+                            send_smtp_email(cfg=smtp_cfg, to_email=em0, subject=subj, body_text=body_txt, body_html=None)
+                            st.success(f"E-mail envoyé à **{em0}**. Consulte ta boîte de réception.")
+                        except Exception as ex:
+                            st.error(str(ex))
+                        finally:
+                            ov.empty()
+
+            else:
+                existing = _latest_user_record(users, email_signup) if (email_signup and is_email_ok) else None
+                has_pwd = bool(
+                    existing
+                    and str(existing.get("password_hash_b64") or "").strip()
+                    and str(existing.get("password_salt_b64") or "").strip()
+                )
+                can_activate = bool(existing and not has_pwd)
+                if can_activate:
+                    st.info(
+                        "Cet email est déjà inscrit à la newsletter mais tu peux l'activer en tant que compte "
+                        "pour avoir accès aux services réservés aux utilisateurs connectés (aide mémoire etc.). "
+                        "Avec les informations renseignées clique juste sur **Activer mon compte**."
+                    )
+
+                # Activation (newsletter → compte) : ne force pas prénom/nom si la fiche n'en a pas encore.
+                # Création “nouveau compte” : prénom + nom requis.
+                can_create = bool(email_signup and password_signup and is_email_ok and is_phone_ok) and (
+                    can_activate or (first_name_su.strip() and last_name_su.strip())
+                )
+                label_create = "Activer mon compte" if can_activate else "Créer un compte"
+                if st.button(
+                    label_create,
+                    type="secondary",
+                    disabled=not can_create,
+                    use_container_width=True,
+                    key="acct_signup_btn",
+                ):
+                    ov = loading_overlay("LumenVia enregistre ton compte…")
+                    try:
+                        salt_b64, hash_b64 = hash_password(password_signup)
+                        new_uid = sha256(email_signup.encode("utf-8")).hexdigest()[:24]
+                        rec0 = _latest_user_record(users, email_signup)
+                        if rec0:
+                            has_pwd0 = bool(
+                                str(rec0.get("password_hash_b64") or "").strip()
+                                and str(rec0.get("password_salt_b64") or "").strip()
+                            )
+                            if has_pwd0:
+                                st.error("Un compte existe déjà pour cet e-mail. Utilise l’onglet « Se connecter ».")
+                                return
+                        _supersede_users_by_email(email_signup)
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="users",
+                            values_by_col={
+                                "entity_id": new_uid,
+                                "email": email_signup,
+                                "source": "compte",
+                                "first_name": first_name_su.strip(),
+                                "last_name": last_name_su.strip(),
+                                "phone_e164": phone_e164_su.strip(),
+                                "country": "FR",
+                                "password_salt_b64": salt_b64,
+                                "password_hash_b64": hash_b64,
+                            },
+                        )
+                        if want_opt_in_su:
+                            latest_before = _latest_subscription_record(subs, new_uid, "weekly_friday")
+                            if not _subscription_is_active(latest_before):
+                                sub_entity = sha256(f"sub|{new_uid}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+                                append_immutable_row(
+                                    gspread_client=gs,
+                                    spreadsheet_id=cfg.gsheet_id,
+                                    table="subscriptions",
+                                    values_by_col={
+                                        "entity_id": sub_entity,
+                                        "user_entity_id": new_uid,
+                                        "type": "weekly_friday",
+                                        "zone": "france",
+                                        "length_pref": "250",
+                                        "opt_in": "true",
+                                        "active": "true",
+                                    },
+                                )
+                        st.session_state.auth_user_entity_id = new_uid
+                        st.session_state.auth_email_lc = email_signup
+                        st.success("Compte créé et connecté.")
+                        st.rerun()
+                    finally:
+                        ov.empty()
+
+        st.divider()
+        # Important : en vue "Mon compte", ne pas afficher le formulaire newsletter en dessous.
+        return
+
+    # --- Newsletter : inscription / opt-out ---
+    auth_email_lc = str(st.session_state.get("auth_email_lc") or "").strip().lower()
+    auth_uid = sha256(auth_email_lc.encode("utf-8")).hexdigest()[:24] if auth_email_lc else ""
+    auth_latest_sub = _latest_subscription_record(subs, auth_uid, "weekly_friday") if auth_uid else None
+    auth_is_in = bool(auth_uid) and _subscription_is_active(auth_latest_sub)
+
+    if auth_email_lc:
+        st.caption(
+            "Tu peux gérer ici ton opt-in. ET tu peux aussi inscrire quelqu’un d’autre (un ami, un proche) "
+            "en renseignant ses informations plus bas."
+        )
+        with st.expander("Mes préférences newsletter", expanded=False):
+            cur_opt_in = str((auth_latest_sub or {}).get("opt_in") or "").strip().lower() in ("true", "1", "oui", "yes")
+            want_opt_in = st.checkbox(
+                "Je souhaite recevoir les e-mails du vendredi (opt-in)",
+                value=bool(cur_opt_in),
+                key="join_me_optin",
+            )
+            if st.button("Enregistrer", type="primary", key="join_me_optin_save"):
+                ov = loading_overlay("Enregistrement…")
+                try:
+                    # Append-only : nouvelle ligne subscriptions si changement
+                    cur_active = str((auth_latest_sub or {}).get("active") or "").strip().lower() in ("true", "1", "oui", "yes", "active")
+                    target_opt_in = bool(want_opt_in)
+                    target_active = bool(want_opt_in)
+                    if (target_opt_in != cur_opt_in) or (target_active != cur_active):
+                        sub_entity = sha256(f"sub|{auth_uid}|prefs|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="subscriptions",
+                            values_by_col={
+                                "entity_id": sub_entity,
+                                "user_entity_id": auth_uid,
+                                "type": "weekly_friday",
+                                "zone": "france",
+                                "length_pref": str((auth_latest_sub or {}).get("length_pref") or "250"),
+                                "opt_in": "true" if target_opt_in else "false",
+                                "active": "true" if target_active else "false",
+                            },
+                        )
+                    st.success("Préférences enregistrées.")
+                    st.rerun()
+                finally:
+                    ov.empty()
+
     if "join_email" not in st.session_state:
         st.session_state.join_email = ""
-    # Pré-remplissage via lien e-mailing: /?route=account&email=...
+    # Pré-remplissage via lien e-mailing : /?route=join&email=...
     if qp_email and not str(st.session_state.join_email).strip():
         st.session_state.join_email = qp_email
-    auth_em = str(st.session_state.get("auth_email_lc") or "").strip()
-    if auth_em and not str(st.session_state.join_email).strip():
-        st.session_state.join_email = auth_em
 
     def _latest_user_by_email(email_lc: str) -> dict | None:
         rows = [u for u in users if str(u.get("email", "")).strip().lower() == email_lc]
@@ -3408,7 +3803,6 @@ def render_join() -> None:
 
     email_in = st.text_input("Email", key="join_email")
     email_lc = email_in.strip().lower()
-    # Validation format e-mail (syntaxe minimale)
     is_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_lc)) if email_lc else False
     if email_in.strip() and not is_email_ok:
         st.error("Merci d’indiquer une adresse e-mail valide (ex. nom@domaine.fr).")
@@ -3417,19 +3811,20 @@ def render_join() -> None:
         is_phone_ok = bool(re.match(r"^\+\d{8,15}$", phone_e164))
         if not is_phone_ok:
             st.error("Téléphone invalide. Utilise le format E.164, ex. +33612345678.")
+
     uid = sha256(email_lc.encode("utf-8")).hexdigest()[:24] if email_lc else ""
     latest_sub = _latest_subscription_record(subs, uid, "weekly_friday") if uid else None
     already_in = bool(uid) and _subscription_is_active(latest_sub)
 
+    if auth_email_lc:
+        st.caption("Astuce : si tu es déjà connecté, ce formulaire sert surtout à inscrire quelqu’un d’autre.")
+
     if already_in:
-        st.success(f"Tu es déjà inscrit à la lettre du vendredi pour **{email_lc}**.")
-        st.markdown(_next_newsletter_send_caption())
-        st.divider()
-        st.caption("Tu peux te désinscrire à tout moment (opt-out).")
+        st.success(f"Tu es déjà inscrit à la newsletter pour **{email_lc}**.")
+        st.caption("Tu peux te désinscrire à tout moment.")
         if st.button("Se désinscrire", type="secondary", key="join_opt_out_btn"):
             ov = loading_overlay("Désinscription…")
             try:
-                # Append-only : une nouvelle ligne subscriptions marque l’opt-out.
                 sub_entity = sha256(f"sub|{uid}|optout|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
                 append_immutable_row(
                     gspread_client=gs,
@@ -3451,17 +3846,15 @@ def render_join() -> None:
                 ov.empty()
         return
 
-    st.write("Laisse tes informations pour recevoir le vendredi en fin de journée la synthèse du dimanche à venir.")
-    consent = st.checkbox("J’accepte de recevoir ces e-mails (désinscription possible à tout moment).")
-    if st.button("S’abonner", type="primary", disabled=not (is_email_ok and first_name and last_name and is_phone_ok and consent)):
+    consent = st.checkbox("J’accepte de recevoir ces e-mails (désinscription possible à tout moment).", key="join_consent")
+    if st.button("S’abonner", type="primary", disabled=not (is_email_ok and first_name and last_name and is_phone_ok and consent), key="join_subscribe_btn"):
         ov = loading_overlay("LumenVia enregistre ton inscription…")
         should_refresh = False
         try:
-            email_lc = email_in.strip().lower()
             user_entity_id = sha256(email_lc.encode("utf-8")).hexdigest()[:24]
-
             rec_u = _latest_user_by_email(email_lc)
             if not rec_u:
+                _supersede_users_by_email(email_lc)
                 append_immutable_row(
                     gspread_client=gs,
                     spreadsheet_id=cfg.gsheet_id,
@@ -3501,7 +3894,152 @@ def render_join() -> None:
         if should_refresh:
             st.rerun()
 
-    # (supprimé) bloc pédagogique « Pourquoi plusieurs lignes dans Google Sheets ? »
+
+def render_reset_password() -> None:
+    st.title("Réinitialiser le mot de passe")
+    st.caption("Saisis un nouveau mot de passe. Le lien est valide pendant une durée limitée.")
+
+    try:
+        em = str(st.query_params.get("email") or "").strip().lower()
+    except Exception:
+        em = ""
+    try:
+        tok = str(st.query_params.get("token") or "").strip()
+    except Exception:
+        tok = ""
+
+    if not em or not tok:
+        st.error("Lien invalide (paramètres manquants).")
+        return
+
+    cfg = load_config()
+    if not cfg.gcp_service_account or not cfg.gsheet_id:
+        st.error("Configuration Google Sheets manquante.")
+        return
+    gs = build_gspread_client(cfg.gcp_service_account)
+    # Même logique que l'inscription : on supersède l'ancienne ligne `users` (status Inactif) avant d'écrire la nouvelle.
+    def _supersede_users_by_email(email_lc: str) -> None:
+        em0 = str(email_lc or "").strip().lower()
+        if not em0:
+            return
+        try:
+            from core.sheets_db import _resolve_table_name, compute_concat, SHEETS_ROW_STATUS_INACTIVE
+        except Exception:
+            return
+        try:
+            sh0 = gs.open_by_key(cfg.gsheet_id)
+            ws0 = sh0.worksheet(_resolve_table_name(sh=sh0, table="users"))
+            header0 = ws0.row_values(1)
+            if not header0 or "status" not in header0:
+                return
+            col_status = header0.index("status") + 1
+            col_concat = header0.index("concat") + 1 if "concat" in header0 else 0
+            recs = ws0.get_all_records(numericise_ignore=["all"])
+        except Exception:
+            return
+        for ix, r in enumerate(recs):
+            if str(r.get("email") or "").strip().lower() != em0:
+                continue
+            if not sheet_row_status_is_live(r.get("status")):
+                continue
+            merged = dict(r)
+            merged["status"] = SHEETS_ROW_STATUS_INACTIVE
+            row_num = ix + 2
+            try:
+                ws0.update_cell(row_num, col_status, SHEETS_ROW_STATUS_INACTIVE)
+                if col_concat:
+                    ws0.update_cell(row_num, col_concat, compute_concat(merged, header=header0))
+            except Exception:
+                continue
+
+    new_pwd = st.text_input("Nouveau mot de passe", type="password", key="pwd_reset_new")
+    new_pwd2 = st.text_input("Confirmer le mot de passe", type="password", key="pwd_reset_new2")
+    if st.button("Mettre à jour mon mot de passe", type="primary", disabled=not (new_pwd and new_pwd2)):
+        if new_pwd != new_pwd2:
+            st.error("Les deux mots de passe ne correspondent pas.")
+            return
+        ov = loading_overlay("Mise à jour du mot de passe…")
+        try:
+            from core.sheets_db import TableSpec, ensure_table, with_concat, BASE_COLUMNS, fetch_records, append_immutable_row
+            from datetime import datetime, timezone
+
+            ensure_table(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table=TableSpec(
+                    name="password_resets",
+                    columns=with_concat([*BASE_COLUMNS, "email", "token_hash", "expires_at", "used"]),
+                ),
+            )
+            resets = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="password_resets", limit=8000)
+            tok_h = sha256(tok.encode("utf-8")).hexdigest()
+            # Dernière demande pour ce token
+            cand = [r for r in resets if str(r.get("token_hash") or "").strip() == tok_h and str(r.get("email") or "").strip().lower() == em]
+            cand.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            rec = cand[0] if cand else {}
+            if not rec:
+                st.error("Lien invalide ou expiré.")
+                return
+            if str(rec.get("used") or "").strip().lower() in ("true", "1", "oui", "yes"):
+                st.error("Ce lien a déjà été utilisé.")
+                return
+            exp = str(rec.get("expires_at") or "").strip()
+            try:
+                dt_exp = datetime.fromisoformat(exp.replace("Z", "+00:00"))
+                if dt_exp.tzinfo is None:
+                    dt_exp = dt_exp.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > dt_exp:
+                    st.error("Ce lien a expiré.")
+                    return
+            except Exception:
+                st.error("Ce lien a expiré.")
+                return
+
+            # Met à jour le mot de passe via append-only dans `users`
+            users = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
+            rows_u = [u for u in users if str(u.get("email") or "").strip().lower() == em]
+            rows_u.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            u0 = rows_u[0] if rows_u else {}
+            if not u0:
+                st.error("Utilisateur introuvable.")
+                return
+            salt_b64, hash_b64 = hash_password(new_pwd)
+            uid = sha256(em.encode("utf-8")).hexdigest()[:24]
+            _supersede_users_by_email(em)
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="users",
+                values_by_col={
+                    "entity_id": uid,
+                    "email": em,
+                    # Dès qu'un mot de passe est défini, on considère l'utilisateur comme "compte"
+                    # (même s'il a commencé par une inscription newsletter).
+                    "source": "compte",
+                    "first_name": str(u0.get("first_name") or "").strip(),
+                    "last_name": str(u0.get("last_name") or "").strip(),
+                    "phone_e164": str(u0.get("phone_e164") or "").strip(),
+                    "country": str(u0.get("country") or "FR").strip() or "FR",
+                    "password_salt_b64": salt_b64,
+                    "password_hash_b64": hash_b64,
+                },
+            )
+            # Marque le token comme utilisé (append-only)
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="password_resets",
+                values_by_col={
+                    "entity_id": sha256(f"pwdreset|used|{em}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
+                    "email": em,
+                    "token_hash": tok_h,
+                    "expires_at": exp,
+                    "used": "true",
+                },
+            )
+            st.success("Mot de passe mis à jour. Tu peux maintenant te connecter.")
+        finally:
+            ov.empty()
 
 
 def _admin_target_has_illustration(*, gcs: object, bucket_name: str, target: dict) -> bool:
@@ -5081,6 +5619,15 @@ def render_admin_plan_consolide() -> None:
       </td>
     </tr>
     <tr>
+      <td><strong>Refactor codebase (maintenabilité)</strong></td>
+      <td><span class="lv-st-todo">À faire</span></td>
+      <td>
+        Réduire <code>app.py</code> (8k+ lignes) à un shell (styles + navigation + routage) et extraire les pages et l’admin en modules dédiés.
+        Proposition : <code>ui/pages/*</code> (about/sunday/newsletter/account/memo/feedback) + <code>ui/admin/*</code> (1 fichier par tuile),
+        puis scinder progressivement les gros modules <code>core/*</code> / <code>channel/*</code> par domaine.
+      </td>
+    </tr>
+    <tr>
       <td>UX — <strong>overlay systématique</strong> pendant tout traitement serveur perceptible</td>
       <td><span class="lv-st-ok">Règle</span></td>
       <td>
@@ -5858,7 +6405,6 @@ def render_admin_readings_cache() -> None:
 
 def render_admin_accounts() -> None:
     st.title("Comptes inscrits")
-    st.caption("Vue HTML (sans tableaux Streamlit) des comptes et de leur origine.")
 
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
@@ -5875,6 +6421,205 @@ def render_admin_accounts() -> None:
         subs = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=6000)
     except Exception:
         subs = []
+
+    # "Flash message" persistant (après rerun)
+    flash = str(st.session_state.get("adm_addsub_flash") or "").strip()
+    if flash:
+        st.success(flash)
+        st.session_state.pop("adm_addsub_flash", None)
+
+    # Nonce pour forcer un "reset" visuel fiable des champs Streamlit après succès
+    # (en changeant les keys des widgets plutôt que de dépendre d'un pop()).
+    nonce = int(st.session_state.get("adm_addsub_nonce") or 0)
+
+    with st.expander(
+        "Ajouter des abonnés (lot de 5)",
+        expanded=bool(st.session_state.get("adm_addsub_open") or False),
+    ):
+        def _norm_email(s: object) -> str:
+            return str(s or "").strip().lower()
+
+        def _email_ok(em: str) -> bool:
+            return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em)) if em else False
+
+        def _phone_ok(ph: str) -> bool:
+            if not ph:
+                return True
+            return bool(re.match(r"^\+\d{8,15}$", ph))
+
+        # Formulaire en lot : 5 lignes
+        with st.form("adm_add_subscribers_5"):
+            col_a, col_b, col_c, col_d = st.columns([1.3, 1, 1, 1], gap="small")
+            with col_a:
+                st.markdown("**E-mail**")
+            with col_b:
+                st.markdown("**Prénom**")
+            with col_c:
+                st.markdown("**Nom**")
+            with col_d:
+                st.markdown("**Téléphone (optionnel)**")
+
+            rows_in: list[dict[str, str]] = []
+            for i in range(5):
+                c1, c2, c3, c4 = st.columns([1.3, 1, 1, 1], gap="small")
+                with c1:
+                    em = st.text_input("E-mail", label_visibility="collapsed", key=f"adm_addsub_em_{nonce}_{i}").strip()
+                with c2:
+                    fn = st.text_input("Prénom", label_visibility="collapsed", key=f"adm_addsub_fn_{nonce}_{i}").strip()
+                with c3:
+                    ln = st.text_input("Nom", label_visibility="collapsed", key=f"adm_addsub_ln_{nonce}_{i}").strip()
+                with c4:
+                    ph = st.text_input(
+                        "Téléphone",
+                        label_visibility="collapsed",
+                        key=f"adm_addsub_ph_{nonce}_{i}",
+                        placeholder="+33612345678",
+                    ).strip()
+                rows_in.append({"email": em, "first_name": fn, "last_name": ln, "phone_e164": ph})
+
+            country = st.selectbox("Pays", options=["FR"], index=0, key=f"adm_addsub_country_{nonce}")
+            length_pref = st.selectbox(
+                "Préférence de longueur",
+                options=["150", "250", "400"],
+                index=1,
+                key=f"adm_addsub_lenpref_{nonce}",
+            )
+            do_submit = st.form_submit_button("Créer ces abonnés", type="primary")
+
+        if do_submit:
+            # En cas d'erreur, on garde l'expander ouvert au rerun.
+            st.session_state["adm_addsub_open"] = True
+            # Nettoyage + validation
+            cleaned: list[dict[str, str]] = []
+            for r in rows_in:
+                em_lc = _norm_email(r.get("email"))
+                fn = str(r.get("first_name") or "").strip()
+                ln = str(r.get("last_name") or "").strip()
+                ph = str(r.get("phone_e164") or "").strip()
+                if not (em_lc or fn or ln or ph):
+                    continue  # ligne vide
+                cleaned.append({"email": em_lc, "first_name": fn, "last_name": ln, "phone_e164": ph})
+
+            if not cleaned:
+                st.warning("Aucune ligne renseignée.")
+            else:
+                bad_lines: list[str] = []
+                for idx, r in enumerate(cleaned, start=1):
+                    em_lc = r["email"]
+                    if not _email_ok(em_lc):
+                        bad_lines.append(f"Ligne {idx} : e-mail invalide.")
+                    if not r["first_name"] or not r["last_name"]:
+                        bad_lines.append(f"Ligne {idx} : prénom/nom requis.")
+                    if not _phone_ok(r.get("phone_e164") or ""):
+                        bad_lines.append(f"Ligne {idx} : téléphone invalide (format +336...).")
+                if bad_lines:
+                    for m in bad_lines[:12]:
+                        st.error(m)
+                    if len(bad_lines) > 12:
+                        st.error(f"... et {len(bad_lines) - 12} autre(s) erreur(s).")
+                else:
+                    ov = loading_overlay("Création des abonnés…")
+                    try:
+                        from core.sheets_db import append_immutable_rows_bulk
+
+                        # Index existants (dernier état par e-mail / par user_entity_id)
+                        by_email: dict[str, dict] = {}
+                        for u in users:
+                            em = _norm_email(u.get("email"))
+                            if not em:
+                                continue
+                            prev = by_email.get(em)
+                            if not prev or str(u.get("created_at") or "") > str(prev.get("created_at") or ""):
+                                by_email[em] = u
+
+                        latest_sub_by_uid: dict[str, dict] = {}
+                        for s in subs:
+                            if str(s.get("type") or "").strip() != "weekly_friday":
+                                continue
+                            uid0 = str(s.get("user_entity_id") or "").strip()
+                            if not uid0:
+                                continue
+                            prev = latest_sub_by_uid.get(uid0)
+                            if not prev or str(s.get("created_at") or "") > str(prev.get("created_at") or ""):
+                                latest_sub_by_uid[uid0] = s
+
+                        to_add_users: list[dict[str, str]] = []
+                        to_add_subs: list[dict[str, str]] = []
+                        seen_batch: set[str] = set()
+                        already_users: list[str] = []
+                        already_optin: list[str] = []
+
+                        for r in cleaned:
+                            em_lc = r["email"]
+                            if em_lc in seen_batch:
+                                continue
+                            seen_batch.add(em_lc)
+                            uid0 = sha256(em_lc.encode("utf-8")).hexdigest()[:24]
+
+                            # User (si absent)
+                            if em_lc not in by_email:
+                                to_add_users.append(
+                                    {
+                                        "entity_id": uid0,
+                                        "email": em_lc,
+                                        "first_name": r["first_name"],
+                                        "last_name": r["last_name"],
+                                        "phone_e164": r.get("phone_e164") or "",
+                                        "country": str(country or "").strip(),
+                                        # Aligné avec “Nous rejoindre”
+                                        "source": "newsletter",
+                                    }
+                                )
+                                by_email[em_lc] = {"entity_id": uid0, "email": em_lc, "created_at": utc_now_iso()}
+                            else:
+                                already_users.append(em_lc)
+
+                            # Subscription (si pas active)
+                            last = latest_sub_by_uid.get(uid0)
+                            if _subscription_is_active(last):
+                                already_optin.append(em_lc)
+                                continue
+                            sub_entity = sha256(f"sub|{uid0}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+                            to_add_subs.append(
+                                {
+                                    "entity_id": sub_entity,
+                                    "user_entity_id": uid0,
+                                    "type": "weekly_friday",
+                                    "zone": "france",
+                                    "length_pref": str(length_pref or "250").strip(),
+                                    "opt_in": "true",
+                                    "active": "true",
+                                }
+                            )
+
+                        added_u = append_immutable_rows_bulk(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="users",
+                            values_by_col_list=to_add_users,
+                            chunk_size=120,
+                        )
+                        added_s = append_immutable_rows_bulk(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="subscriptions",
+                            values_by_col_list=to_add_subs,
+                            chunk_size=120,
+                        )
+                        # Message + reset UI (champs vidés + expander replié)
+                        msg = f"Abonnés ajoutés : {added_u} utilisateur(s) créé(s), {added_s} abonnement(s) ajouté(s)."
+                        if already_users:
+                            uniq = sorted(set(already_users))
+                            msg += f"\nDéjà existants (non recréés) : {', '.join(uniq[:12])}" + ("…" if len(uniq) > 12 else "")
+                        if already_optin:
+                            uniq2 = sorted(set(already_optin))
+                            msg += f"\nDéjà abonnés (opt-in actif) : {', '.join(uniq2[:12])}" + ("…" if len(uniq2) > 12 else "")
+                        st.session_state["adm_addsub_flash"] = msg
+                        st.session_state["adm_addsub_open"] = False
+                        st.session_state["adm_addsub_nonce"] = nonce + 1
+                        st.rerun()
+                    finally:
+                        ov.empty()
 
     # Filtre simple (côté UI) : sous-chaîne e-mail
     q = st.text_input("Filtrer (e-mail contient)", value="", key="adm_accounts_filter").strip().lower()
@@ -5962,9 +6707,6 @@ def render_admin_accounts() -> None:
     )
 
     def _render_table(title: str, rows: list[dict]) -> None:
-        def esc(s: object) -> str:
-            return html_escape(str(s or ""))
-
         body_rows = []
         for u in rows[:400]:
             em = str(u.get("email") or "").strip().lower()
@@ -6312,7 +7054,8 @@ def render_admin_emailing() -> None:
         return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_lc)) if email_lc else False
 
     # Dry-run : prioritaire depuis la table users (source = dry_run/test_emailing)
-    users_rows_for_dry = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
+    # Un peu plus large que 6000 pour fiabiliser la recherche "par e-mail" en mode test.
+    users_rows_for_dry = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=9000)
     dry_candidates = [
         u
         for u in users_rows_for_dry
@@ -6342,17 +7085,173 @@ def render_admin_emailing() -> None:
     if not dry_phone_in and dry_phone_secret:
         dry_phone_in = dry_phone_secret
 
-    if not dry_email_in and not dry_phone_in:
+    # Destinataires de test (manuel unitaire) : sélection explicite possible
+    test_opt_hotmail = st.checkbox(
+        "Envoyer aussi à `jop28@hotmail.com` (test)",
+        value=False,
+        key="adm_email_test_hotmail",
+        disabled=bool(send_to_all),
+    )
+    test_opt_gemini = st.checkbox(
+        "Envoyer aussi à `jop28gemini@gmail.com` (test)",
+        value=True,
+        key="adm_email_test_gemini",
+        disabled=bool(send_to_all),
+    )
+
+    def _latest_user_by_email(email_lc: str) -> dict:
+        em0 = str(email_lc or "").strip().lower()
+        if not em0:
+            return {}
+        best: dict = {}
+        best_ts = ""
+        for u in users_rows_for_dry:
+            if str(u.get("email") or "").strip().lower() != em0:
+                continue
+            # En e-mailing, on veut la fiche "live" (immuabilité : une seule version Actif).
+            if not sheet_row_status_is_live(u.get("status")):
+                continue
+            ts = str(u.get("created_at") or "")
+            if not best or ts > best_ts:
+                best = u
+                best_ts = ts
+        return best
+
+    selected_test_emails: list[str] = []
+    if test_opt_hotmail:
+        selected_test_emails.append("jop28@hotmail.com")
+    if test_opt_gemini:
+        selected_test_emails.append("jop28gemini@gmail.com")
+    # Si rien n'est coché, on retombe sur le destinataire dry-run automatique (users/secrets)
+    if not selected_test_emails and _is_email_ok(dry_email_in):
+        selected_test_emails = [dry_email_in.strip().lower()]
+
+    if not selected_test_emails and not dry_phone_in:
         st.warning(
             "Aucun destinataire de test trouvé. "
-            "Soit ajoute une ligne `users` avec `source=dry_run` + un e‑mail valide, "
-            "soit configure `EMAIL_DRY_RUN_TO` / `SMS_DRY_RUN_TO` dans les secrets."
+            "Coche au moins un destinataire ci-dessus, "
+            "ou ajoute un e‑mail de test dans `users` (source=test), "
+            "ou configure une adresse de test dans les secrets."
         )
-    st.markdown("**Destinataire dry-run (depuis `users`)**")
-    st.code(f"email: {dry_email_in or '—'}\nphone_e164: {dry_phone_in or '—'}\nsource: {str(dry_user.get('source') or '').strip() or '—'}")
+
+    st.markdown("**Destinataires de test (aperçu)**")
+    preview_lines: list[str] = []
+    for em in selected_test_emails:
+        u0 = _latest_user_by_email(em)
+        fn0 = str(u0.get("first_name") or "Test").strip() or "Test"
+        ln0 = str(u0.get("last_name") or "JOPAI").strip() or "JOPAI"
+        src0 = str(u0.get("source") or "").strip() or "—"
+        preview_lines.append(f"{em}\t{fn0}\t{ln0}\t{src0}")
+    if dry_phone_in and not selected_test_emails:
+        preview_lines.append(f"phone_e164:\t{dry_phone_in}")
+    st.code(("\n".join(preview_lines) if preview_lines else "—")[:9000])
     debug_verbose = False
 
-    if st.button("Lancer l’envoi", type="primary", key="adm_email_send_run", disabled=not (send_email or send_sms)):
+    # Garde-fous supplémentaires si envoi "tous opt-in"
+    excluded_emails: set[str] = set()
+    limit_to_n = 0
+    confirm_all_ok = True
+    confirm_phrase_ok = True
+    if send_to_all:
+        st.warning(
+            "Tu es sur le point de cibler **tous les inscrits opt-in**. "
+            "Prévisualise la liste, ajuste si besoin, puis confirme avant de pouvoir envoyer.",
+            icon="⚠️",
+        )
+        with st.expander("Aperçu des destinataires (avant envoi)", expanded=True):
+            users_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
+            subs_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
+            rec_preview = lumenvia_manual_broadcast_users(
+                users_rows=users_preview,
+                subs_rows=subs_preview,
+                send_to_all=True,
+            )
+            em_list = sorted(
+                {
+                    str(u.get("email") or "").strip().lower()
+                    for u in rec_preview
+                    if str(u.get("email") or "").strip()
+                }
+            )
+            st.caption(f"Destinataires détectés : **{len(rec_preview)}** (e-mails valides : **{len(em_list)}**)")
+
+            # Exclusions (optionnel)
+            excl_pick = st.multiselect(
+                "Exclure des e-mails (optionnel)",
+                options=em_list,
+                default=[],
+                key="adm_email_excl_pick",
+            )
+            excl_paste = st.text_area(
+                "Ou coller une liste d’e-mails à exclure (un par ligne, optionnel)",
+                value="",
+                height=80,
+                key="adm_email_excl_paste",
+            )
+            excluded_emails = {str(e or "").strip().lower() for e in (excl_pick or []) if str(e or "").strip()}
+            for ln in (excl_paste or "").splitlines():
+                s0 = str(ln or "").strip().lower()
+                if s0 and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", s0):
+                    excluded_emails.add(s0)
+
+            filtered_preview = (
+                [u for u in rec_preview if str(u.get("email") or "").strip().lower() not in excluded_emails]
+                if excluded_emails
+                else list(rec_preview)
+            )
+
+            limit_to_n = int(
+                st.number_input(
+                    "Limiter l’envoi aux N premiers (optionnel, utile pour un test)",
+                    min_value=0,
+                    max_value=max(0, len(filtered_preview)),
+                    value=0,
+                    step=1,
+                    key="adm_email_limit_to_n",
+                )
+            )
+
+            # Mini table (limite) : qui va recevoir
+            show_n = st.slider(
+                "Afficher les N premiers destinataires (aperçu)",
+                min_value=10,
+                max_value=300,
+                value=60,
+                step=10,
+                key="adm_email_preview_n",
+            )
+            lines = []
+            for u in filtered_preview[: int(show_n)]:
+                em0 = str(u.get("email") or "").strip().lower()
+                fn0 = str(u.get("first_name") or "").strip()
+                ln0 = str(u.get("last_name") or "").strip()
+                lines.append(f"{em0}\t{fn0}\t{ln0}")
+            st.code(("\n".join(lines) if lines else "—")[:9000])
+
+            final_list = filtered_preview[: int(limit_to_n)] if limit_to_n > 0 else filtered_preview
+            st.markdown(f"**Après exclusions/limite :** {len(final_list)} destinataire(s).")
+
+            confirm_all_ok = st.checkbox(
+                "J’ai vérifié la liste et je confirme vouloir envoyer à ces destinataires.",
+                value=False,
+                key="adm_email_confirm_checked",
+            )
+            phrase = st.text_input(
+                "Pour activer l’envoi, tape exactement : ENVOYER",
+                value="",
+                key="adm_email_confirm_phrase",
+            ).strip()
+            confirm_phrase_ok = phrase == "ENVOYER"
+
+    can_execute = (confirm_all_ok and confirm_phrase_ok) if send_to_all else True
+    can_execute = can_execute and (bool(send_to_all) or bool(selected_test_emails) or bool(dry_phone_in))
+
+    if st.button(
+        "Lancer l’envoi",
+        type="primary",
+        key="adm_email_send_run",
+        disabled=(not (send_email or send_sms)) or (not can_execute),
+    ):
         ov = loading_overlay("Préparation de l’envoi…")
         try:
             import traceback
@@ -6410,18 +7309,43 @@ def render_admin_emailing() -> None:
                     if str(subr.get("active") or "").strip().lower() not in ("true", "1", "oui", "yes", "active"):
                         continue
                     recipients.append((uid0, by_uid_user.get(uid0) or {}))
+                # Applique exclusions / limite (si demandées dans l’aperçu)
+                if excluded_emails:
+                    recipients = [
+                        (uid0, u)
+                        for (uid0, u) in recipients
+                        if str((u or {}).get("email") or "").strip().lower() not in excluded_emails
+                    ]
+                if limit_to_n > 0:
+                    recipients = recipients[: int(limit_to_n)]
             else:
-                recipients = [
-                    (
-                        "dry_run",
-                        {
-                            "email": dry_email_in.strip(),
-                            "phone_e164": dry_phone_in.strip(),
-                            "first_name": "Test",
-                            "last_name": "JOPAI",
-                        },
+                # Destinataires de test sélectionnés (1 ou 2) + fallback dry-run
+                recipients = []
+                for em in selected_test_emails:
+                    u0 = _latest_user_by_email(em)
+                    recipients.append(
+                        (
+                            "dry_run",
+                            {
+                                "email": em.strip(),
+                                "phone_e164": str(u0.get("phone_e164") or "").strip(),
+                                "first_name": str(u0.get("first_name") or "Test").strip() or "Test",
+                                "last_name": str(u0.get("last_name") or "JOPAI").strip() or "JOPAI",
+                            },
+                        )
                     )
-                ]
+                if not recipients:
+                    recipients = [
+                        (
+                            "dry_run",
+                            {
+                                "email": dry_email_in.strip(),
+                                "phone_e164": dry_phone_in.strip(),
+                                "first_name": "Test",
+                                "last_name": "JOPAI",
+                            },
+                        )
+                    ]
 
             from core.outbound import SmtpConfig, TwilioConfig, send_smtp_email, send_twilio_sms
             from core.sheets_db import TableSpec, ensure_table
@@ -6565,7 +7489,7 @@ def render_admin_emailing() -> None:
                     except Exception:  # pragma: no cover
                         _q = None  # type: ignore[assignment]
                     enc = _q(email0) if _q else email0
-                    pref_url = origin0.rstrip("/") + "/?route=account&email=" + enc
+                    pref_url = origin0.rstrip("/") + "/?route=join&email=" + enc
 
                 def btn(label: str, url: str) -> str:
                     if not url:
@@ -6740,8 +7664,18 @@ def render_admin_emailing() -> None:
                                 recipient_email=email0 or None,
                             )
                             pp = _linkify_html(pp)
-                            for kw in ("LumenVia", "JOPAI", "PDF", "Audio", "Illustration", "messe", "Parole"):
-                                pp = re.sub(rf"(?i)\b{re.escape(kw)}\b", lambda m: f"<strong>{m.group(0)}</strong>", pp)
+                            # Met en valeur JOPAI© comme dans le footer (couleurs/typo).
+                            pp = re.sub(
+                                r"(?i)\bJOPAI\b",
+                                '<span class="jopai-inline"><span class="jop">JOP</span><span class="ai">AI</span><sup class="ai">©</sup></span>',
+                                pp,
+                            )
+                            for kw in ("LumenVia", "PDF", "Audio", "Illustration", "messe", "Parole"):
+                                pp = re.sub(
+                                    rf"(?i)\b{re.escape(kw)}\b",
+                                    lambda m: f"<strong>{m.group(0)}</strong>",
+                                    pp,
+                                )
                             _in_fb = (
                                 _wrap_lo is not None
                                 and _wrap_hi is not None
@@ -6850,13 +7784,17 @@ def render_admin_emailing() -> None:
                     footer_links.append(
                         f'<a href="{origin0.rstrip("/")}/?route=about" target="_blank" rel="noopener noreferrer">Accéder à LumenVia</a>'
                     )
-                if prefs_link:
-                    footer_links.append(
-                        f'<a href="{prefs_link}" target="_blank" rel="noopener noreferrer">Gérer mes préférences</a>'
-                    )
                 footer_html = " • ".join(footer_links)
 
-                h2 = (nom_dim + (" — " + date_dim if date_dim else "")).strip(" —")
+                # Évite d'afficher 2 fois la date si l'objet la contient déjà (cas par défaut :
+                # "… dimanche {{date_dimanche}}" + sous-titre "… — {{date_dimanche}}").
+                _sub_date = ""
+                try:
+                    if date_dim and date_dim not in (subject0 or ""):
+                        _sub_date = date_dim
+                except Exception:
+                    _sub_date = date_dim if date_dim else ""
+                h2 = (nom_dim + (" — " + _sub_date if _sub_date else "")).strip(" —")
                 parts: list[str] = []
                 parts.append("<!doctype html>")
                 parts.append("<html><head><meta charset=\"utf-8\">")
@@ -6873,12 +7811,11 @@ def render_admin_emailing() -> None:
                 parts.append(".jopai .jop{font-weight:800;color:#0d9488;}")
                 parts.append(".jopai .ai{font-style:italic;color:#0b2745;}")
                 parts.append(".jopai .rest{color:#0b2745;}")
+                parts.append(".jopai-inline{font-family:Montserrat,Helvetica,Arial,sans-serif;letter-spacing:0.3px;white-space:nowrap;}")
+                parts.append(".jopai-inline .jop{font-weight:800;color:#0d9488;}")
+                parts.append(".jopai-inline .ai{font-style:italic;color:#0b2745;}")
                 parts.append("</style></head><body><div class=\"wrap\">")
-                parts.append(f"<div class=\"title\">{subject0}</div>")
-                if h2:
-                    parts.append(f"<div class=\"sub\">{h2}</div>")
-                parts.append("<div class=\"hr\"></div>")
-                parts.append(f"<p>Bonjour {who},</p>")
+                parts.append(f"<p><strong>Bonjour {who},</strong></p>")
                 parts.append(intro_html)
                 parts.append("".join(cards))
                 if footer_html:
@@ -6944,7 +7881,7 @@ def render_admin_emailing() -> None:
                     quote_plus = None  # type: ignore[assignment]
                 if values2.get("origin") and to_email:
                     enc = quote_plus(to_email) if quote_plus else to_email
-                    values2["optout_url"] = values2["origin"].rstrip("/") + "/?route=account&email=" + enc
+                    values2["optout_url"] = values2["origin"].rstrip("/") + "/?route=join&email=" + enc
                 rendered2 = render_template(EmailTemplate(subject=subject_rt, body=body_rt), values=values2)
                 # Placeholder "docx" (non-tag) : illustration
                 rendered2 = EmailTemplate(
@@ -7859,6 +8796,12 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
             key="adm_sched_mode",
         )
         send_to_all = mode == "tous_opt_in"
+        if send_to_all:
+            st.warning(
+                "Mode **Tous les inscrits opt-in** : tu vas cibler l’ensemble des abonnés actifs (selon `subscriptions`). "
+                "Vérifie la liste ci-dessous avant d’envoyer.",
+                icon="⚠️",
+            )
 
         # Dimanche ciblé : force un dimanche
         today = date.today()
@@ -7898,7 +8841,89 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
         )
         st.info(recap)
 
-        if st.button("Exécuter maintenant", type="primary"):
+        # Sécurité / ajustement liste : uniquement pour l’envoi “tous opt-in”
+        filtered_preview = list(rec_preview)
+        excluded_emails: set[str] = set()
+        confirm_all_ok = True
+        confirm_phrase_ok = True
+        if send_to_all:
+            with st.expander("Aperçu des destinataires (avant envoi)", expanded=True):
+                em_list = sorted(
+                    {
+                        str(u.get("email") or "").strip().lower()
+                        for u in rec_preview
+                        if str(u.get("email") or "").strip()
+                    }
+                )
+                st.caption(f"E-mails détectés : **{len(em_list)}**")
+
+                # Exclusions : multi-select + copier/coller
+                excl_pick = st.multiselect(
+                    "Exclure des e-mails (optionnel)",
+                    options=em_list,
+                    default=[],
+                    key="adm_sched_excl_pick",
+                )
+                excl_paste = st.text_area(
+                    "Ou coller une liste d’e-mails à exclure (un par ligne, optionnel)",
+                    value="",
+                    height=80,
+                    key="adm_sched_excl_paste",
+                )
+                excluded_emails = {str(e or "").strip().lower() for e in (excl_pick or []) if str(e or "").strip()}
+                for ln in (excl_paste or "").splitlines():
+                    s = str(ln or "").strip().lower()
+                    if s and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", s):
+                        excluded_emails.add(s)
+
+                if excluded_emails:
+                    filtered_preview = [
+                        u
+                        for u in filtered_preview
+                        if str(u.get("email") or "").strip().lower() not in excluded_emails
+                    ]
+
+                # Mini table (limite) : qui va recevoir
+                show_n = st.slider(
+                    "Afficher les N premiers destinataires (aperçu)",
+                    min_value=10,
+                    max_value=300,
+                    value=60,
+                    step=10,
+                    key="adm_sched_preview_n",
+                )
+                lines = []
+                for u in filtered_preview[: int(show_n)]:
+                    em0 = str(u.get("email") or "").strip().lower()
+                    fn0 = str(u.get("first_name") or "").strip()
+                    ln0 = str(u.get("last_name") or "").strip()
+                    lines.append(f"{em0}\t{fn0}\t{ln0}")
+                st.code(("\n".join(lines) if lines else "—")[:9000])
+
+                # Confirmations
+                final_em = sum(1 for u in filtered_preview if str(u.get("email") or "").strip()) if chan_em else 0
+                final_sm = sum(1 for u in filtered_preview if str(u.get("phone_e164") or "").strip()) if chan_sm else 0
+                final_touch = len(filtered_preview)
+                st.markdown(
+                    f"**Après exclusions :** {final_touch} destinataire(s), "
+                    f"**{final_em}** e-mail(s) et **{final_sm}** SMS."
+                )
+
+                confirm_all_ok = st.checkbox(
+                    "J’ai vérifié la liste et je confirme vouloir envoyer à ces destinataires.",
+                    value=False,
+                    key="adm_sched_confirm_checked",
+                )
+                phrase = st.text_input(
+                    "Pour activer l’envoi, tape exactement : ENVOYER",
+                    value="",
+                    key="adm_sched_confirm_phrase",
+                ).strip()
+                confirm_phrase_ok = phrase == "ENVOYER"
+
+        can_execute = (confirm_all_ok and confirm_phrase_ok) if send_to_all else True
+
+        if st.button("Exécuter maintenant", type="primary", disabled=not can_execute):
             # Exécution : réutilise la logique d’envoi (hebdo opt-in)
             started = utc_now_iso()
             ok0 = 0
@@ -7918,6 +8943,9 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
             recipients = lumenvia_manual_broadcast_users(
                 users_rows=users_rows, subs_rows=subs_rows, send_to_all=send_to_all
             )
+            # Applique les exclusions choisies dans l’aperçu (sécurité)
+            if send_to_all and excluded_emails:
+                recipients = [u for u in recipients if str(u.get("email") or "").strip().lower() not in excluded_emails]
 
             # template actif — même filtres vivants/langue FR que la page Emailing
             tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
@@ -8519,6 +9547,11 @@ def main() -> None:
             del st.query_params["sunday"]
         except Exception:
             pass
+        try:
+            if "open_cal" in st.query_params:
+                del st.query_params["open_cal"]
+        except Exception:
+            pass
 
     try:
         rte_q = str(params.get("route") or "").strip().lower()
@@ -8526,6 +9559,13 @@ def main() -> None:
         rte_q = ""
     if rte_q in ("feedback", "avis"):
         st.session_state.route = "feedback"
+    elif rte_q in ("account", "compte"):
+        # Liens e-mailing : /?route=account&email=... → ouvrir “Mon compte”
+        st.session_state.route = "account"
+    elif rte_q in ("join", "nous_rejoindre", "nousrejoindre"):
+        st.session_state.route = "join"
+    elif rte_q in ("reset_password", "reset", "pwd_reset"):
+        st.session_state.route = "reset_password"
 
     if adm in ("1", "login", "step3", "cdc", "mob", "mobile"):
         try:
@@ -8548,6 +9588,8 @@ def main() -> None:
         render_feedback()
     elif route == "account":
         render_join()
+    elif route == "reset_password":
+        render_reset_password()
     elif route == "admin_login":
         render_admin_login()
     elif route == "admin_step3":
