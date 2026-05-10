@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 title JOPAI-LumenVia (Port 8507)
-cd /d "C:\Users\jop28\OneDrive\Documents\GitHub\JOPAI-LumenVia"
+cd /d "%~dp0"
 
 echo.
 echo ==========================================

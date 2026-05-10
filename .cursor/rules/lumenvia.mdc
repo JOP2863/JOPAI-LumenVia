@@ -24,6 +24,11 @@ Pour chaque table:
 - Toujours charger via `st.secrets` en app, ou via lecture toml outillée en scripts.
 - **API AELF** : pas de clé ; URL de base facultative — `AELF_BASE_URL` (racine) ou `[aelf]` → `base_url` dans les secrets ; défaut `https://api.aelf.org`. Préemption : variable d’environnement `AELF_BASE_URL` si définie.
 
+## Données personnelles et dépôt public
+- **Aucune** adresse e-mail, numéro de téléphone, nom propre de contact ou chemin machine (`C:\Users\…`) dans le code versionné : uniquement **secrets** (`st.secrets` / variables d’environnement) ou données métier (Sheets) avec libellés UI **neutres** (« profil test 1 », etc.).
+- SMTP / expéditeur / destinataires dry-run / cases admin e-mail : valeurs dans les secrets, jamais en dur dans `app.py` pour faciliter la lecture par robots (GitHub, cache HTML, logs).
+- Optionnel e-mailing admin : `EMAIL_TEST_RECIPIENT_1` … `EMAIL_TEST_RECIPIENT_3` pour jusqu’à trois cases à cocher (affichage sans adresse).
+
 ## Stockage GCS (structure)
 - `Images/illustrations/`
 - `Images/logos/`

@@ -13,6 +13,7 @@ from io import StringIO
 from pathlib import Path
 from html import escape as html_escape
 import random
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 
@@ -66,6 +67,7 @@ from core.illustration_thumbs import (
     vision_console_activation_url,
 )
 from core.pdf_graine_parole_mensuel import build_graine_parole_monthly_pdf_bytes, strip_light_markdown_to_plain
+from core.outbound import SmtpConfig
 from ui.liturgy_render import render_liturgy_block
 
 
@@ -77,6 +79,24 @@ _PROMPT_TEMPLATE_KEYS = {
     "overlay_catechese_bridge",
     "retry_hardened_prefix",
 }
+
+@st.cache_data(ttl=75, max_entries=40, show_spinner=False)
+def _adm_feedback_sheet_fetch_cached(
+    spreadsheet_id: str,
+    table: str,
+    limit: int,
+    service_account_json: str,
+) -> list[dict]:
+    """Court TTL : les reruns Streamlit (expanders, widgets) ne refont pas un aller-retour Sheets à chaque fois."""
+    info = json.loads(service_account_json)
+    gs = build_gspread_client(info)
+    return fetch_records(
+        gspread_client=gs,
+        spreadsheet_id=spreadsheet_id,
+        table=table,
+        limit=limit,
+    )
+
 
 _PROMPT_TEMPLATE_LABELS: dict[str, str] = {
     "instructions_base_md": "Socle — consignes générales (structure du prompt)",
@@ -193,28 +213,48 @@ def _inject_expander_footer_scroll() -> None:
     return 92;
   }
 
+  function scrollBehaviorPreferInstant() {
+    try {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
+    } catch (e0) {}
+    try {
+      if (window.matchMedia("(max-width: 900px)").matches) return true;
+    } catch (e1) {}
+    try {
+      if (window.matchMedia("(pointer: coarse)").matches) return true;
+    } catch (e2) {}
+    return false;
+  }
+
   function bumpScroll(detailsEl) {
     if (!detailsEl || !detailsEl.open) return;
+    var instant = scrollBehaviorPreferInstant();
+    var sb = instant ? "auto" : "smooth";
     var reserve = footerReservePx();
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
+    function step() {
+      try {
+        detailsEl.scrollIntoView({ behavior: sb, block: "nearest", inline: "nearest" });
+        var rect = detailsEl.getBoundingClientRect();
+        var vh = rootWin.innerHeight || doc.documentElement.clientHeight || 720;
+        var bottomLimit = vh - reserve;
+        var overflow = rect.bottom - bottomLimit;
+        if (overflow <= 6) return;
+        var dy = overflow + 8;
+        var se = doc.scrollingElement || doc.documentElement || doc.body;
         try {
-          detailsEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-          var rect = detailsEl.getBoundingClientRect();
-          var vh = rootWin.innerHeight || doc.documentElement.clientHeight || 720;
-          var bottomLimit = vh - reserve;
-          var overflow = rect.bottom - bottomLimit;
-          if (overflow <= 6) return;
-          var dy = overflow + 8;
-          var se = doc.scrollingElement || doc.documentElement || doc.body;
-          try {
-            se.scrollBy({ top: dy, behavior: "smooth" });
-          } catch (e2) {
-            rootWin.scrollBy(0, dy);
-          }
-        } catch (e) {}
+          se.scrollBy({ top: dy, behavior: sb });
+        } catch (e2) {
+          rootWin.scrollBy(0, dy);
+        }
+      } catch (e) {}
+    }
+    if (instant) {
+      requestAnimationFrame(step);
+    } else {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(step);
       });
-    });
+    }
   }
 
   try {
@@ -255,12 +295,14 @@ def _inject_expander_footer_scroll() -> None:
               exp0.querySelector('[data-testid="stExpanderDetails"]')
             : null;
           if (!det) return;
-          window.setTimeout(function () {
-            onDetails(det);
-          }, 90);
-          window.setTimeout(function () {
-            onDetails(det);
-          }, 320);
+          var delays = window.matchMedia("(max-width: 900px)").matches ? [120] : [90, 320];
+          for (var di = 0; di < delays.length; di++) {
+            (function (ms) {
+              window.setTimeout(function () {
+                onDetails(det);
+              }, ms);
+            })(delays[di]);
+          }
         } catch (e) {}
       },
       true
@@ -3217,6 +3259,85 @@ def render_memo() -> None:
         )
 
 
+def _lv_read_streamlit_secret(*keys: str) -> str:
+    """Lit une clé dans ``st.secrets`` (racine ou sections ``smtp`` / ``twilio`` / ``dry_run``)."""
+    try:
+        s = st.secrets
+    except Exception:
+        return ""
+    for k in keys:
+        try:
+            v = s.get(k)  # type: ignore[attr-defined]
+        except Exception:
+            v = None
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    for sec in ("smtp", "twilio", "dry_run"):
+        try:
+            block = s.get(sec)  # type: ignore[attr-defined]
+        except Exception:
+            block = None
+        if not isinstance(block, dict):
+            continue
+        for k in keys:
+            v = block.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+    return ""
+
+
+def _lv_smtp_config_from_secrets_optional() -> SmtpConfig | None:
+    """Retourne une config SMTP si ``SMTP_HOST`` est défini, sinon ``None``."""
+    try:
+        host = _lv_read_streamlit_secret("SMTP_HOST")
+        if not host:
+            return None
+        fe = _lv_read_streamlit_secret("SMTP_FROM")
+        if not fe:
+            return None
+        return SmtpConfig(
+            host=host,
+            port=int(_lv_read_streamlit_secret("SMTP_PORT") or 587),
+            username=_lv_read_streamlit_secret("SMTP_USER"),
+            password=_lv_read_streamlit_secret("SMTP_PASSWORD"),
+            from_email=fe,
+            use_tls=str(_lv_read_streamlit_secret("SMTP_USE_TLS") or "true").strip().lower()
+            not in ("0", "false", "no", "off"),
+        )
+    except Exception:
+        return None
+
+
+def _schedule_feedback_survey_notify_email(
+    *,
+    smtp_cfg: SmtpConfig,
+    to_email: str,
+    lines: list[str],
+) -> None:
+    """Envoi SMTP en arrière-plan ; aucune erreur ne remonte à l’interface utilisateur."""
+    subject = "[LumenVia] Nouveau retour — questionnaire"
+    body = (
+        "Réponse enregistrée sur le formulaire « Donner votre avis ».\n\n"
+        + "\n".join(lines)
+    )
+
+    def _run() -> None:
+        try:
+            from core.outbound import send_smtp_email
+
+            send_smtp_email(
+                cfg=smtp_cfg,
+                to_email=to_email,
+                subject=subject,
+                body_text=body,
+                body_html=None,
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True, name="lumenvia_feedback_notify").start()
+
+
 def render_feedback() -> None:
     """Questionnaire flash post-envoi (Sheets RSTN `experience_feedback`)."""
     st.title("Donner votre avis")
@@ -3404,6 +3525,31 @@ En tant que premier passager de cette aventure, votre retour nous est précieux 
                 },
             )
             st.success("Merci infiniment : ton avis nous aide à faire grandir LumenVia.")
+            try:
+                notify_to = str(st.secrets.get("EMAIL_TEST_RECIPIENT_1") or "").strip().lower()
+            except Exception:
+                notify_to = ""
+            if _em_ok_feedback(notify_to):
+                smtp_n = _lv_smtp_config_from_secrets_optional()
+                if smtp_n:
+                    lines_fb = [
+                        f"E-mail (champ formulaire) : {em_clean or '—'}",
+                        f"État d'esprit : {emotion}",
+                        f"Illustration (1–5) : {r_illus}",
+                        f"Synthèse PDF (1–5) : {r_synth}",
+                        f"Audio (1–5) : {r_audio}",
+                        f"Préparation dimanche : {utility}",
+                        f"Ce qui a marqué : {(standout or '').strip() or '—'}",
+                        f"À améliorer : {(wish or '').strip() or '—'}",
+                        f"Campagne (hint) : {q_campaign or '—'}",
+                        f"Date dimanche (hint) : "
+                        f"{q_dim[:10] if len(q_dim) >= 10 else (q_dim or '—')}",
+                    ]
+                    _schedule_feedback_survey_notify_email(
+                        smtp_cfg=smtp_n,
+                        to_email=notify_to,
+                        lines=lines_fb,
+                    )
         except Exception as ex:
             st.exception(ex)
         finally:
@@ -6585,8 +6731,10 @@ def render_admin_feedback_insights() -> None:
             ),
         ),
     )
+    sid = str(cfg.gsheet_id).strip()
+    sa_json = json.dumps(cfg.gcp_service_account, sort_keys=True)
     try:
-        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="experience_feedback", limit=1200)
+        rows = _adm_feedback_sheet_fetch_cached(sid, "experience_feedback", 1200, sa_json)
     except Exception as e:
         st.error(f"Lecture `experience_feedback` impossible : {e}")
         return
@@ -6665,11 +6813,12 @@ def render_admin_feedback_insights() -> None:
     bundle = "\n".join(lines)
     bundle_sig = sha256(f"{n_sample}\n{bundle}".encode("utf-8")).hexdigest()
 
-    def _latest_saved_insight(sig: str) -> dict | None:
-        try:
-            ins_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="feedback_insights", limit=800)
-        except Exception:
-            return None
+    try:
+        ins_rows_all = _adm_feedback_sheet_fetch_cached(sid, "feedback_insights", 800, sa_json)
+    except Exception:
+        ins_rows_all = []
+
+    def _latest_saved_insight(ins_rows: list[dict], sig: str) -> dict | None:
         cand = [
             r
             for r in ins_rows
@@ -6681,7 +6830,7 @@ def render_admin_feedback_insights() -> None:
         cand.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
         return cand[0]
 
-    prev_ins = _latest_saved_insight(bundle_sig)
+    prev_ins = _latest_saved_insight(ins_rows_all, bundle_sig)
     if prev_ins:
         st.warning(
             "Une synthèse **identique** (même agrégat et même nombre de réponses) est déjà enregistrée. "
@@ -6742,6 +6891,10 @@ def render_admin_feedback_insights() -> None:
                 },
             )
             st.success("Synthèse enregistrée dans la table `feedback_insights`.")
+            try:
+                _adm_feedback_sheet_fetch_cached.clear()
+            except Exception:
+                pass
         except Exception as e:
             st.exception(e)
         finally:
@@ -7068,14 +7221,14 @@ def render_admin_accounts() -> None:
                     opt_txt = "Oui" if _subscription_is_active(rec) else "Non"
             body_rows.append(
                 "<tr>"
-                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);'>{esc(em)}</td>"
-                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{esc(src or '—')}</td>"
-                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{esc(opt_txt)}</td>"
-                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{esc(created or '—')}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);'>{html_escape(em)}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{html_escape(src or '—')}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{html_escape(opt_txt)}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{html_escape(created or '—')}</td>"
                 "</tr>"
             )
         html = f"""
-<div style="margin:0.75rem 0 0.25rem;font-weight:700;color:#6b5918;text-align:center;">{esc(title)}</div>
+<div style="margin:0.75rem 0 0.25rem;font-weight:700;color:#6b5918;text-align:center;">{html_escape(title)}</div>
 <div style="overflow:auto;border:1px solid rgba(212,175,55,0.35);background:rgba(255,255,255,0.72);">
 <table style="width:100%;border-collapse:collapse;font-size:0.95rem;">
   <thead>
@@ -7430,25 +7583,29 @@ def render_admin_emailing() -> None:
     if not dry_phone_in and dry_phone_secret:
         dry_phone_in = dry_phone_secret
 
-    # Destinataires de test (manuel unitaire) : sélection explicite possible
-    test_opt_hotmail = st.checkbox(
-        "Envoyer aussi à `jop28@hotmail.com` (test)",
-        value=False,
-        key="adm_email_test_hotmail",
-        disabled=bool(send_to_all),
-    )
-    test_opt_gemini = st.checkbox(
-        "Envoyer aussi à `jop28gemini@gmail.com` (test)",
-        value=True,
-        key="adm_email_test_gemini",
-        disabled=bool(send_to_all),
-    )
-    test_opt_cmarsollat = st.checkbox(
-        "Envoyer aussi à `cmarsollat@hotmail.com` (test)",
-        value=False,
-        key="adm_email_test_cmarsollat",
-        disabled=bool(send_to_all),
-    )
+    # Destinataires de test (manuel) : adresses réelles uniquement via secrets
+    # (`EMAIL_TEST_RECIPIENT_1` … `EMAIL_TEST_RECIPIENT_3` dans `.streamlit/secrets.toml`).
+    # Libellés UI neutres : aucune adresse en clair dans le dépôt ni dans le HTML envoyé au client.
+    test_recipient_slots: list[tuple[str, str]] = []
+    try:
+        ssec = st.secrets
+        for i in range(1, 4):
+            sk = f"EMAIL_TEST_RECIPIENT_{i}"
+            em = str(ssec.get(sk) or "").strip().lower()
+            if _is_email_ok(em):
+                test_recipient_slots.append((em, str(i)))
+    except Exception:
+        pass
+
+    selected_test_emails: list[str] = []
+    for em_addr, slot_i in test_recipient_slots:
+        if st.checkbox(
+            f"Envoyer aussi au destinataire de test (profil {slot_i})",
+            value=False,
+            key=f"adm_email_test_opt_{slot_i}",
+            disabled=bool(send_to_all),
+        ):
+            selected_test_emails.append(em_addr)
     manual_extra_raw = st.text_area(
         "Autres destinataires (saisie manuelle — une adresse par ligne, ou séparées par virgule / point-virgule)",
         value="",
@@ -7490,13 +7647,6 @@ def render_admin_emailing() -> None:
                 best_ts = ts
         return best
 
-    selected_test_emails: list[str] = []
-    if test_opt_hotmail:
-        selected_test_emails.append("jop28@hotmail.com")
-    if test_opt_gemini:
-        selected_test_emails.append("jop28gemini@gmail.com")
-    if test_opt_cmarsollat:
-        selected_test_emails.append("cmarsollat@hotmail.com")
     for em in _parse_extra_emails(manual_extra_raw):
         if em not in selected_test_emails:
             selected_test_emails.append(em)
