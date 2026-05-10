@@ -6843,13 +6843,6 @@ def render_admin_feedback_insights() -> None:
             )
             st.markdown(str(prev_ins.get("synthesis_text") or "") or "—")
 
-    force_regen = st.checkbox(
-        "Forcer un nouvel appel IA (refaire la synthèse même si une version existe pour ce périmètre)",
-        value=False,
-        key="adm_fb_insights_force",
-        disabled=not bool(prev_ins),
-    )
-
     prompt_fb = (
         "Tu es consultant pour LumenVia (préparation dominicale, textes AELF, ton bienveillant).\n\n"
         "Données : réponses utilisateurs au questionnaire flash (sans adresses e-mail).\n"
@@ -6861,8 +6854,19 @@ def render_admin_feedback_insights() -> None:
         "Contraintes : pas de jargon SMTP/API ; pas inventer de citations ; rester factuel par rapport aux données."
     )
 
-    if st.button("Générer la synthèse IA", type="primary", key="adm_fb_insights_run"):
-        if prev_ins and not force_regen:
+    # Formulaire : case « Forcer » + bouton dans la même soumission (aligné tactile / mobile ; évite deux reruns désynchronisés).
+    with st.form("adm_fb_insights_generate_form", clear_on_submit=False):
+        force_regen = st.checkbox(
+            "Forcer un nouvel appel IA (refaire la synthèse même si une version existe pour ce périmètre)",
+            value=False,
+            key="adm_fb_insights_force",
+            disabled=not bool(prev_ins),
+        )
+        gen_clicked = st.form_submit_button("Générer la synthèse IA", type="primary")
+
+    if gen_clicked:
+        force_ok = bool(force_regen)
+        if prev_ins and not force_ok:
             st.info(
                 "Aucun appel IA lancé : ouvre l’expander « Synthèse déjà enregistrée » ou coche **Forcer** pour refaire une analyse."
             )
