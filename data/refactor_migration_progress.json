@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "completed_ids": [
+    "adm_cdc",
+    "adm_liturgy",
+    "adm_mobile_sim",
+    "adm_plan",
+    "adm_test_resources",
+    "adm_users_comms",
+    "core_split",
+    "doc_strategy",
+    "granularity_gauss_audit",
+    "page_about",
+    "page_feedback_join",
+    "page_memo",
+    "page_sunday",
+    "plan_before_extract",
+    "qa_sunday_admin_flows",
+    "ui_components",
+    "ui_navigation",
+    "ui_styles",
+    "final_shell",
+    "closure_audit_self_review"
+  ],
+  "current_step_id": null
+}

@@ -5,6 +5,8 @@ import re
 
 import streamlit as st
 
+from core.aelf_text_cleanup import clean_aelf_text_for_display
+
 
 def render_liturgy_block(title: str, text: str | None) -> None:
     st.markdown(f"**{title}**")
@@ -21,29 +23,6 @@ def render_liturgy_block(title: str, text: str | None) -> None:
 """,
         unsafe_allow_html=True,
     )
-
-
-def clean_aelf_text_for_display(text: str) -> str:
-    """
-    Nettoyage "présentation" uniquement (ne change pas la logique API).
-    - Normalise retours ligne: \\r\\n -> \\n
-    - Nettoie les espaces fin de ligne
-    - Évite les blocs trop aérés
-    """
-    s = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = [ln.rstrip() for ln in s.split("\n")]
-    # Pas plus d'une ligne vide consécutive
-    out: list[str] = []
-    blank = False
-    for ln in lines:
-        if ln.strip() == "":
-            if not blank:
-                out.append("")
-            blank = True
-        else:
-            out.append(ln)
-            blank = False
-    return "\n".join(out).strip()
 
 
 def _to_paragraph_html(text: str) -> str:
