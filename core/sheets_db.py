@@ -339,6 +339,21 @@ def default_tables() -> list[TableSpec]:
             ],
         ),
         TableSpec(
+            name="Voix_Audio",
+            columns=[
+                "#ID",
+                "Statut",
+                "Version",
+                "Date_Effet",
+                "Cible",
+                "Couleur",
+                "Temps_Liturgique",
+                "Voix",
+                "Description",
+                "Concaténation",
+            ],
+        ),
+        TableSpec(
             name="audio",
             columns=with_concat(
                 [

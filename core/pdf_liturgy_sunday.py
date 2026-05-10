@@ -595,6 +595,7 @@ def build_liturgy_sunday_pdf_bytes(
     synthesis_text: str | None,
     audio_listen_url: str | None,
     audio_listen_note: str | None = None,
+    audio_readings_listen_url: str | None = None,
     about_markdown: str | None = None,
     back_cover_image_bytes: bytes | None = None,
     accent_hex: str | None = None,
@@ -607,6 +608,7 @@ def build_liturgy_sunday_pdf_bytes(
         date_line=date_line,
         meta_line=meta_line,
         audio_listen_url=audio_listen_url,
+        audio_readings_listen_url=audio_readings_listen_url,
         accent_hex=accent_hex,
     )
     body = build_liturgy_body_pdf_bytes(

@@ -47,6 +47,8 @@ from core.sheets_db import (
 )
 from core.prompt_templates import compute_sha256_text
 from core.parametres_ia import pick_effective_templates
+from core.gemini_tts_catalog import gemini_tts_voice_names_ordered, load_gemini_tts_voice_catalog
+from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE, pick_voice_name, resolve_voice
 from core.storage import blob_exists, upload_text, upload_bytes, download_bytes
 from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
@@ -78,6 +80,10 @@ _PROMPT_TEMPLATE_KEYS = {
     "overlay_no_takeaways",
     "overlay_catechese_bridge",
     "retry_hardened_prefix",
+    "audio_style_default",
+    "audio_style_paques",
+    "audio_style_careme",
+    "audio_style_lectures",
 }
 
 @st.cache_data(ttl=75, max_entries=40, show_spinner=False)
@@ -104,6 +110,10 @@ _PROMPT_TEMPLATE_LABELS: dict[str, str] = {
     "overlay_no_takeaways": "Surcouche — sans section « À retenir »",
     "overlay_catechese_bridge": "Surcouche — passerelle catéchèse (Stone Card)",
     "retry_hardened_prefix": "Surcouche — préfixe de relance (anti-hallucination renforcée)",
+    "audio_style_default": "TTS — style oral par défaut (synthèse)",
+    "audio_style_paques": "TTS — surcouche temps pascal (synthèse)",
+    "audio_style_careme": "TTS — surcouche Carême (synthèse)",
+    "audio_style_lectures": "TTS — style lectures du lectionnaire",
 }
 
 
@@ -126,6 +136,22 @@ def _load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint
     rows = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="Paramètres_IA", limit=5000)
     latest = pick_effective_templates(rows, allowed_keys=set(_PROMPT_TEMPLATE_KEYS))
     return {k: v.content_md for k, v in latest.items() if k in _PROMPT_TEMPLATE_KEYS and v.content_md}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_voix_rules_cached(*, gsheet_id: str, service_account_fingerprint: str) -> list[dict]:
+    """Règles de voix TTS (`Voix_Audio` / VOIX)."""
+    if not gsheet_id:
+        return []
+    _ = service_account_fingerprint
+    cfg = load_config()
+    if not cfg.gcp_service_account:
+        return []
+    gs = build_gspread_client(cfg.gcp_service_account)
+    try:
+        return fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="Voix_Audio", limit=0)
+    except Exception:
+        return []
 
 
 def _service_account_fingerprint(sa: object) -> str:
@@ -918,6 +944,24 @@ label[data-testid="stWidgetLabel"] {
   }
 }
 
+/*
+  Clic / tap « une fois suffit » sur les boutons (formulaires Streamlit inclus).
+  - touch-action: manipulation évite le délai tactiles ~300ms (legacy WebKit) et le double-tap-zoom
+    qui donnent l’impression qu’il faut appuyer deux fois sur Connexion / Envoyer / etc.
+*/
+[data-testid="stAppViewContainer"] button,
+[data-testid="stAppViewContainer"] [data-testid="stFormSubmitButton"] button {
+  touch-action: manipulation !important;
+}
+@media (max-width: 1024px) {
+  [data-testid="stAppViewContainer"] button[kind="primary"],
+  [data-testid="stAppViewContainer"] [data-testid="stFormSubmitButton"] button {
+    min-height: 48px !important;
+    padding-top: 0.45rem !important;
+    padding-bottom: 0.45rem !important;
+  }
+}
+
 </style>
         """,
         unsafe_allow_html=True,
@@ -1405,6 +1449,35 @@ def _norm_key(s: str | None) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in t).strip("_")
 
 
+def _compose_synthesis_tts_text(*, body: str, templates: dict[str, str], periode: str | None) -> str:
+    """Préfixe instructions TTS (Levier B) + corps synthèse."""
+    base = (templates.get("audio_style_default") or "").strip()
+    k = _norm_key(periode)
+    extras: list[str] = []
+    if k == "pascal" or "pascal" in k:
+        x = (templates.get("audio_style_paques") or "").strip()
+        if x:
+            extras.append(x)
+    elif "careme" in k:
+        x = (templates.get("audio_style_careme") or "").strip()
+        if x:
+            extras.append(x)
+    parts: list[str] = []
+    if base:
+        parts.append(base)
+    parts.extend(extras)
+    parts.append((body or "").strip())
+    return "\n\n".join(parts)
+
+
+def _compose_readings_tts_text(*, body: str, templates: dict[str, str]) -> str:
+    lect = (templates.get("audio_style_lectures") or "").strip()
+    b = (body or "").strip()
+    if lect:
+        return lect + "\n\n" + b
+    return b
+
+
 def _explain_liturgical_time(periode: str | None) -> str:
     k = _norm_key(periode)
     hints: dict[str, str] = {
@@ -1606,6 +1679,234 @@ def _cycle_year_display(s: str | None) -> str:
     return _liturgy_display_label(t)
 
 
+def _is_readings_audio_gcs_path(path: str) -> bool:
+    """Objets « lectures intégrales » : préfixe dédié (distinct de ``Audio/…`` synthèse)."""
+    p = (path or "").strip().replace("\\", "/")
+    return p.startswith("AudioLectures/")
+
+
+def _plain_readings_for_tts(texts: object) -> str:
+    """Texte continu pour TTS des quatre lectures AELF (sans HTML)."""
+    from ui.liturgy_render import clean_aelf_text_for_display
+
+    parts: list[str] = []
+
+    def _seg(title: str, body: str | None) -> None:
+        raw = clean_aelf_text_for_display(body or "")
+        raw = re.sub(r"<[^>]+>", " ", raw)
+        raw = " ".join(raw.split())
+        if raw.strip():
+            parts.append(f"{title}. {raw.strip()}")
+
+    _seg("Première lecture", getattr(texts, "premiere_lecture", None))
+    _seg("Psaume", getattr(texts, "psaume", None))
+    _seg("Deuxième lecture", getattr(texts, "deuxieme_lecture", None))
+    _seg("Évangile", getattr(texts, "evangile", None))
+    return "\n\n".join(parts).strip()
+
+
+def _tts_gemini_chunked_bytes(*, cfg: object, text: str, voice_name: str | None = None) -> tuple[bytes, str, str]:
+    """Synthèse vocale longue via Gemini API (fragments), même stratégie que le fallback synthèse."""
+    if voice_name is None or not str(voice_name).strip():
+        voice_name = DEFAULT_GEMINI_TTS_VOICE
+    if not (text or "").strip():
+        raise ValueError("Texte vide")
+    if not getattr(cfg, "gemini_api_key", None):
+        raise RuntimeError("GEMINI_API_KEY requise pour l’audio des lectures (TTS fragmenté).")
+    from core.gemini_tts_api import GeminiTtsApiClient
+
+    tts_api = GeminiTtsApiClient(api_key=str(cfg.gemini_api_key))
+    chunks = _chunk_text_for_tts(text, max_chars=1400)
+    wav_parts_by_i: dict[int, bytes] = {}
+    tts_errors: list[str] = []
+
+    def _tts_job(i: int, ch: str) -> tuple[int, bytes]:
+        tts_audio = tts_api.generate_audio(
+            model="gemini-2.5-flash-preview-tts",
+            text=ch,
+            voice_name=voice_name,
+        )
+        b, mt, _ = normalize_audio_bytes(audio_bytes=tts_audio.audio_bytes, mime_type=tts_audio.mime_type)
+        if mt != "audio/wav":
+            b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
+        return i, b
+
+    workers = max(1, min(2, len(chunks)))
+    with ThreadPoolExecutor(max_workers=workers) as ex2:
+        futs = [ex2.submit(_tts_job, i, ch) for i, ch in enumerate(chunks)]
+        for fut in as_completed(futs):
+            try:
+                i, b = fut.result()
+                wav_parts_by_i[i] = b
+            except Exception as ex:
+                tts_errors.append(str(ex))
+
+    if tts_errors or len(wav_parts_by_i) != len(chunks):
+        raise RuntimeError(
+            "TTS incomplet : "
+            + (tts_errors[0][:200] if tts_errors else "morceaux manquants")
+        )
+
+    wav_parts = [wav_parts_by_i[i] for i in range(len(chunks))]
+    joined = join_wav_bytes(wav_parts)
+    b_out, mime_out, ext_out = normalize_audio_bytes(audio_bytes=joined, mime_type="audio/wav")
+    return b_out, mime_out, ext_out
+
+
+def _fetch_existing_readings_audio(
+    *,
+    gs: object,
+    gcs: object,
+    cfg: object,
+    date_str: str,
+    zone: str,
+) -> tuple[tuple[bytes, str] | None, str | None]:
+    """Dernier audio « lectures seules ''AudioLectures/'' pour la dernière génération du jour."""
+    try:
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=3000)
+        gens_day = [
+            g
+            for g in gens
+            if str(g.get("date", "")).strip() == date_str and str(g.get("zone", "")).strip() == zone
+        ]
+        if not gens_day:
+            return None, None
+        latest = sorted(gens_day, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
+        gen_eid = str(latest.get("entity_id") or "").strip()
+        if not gen_eid:
+            return None, None
+
+        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=5000)
+        aud_rows = [
+            a
+            for a in audios
+            if str(a.get("gen_entity_id", "")).strip() == gen_eid
+            and _is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))
+        ]
+        if not aud_rows:
+            return None, None
+        aud = sorted(aud_rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
+        path = str(aud.get("gcs_path") or "").strip()
+        if not path:
+            return None, None
+        raw = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
+        mime_guess = "audio/wav" if path.lower().endswith(".wav") else "audio/mpeg"
+        b, mime, _ = normalize_audio_bytes(audio_bytes=raw, mime_type=mime_guess)
+        return (b, mime), path
+    except Exception:
+        return None, None
+
+
+def _latest_generation_row_for_sunday(*, gs: object, cfg: object, date_str: str, zone: str) -> dict | None:
+    """Dernière ligne ``generations`` pour un dimanche et une zone."""
+    try:
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=6000)
+        gens_day = [
+            g
+            for g in gens
+            if str(g.get("date", "")).strip() == date_str and str(g.get("zone", "")).strip() == zone
+        ]
+        if not gens_day:
+            return None
+        return sorted(gens_day, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
+    except Exception:
+        return None
+
+
+def _has_readings_audio_for_gen(*, gs: object, cfg: object, gen_entity_id: str) -> bool:
+    ge = str(gen_entity_id or "").strip()
+    if not ge:
+        return False
+    try:
+        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=8000)
+        for a in audios:
+            if str(a.get("gen_entity_id") or "").strip() != ge:
+                continue
+            if _is_readings_audio_gcs_path(str(a.get("gcs_path") or "")):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _synthesis_audio_gcs_path_for_gen(*, gs: object, cfg: object, gen_entity_id: str) -> str | None:
+    ge = str(gen_entity_id or "").strip()
+    if not ge:
+        return None
+    try:
+        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=8000)
+        rows = [
+            a
+            for a in audios
+            if str(a.get("gen_entity_id") or "").strip() == ge
+            and not _is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))
+        ]
+        if not rows:
+            return None
+        aud = sorted(rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
+        p = str(aud.get("gcs_path") or "").strip()
+        return p or None
+    except Exception:
+        return None
+
+
+def _weekly_email_signed_urls(
+    *,
+    cfg: object,
+    gs: object,
+    date_str: str,
+    zone: str = "france",
+) -> dict[str, str]:
+    """PDF, audio synthèse, audio lectures (AudioLectures/), illustration — URLs signées pour l’e-mail hebdo."""
+    out = {"url_pdf": "", "url_audio": "", "url_audio_readings": "", "url_illustration": ""}
+    bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
+    if not bucket or not getattr(cfg, "gcp_service_account", None):
+        return out
+    try:
+        gcs = build_gcs_client(cfg.gcp_service_account)
+    except Exception:
+        return out
+    p_pdf = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+    try:
+        out["url_pdf"] = _gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_pdf) or ""
+    except Exception:
+        pass
+    year = date_str[:4]
+    cand = [f"Images/illustrations/{year}/{date_str}{ext}" for ext in (".webp", ".png", ".jpg", ".jpeg")]
+    try:
+        out["url_illustration"] = (
+            _gcs_first_signed_url(gcs=gcs, bucket_name=bucket, candidate_paths=cand) or ""
+        )
+    except Exception:
+        pass
+    try:
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=6000)
+        gens_d = [
+            g
+            for g in gens
+            if str(g.get("date") or "").strip()[:10] == date_str and str(g.get("zone") or "").strip() == zone
+        ]
+        gens_d.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        gen_id = str((gens_d[0] or {}).get("entity_id") or "").strip() if gens_d else ""
+        if not gen_id:
+            return out
+        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=6000)
+        aud_d = [a for a in aud_rows if str(a.get("gen_entity_id") or "").strip() == gen_id]
+        syn_rows = [a for a in aud_d if not _is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))]
+        read_rows = [a for a in aud_d if _is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))]
+        syn_rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        read_rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        p_syn = str((syn_rows[0] or {}).get("gcs_path") or "").strip() if syn_rows else ""
+        p_read = str((read_rows[0] or {}).get("gcs_path") or "").strip() if read_rows else ""
+        if p_syn:
+            out["url_audio"] = _gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_syn) or ""
+        if p_read:
+            out["url_audio_readings"] = _gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_read) or ""
+    except Exception:
+        pass
+    return out
+
+
 def _fetch_existing_sunday_bundle(
     *,
     gs: object,
@@ -1640,7 +1941,12 @@ def _fetch_existing_sunday_bundle(
                 syn_text = None
 
         audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=5000)
-        aud_rows = [a for a in audios if str(a.get("gen_entity_id", "")).strip() == gen_eid]
+        aud_rows = [
+            a
+            for a in audios
+            if str(a.get("gen_entity_id", "")).strip() == gen_eid
+            and not _is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))
+        ]
         if not aud_rows:
             return None, syn_text, None
         aud = sorted(aud_rows, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
@@ -1784,7 +2090,7 @@ _ABOUT_MARKDOWN = """
 
 
 JOPAI LumenVia est un compagnon spirituel conçu pour vous aider à franchir le seuil de la célébration avec un cœur ouvert et une intelligence éclairée.  
-Trop souvent, nous arrivons à la messe sans avoir eu le temps de déposer le bruit du monde. Ce site est une halte, un chemin de lumière (**LumenVia**) pour vous préparer à recevoir la Parole de Dieu.
+Trop souvent, nous arrivons à la messe sans avoir eu le temps de déposer le bruit du monde. Ce site est une pause, un chemin de lumière (**LumenVia**) pour vous préparer à recevoir la Parole de Dieu.
 
 **Pourquoi utiliser LumenVia ?**
 
@@ -1875,7 +2181,7 @@ def render_sunday() -> None:
         bucket_name: str | None,
     ) -> dict[str, dict[str, bool]]:
         """
-        Retourne un mapping date_iso -> {text,audio,pdf} pour les dimanches du mois.
+        Retourne un mapping date_iso -> {text,audio,pdf,readings_audio} pour les dimanches du mois.
         Objectif : affichage indicatif (encerclage) sans empêcher la régénération.
 
         Optimisations : cache plus long (pas besoin temps réel), filtre rapide sur l’année affichée,
@@ -1917,6 +2223,13 @@ def render_sunday() -> None:
             str(r.get("gen_entity_id") or "").strip()
             for r in aud
             if str(r.get("gen_entity_id") or "").strip() in allowed_gen_ids
+            and not _is_readings_audio_gcs_path(str(r.get("gcs_path") or ""))
+        }
+        readings_audio_gen_ids = {
+            str(r.get("gen_entity_id") or "").strip()
+            for r in aud
+            if str(r.get("gen_entity_id") or "").strip() in allowed_gen_ids
+            and _is_readings_audio_gcs_path(str(r.get("gcs_path") or ""))
         }
 
         # PDF : existence objet GCS (best-effort)
@@ -1949,7 +2262,13 @@ def render_sunday() -> None:
             has_text = bool(str((g or {}).get("text_gcs_path") or "").strip())
             gen_id = str((g or {}).get("entity_id") or "").strip()
             has_audio = bool(gen_id and gen_id in audio_gen_ids)
-            out[ds] = {"text": has_text, "audio": has_audio, "pdf": (ds in pdf_exists)}
+            has_readings_audio = bool(gen_id and gen_id in readings_audio_gen_ids)
+            out[ds] = {
+                "text": has_text,
+                "audio": has_audio,
+                "pdf": (ds in pdf_exists),
+                "readings_audio": has_readings_audio,
+            }
         return out
 
     # Mini-calendrier HTML : dimanches encerclés si contenu déjà présent
@@ -1985,7 +2304,12 @@ def render_sunday() -> None:
                     ds = d.isoformat()
                     st0 = st_map.get(ds) or {}
                     is_sun = d.weekday() == 6
-                    has_any = bool(st0.get("text") or st0.get("audio") or st0.get("pdf"))
+                    has_any = bool(
+                        st0.get("text")
+                        or st0.get("audio")
+                        or st0.get("pdf")
+                        or st0.get("readings_audio")
+                    )
                     ring = "lv-ring" if (in_month and is_sun and has_any) else ("lv-sun" if (in_month and is_sun) else "")
                     muted = "lv-muted" if not in_month else ""
                     # Clique sur un dimanche avec contenu → charge ce dimanche (comme si sélectionné au date_input).
@@ -2183,6 +2507,8 @@ def render_sunday() -> None:
     bundle_audio: tuple[bytes, str] | None = None
     bundle_synth_text: str | None = None
     bundle_audio_gcs_path: str | None = None
+    bundle_readings_audio: tuple[bytes, str] | None = None
+    bundle_readings_gcs_path: str | None = None
     bundle_from_disk = False
     if cfg.gcp_service_account and cfg.gsheet_id and cfg.gcs_bucket_name:
         try:
@@ -2190,6 +2516,9 @@ def render_sunday() -> None:
             if gcs_top is None:
                 gcs_top = build_gcs_client(cfg.gcp_service_account)
             bundle_audio, bundle_synth_text, bundle_audio_gcs_path = _fetch_existing_sunday_bundle(
+                gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
+            )
+            bundle_readings_audio, bundle_readings_gcs_path = _fetch_existing_readings_audio(
                 gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
             )
             if bundle_audio or (bundle_synth_text or "").strip():
@@ -2202,6 +2531,7 @@ def render_sunday() -> None:
                 )
         except Exception:
             bundle_audio, bundle_synth_text, bundle_audio_gcs_path = None, None, None
+            bundle_readings_audio, bundle_readings_gcs_path = None, None
 
     if not bundle_audio and not (bundle_synth_text or "").strip():
         disk_bundle = load_sunday_bundle(date_str, zone)
@@ -2225,24 +2555,53 @@ def render_sunday() -> None:
 
     st.subheader("Identité du jour")
     with st.container():
-        # Trois formats : intro datée puis Pdf / Audio / Texte côte à côte (colonnes).
+        # Formats publiés : intro selon le nombre réel, puis Pdf / Audio synthèse / Texte (colonnes) + bloc lectures audio.
         has_pdf_fmt = bool(pdf_bytes_for_user)
         has_audio_fmt = bundle_audio is not None
         has_text_fmt = bool((bundle_synth_text or "").strip())
+        has_readings_fmt = bundle_readings_audio is not None
+        n_formats = sum([has_pdf_fmt, has_audio_fmt, has_text_fmt, has_readings_fmt])
         date_prep = html_escape(_french_weekday_day_month_year(date_str))
         # Teintes tirées du couple or / sépia (charte liturgique) : lisibles sur fond crème, distinctes du corps #342E29.
+        if n_formats <= 0:
+            intro_inner = (
+                f"<strong style=\"color:#6b5918;font-weight:600;\">Aucun support numérique</strong>"
+                f"<span style=\"color:#5f4f3a;\"> publié pour l’instant par "
+                f"<strong style=\"color:#6b5918;font-weight:600;\">{_jopai_mark_html()} LumenVia</strong>"
+                f" pour vous préparer</span>"
+                f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
+                f"<strong style=\"color:#584610;\">{date_prep}</strong>"
+                f" — les lectures textuelles figurent plus bas.</span>"
+            )
+        else:
+            cardinals = ("Un", "Deux", "Trois", "Quatre")
+            c = cardinals[n_formats - 1]
+            fmt_word = "format" if n_formats == 1 else "formats"
+            disp = "disponible" if n_formats == 1 else "disponibles"
+            prop = "proposé" if n_formats == 1 else "proposés"
+            intro_inner = (
+                f"<strong style=\"color:#6b5918;font-weight:600;\">{c} {fmt_word}</strong>"
+                f"<span style=\"color:#5f4f3a;\"> {disp} {prop} par "
+                f"<strong style=\"color:#6b5918;font-weight:600;\">{_jopai_mark_html()} LumenVia</strong>"
+                f" pour vous préparer</span>"
+                f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
+                f"<strong style=\"color:#584610;\">{date_prep}</strong>.</span>"
+            )
         st.markdown(
             f"<p style=\"font-size:clamp(0.95rem, 0.35vw + 0.94rem, 1.06rem);line-height:1.52;"
             f"text-align:center;text-wrap:balance;max-width:min(42rem,calc(100% - 0.75rem));"
-            f"margin:0 auto 0.85rem;color:#5f4f3a;\">"
-            f"<strong style=\"color:#6b5918;font-weight:600;\">Trois formats</strong>"
-            f"<span style=\"color:#5f4f3a;\"> disponibles proposé par "
-            f"<strong style=\"color:#6b5918;font-weight:600;\">{_jopai_mark_html()} LumenVia</strong>"
-            f" pour vous préparer</span>"
-            f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
-            f"<strong style=\"color:#584610;\">{date_prep}</strong>.</span></p>",
+            f"margin:0 auto 0.85rem;color:#5f4f3a;\">{intro_inner}</p>",
             unsafe_allow_html=True,
         )
+
+        if has_readings_fmt:
+            st.markdown(
+                "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.4;color:#5f4f3a;"
+                "font-size:0.95rem;\"><strong>Écouter les lectures</strong></p>",
+                unsafe_allow_html=True,
+            )
+            st.audio(bundle_readings_audio[0], format=bundle_readings_audio[1])
+
         col_pdf, col_audio, col_texte = st.columns([1, 1.25, 1], gap="medium")
         with col_pdf:
             if has_pdf_fmt:
@@ -2289,7 +2648,7 @@ def render_sunday() -> None:
                 else:
                     st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
 
-        if not has_pdf_fmt and not has_audio_fmt and not has_text_fmt:
+        if not has_pdf_fmt and not has_audio_fmt and not has_text_fmt and not has_readings_fmt:
             _synth_na_msg = (
                 "Pour le moment, **seules les lectures** du dimanche sont disponibles sur cette page : "
                 "la synthèse (texte et audio) réalisée avec l’aide de l’IA n’a pas encore été publiée.\n\n"
@@ -2328,14 +2687,7 @@ def render_sunday() -> None:
                     value=False,
                     key=f"pdf_force_regen_{date_str}",
                 )
-                allow_readings_only_pdf = st.checkbox(
-                    "Autoriser un PDF lectures seules (sans synthèse)",
-                    value=False,
-                    key=f"pdf_allow_readings_only_{date_str}",
-                    help="À utiliser uniquement si tu veux un PDF minimal (lectures), en attendant la synthèse.",
-                    disabled=has_any_synthesis,
-                )
-                can_build_pdf = bool(has_any_synthesis or allow_readings_only_pdf)
+                can_build_pdf = bool(has_any_synthesis)
                 if st.button("Préparer le PDF du dimanche (complet)", key=prep_key, disabled=not can_build_pdf):
                     ov_pdf = loading_overlay("Préparation du PDF (couverture + lectures + synthèse)…")
                     try:
@@ -2355,6 +2707,16 @@ def render_sunday() -> None:
                             )
                             if signed:
                                 aud_url = signed
+                        readings_pdf_cover = None
+                        if bundle_readings_gcs_path:
+                            try:
+                                readings_pdf_cover = _gcs_signed_url(
+                                    gcs=gcs_top,
+                                    bucket_name=str(cfg.gcs_bucket_name).strip(),
+                                    path=bundle_readings_gcs_path,
+                                ) or None
+                            except Exception:
+                                readings_pdf_cover = None
                         synth_for_pdf = bundle_synth_text if has_any_synthesis else ""
                         if not include_catechese_pdf:
                             synth_for_pdf = _strip_catechese_bridge(synth_for_pdf)
@@ -2413,6 +2775,7 @@ def render_sunday() -> None:
                             synthesis_text=synth_for_pdf,
                             audio_listen_url=aud_url,
                             audio_listen_note=aud_note,
+                            audio_readings_listen_url=readings_pdf_cover,
                             about_markdown=_ABOUT_MARKDOWN,
                             back_cover_image_bytes=back_cover_b,
                             accent_hex=_liturgical_accent_hex(getattr(identity, "couleur", None)),
@@ -2460,36 +2823,99 @@ def render_sunday() -> None:
                 key=f"adm_sunday_catech_{date_str}",
             )
             auto_pdf = st.checkbox(
-                "Générer aussi le PDF dans la foulée (peut prendre plus de temps)",
+                "Inclure aussi le fascicule du dimanche au format PDF",
                 value=False,
                 key=f"adm_sunday_auto_pdf_{date_str}",
+                help="À la fin d’une régénération complète, produit aussi le PDF et l’envoie sur Cloud.",
+            )
+            audio_readings_gen = st.checkbox(
+                "Audio des lectures",
+                value=True,
+                key=f"adm_sunday_audio_readings_{date_str}",
+                help="Fichier distinct AudioLectures/… rattaché à la même génération que la synthèse.",
             )
             debug = st.toggle("Mode debug", value=False, key=f"adm_sunday_debug_{date_str}")
+            st.caption(
+                "« Compléter les manquants » ajoute seulement ce qui manque encore sur Cloud, selon les cases "
+                "**Audio des lectures** et **fascicule PDF** — sans refaire la synthèse IA. "
+                "« Tout régénérer (long) » relance Vertex + audios ; prévoir plusieurs minutes."
+            )
             if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
                 st.warning("Configuration incomplète (service account / gsheet_id / bucket). Synthèse indisponible.")
-            elif st.button(
-                "Régénérer la synthèse et l’audio" if already_has_bundle else "Générer la synthèse et l’audio",
-                type="primary",
-                key=f"adm_sunday_gen_{date_str}",
-            ):
-                overlay = loading_overlay("LumenVia prépare la synthèse et l’audio…")
-                try:
-                    _run_generate_sunday_flow(
-                        _overlay=overlay,
-                        identity=identity,
-                        texts=texts,
-                        zone=zone,
-                        total_words=total_words,
-                        pct=int(pct or 20),
-                        include_takeaways=bool(include_takeaways),
-                        include_catechese_bridge=bool(include_catechese_bridge_gen),
-                        generate_pdf=bool(auto_pdf),
-                        debug=bool(debug),
-                        cfg=cfg,
+            else:
+                col_inc, col_full = st.columns(2)
+                with col_inc:
+                    inc_clicked = st.button(
+                        "Compléter les manquants",
+                        type="primary",
+                        key=f"adm_sunday_incremental_{date_str}",
+                        help="Audio des lectures (si case cochée) et/ou fascicule PDF (si case fascicule cochée), "
+                        "uniquement si absents sur Cloud — synthèse déjà enregistrée.",
                     )
-                    st.rerun()
-                finally:
-                    overlay.empty()
+                with col_full:
+                    full_clicked = st.button(
+                        "Tout régénérer (long)",
+                        type="secondary",
+                        key=f"adm_sunday_full_{date_str}",
+                        help="Nouvelle synthèse Vertex, audio synthèse, options ci-dessous — plusieurs minutes.",
+                    )
+                if inc_clicked:
+                    gcs_inc = gcs_top
+                    if gcs_inc is None:
+                        try:
+                            gcs_inc = build_gcs_client(cfg.gcp_service_account)
+                        except Exception as ex:
+                            st.error(f"Connexion GCS impossible : {ex}")
+                            gcs_inc = None
+                    if gcs_inc:
+                        overlay_inc = loading_overlay("Complément des contenus manquants…")
+                        try:
+                            gs_inc = build_gspread_client(cfg.gcp_service_account)
+                            include_cat_state = bool(
+                                st.session_state.get(f"pdf_catechese_{date_str}", True)
+                            )
+                            _run_incremental_sunday_outputs(
+                                cfg=cfg,
+                                gs=gs_inc,
+                                gcs=gcs_inc,
+                                identity=identity,
+                                texts=texts,
+                                zone=zone,
+                                bundle_synth_text=bundle_synth_text,
+                                bundle_audio_gcs_path=bundle_audio_gcs_path,
+                                bundle_readings_gcs_path=bundle_readings_gcs_path,
+                                include_catechese_pdf=include_cat_state,
+                                also_pdf_if_missing=bool(
+                                    st.session_state.get(f"adm_sunday_auto_pdf_{date_str}", False)
+                                ),
+                                also_readings_if_missing=bool(
+                                    st.session_state.get(f"adm_sunday_audio_readings_{date_str}", True)
+                                ),
+                                pdf_key=pdf_key,
+                            )
+                            st.rerun()
+                        finally:
+                            overlay_inc.empty()
+                if full_clicked:
+                    overlay = loading_overlay("LumenVia régénère la synthèse et les audios (long)…")
+                    try:
+                        _run_generate_sunday_flow(
+                            _overlay=overlay,
+                            identity=identity,
+                            texts=texts,
+                            zone=zone,
+                            total_words=total_words,
+                            pct=int(pct or 20),
+                            include_takeaways=bool(include_takeaways),
+                            include_catechese_bridge=bool(include_catechese_bridge_gen),
+                            generate_pdf=bool(auto_pdf),
+                            generate_readings_audio=bool(audio_readings_gen),
+                            debug=bool(debug),
+                            cfg=cfg,
+                        )
+                        st.rerun()
+                    finally:
+                        overlay.empty()
 
     fete_raw = (identity.fete or "").strip() or (_jour_liturgique(identity) or "").strip()
     fete_line = _liturgy_display_label(fete_raw) if fete_raw else "—"
@@ -2520,6 +2946,226 @@ def render_sunday() -> None:
     render_liturgy_block("Évangile", texts.evangile)
 
 
+def _run_incremental_sunday_outputs(
+    *,
+    cfg: object,
+    gs: object,
+    gcs: object,
+    identity: object,
+    texts: object,
+    zone: str,
+    bundle_synth_text: str | None,
+    bundle_audio_gcs_path: str | None,
+    bundle_readings_gcs_path: str | None,
+    include_catechese_pdf: bool,
+    also_pdf_if_missing: bool,
+    also_readings_if_missing: bool,
+    pdf_key: str,
+) -> None:
+    """Sans nouvelle synthèse Vertex : audio des lectures (TTS) et/ou fascicule PDF si absents sur Cloud."""
+    date_str = str(identity.date)
+    gen_row = _latest_generation_row_for_sunday(gs=gs, cfg=cfg, date_str=date_str, zone=zone)
+    if not gen_row:
+        st.error(
+            "Aucune synthèse enregistrée pour cette date. Utilise d’abord « Tout régénérer (long) »."
+        )
+        return
+    gen_eid = str(gen_row.get("entity_id") or "").strip()
+    if not gen_eid:
+        st.error("Enregistrement de génération invalide (identifiant manquant).")
+        return
+
+    synth = (bundle_synth_text or "").strip()
+    if not synth:
+        tp = str(gen_row.get("text_gcs_path") or "").strip()
+        if tp:
+            try:
+                synth = (
+                    download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=tp)
+                    .decode("utf-8", errors="replace")
+                    .strip()
+                )
+            except Exception as ex:
+                st.warning(f"Lecture du texte de synthèse sur Cloud impossible : {ex}")
+                synth = ""
+
+    done: list[str] = []
+    readings_path_this_run: str | None = None
+
+    if (
+        also_readings_if_missing
+        and not _has_readings_audio_for_gen(gs=gs, cfg=cfg, gen_entity_id=gen_eid)
+    ):
+        readings_plain = _plain_readings_for_tts(texts)
+        if not readings_plain.strip():
+            st.warning("Texte des lectures vide — impossible de produire l’audio des lectures.")
+        else:
+            try:
+                with st.spinner("Audio des lectures (TTS)…"):
+                    templates_ia: dict[str, str] = {}
+                    voix_r: list[dict] = []
+                    try:
+                        templates_ia = _load_prompt_templates_cached(
+                            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+                            service_account_fingerprint=_service_account_fingerprint(
+                                getattr(cfg, "gcp_service_account", {}) or {}
+                            ),
+                        )
+                        voix_r = _load_voix_rules_cached(
+                            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+                            service_account_fingerprint=_service_account_fingerprint(
+                                getattr(cfg, "gcp_service_account", {}) or {}
+                            ),
+                        )
+                    except Exception:
+                        templates_ia = {}
+                        voix_r = []
+                    voice_read = pick_voice_name(
+                        voix_r,
+                        cible="lectures",
+                        couleur=getattr(identity, "couleur", None),
+                        periode=getattr(identity, "periode", None),
+                    )
+                    readings_tts = _compose_readings_tts_text(body=readings_plain, templates=templates_ia)
+                    r_bytes, r_mime, r_ext = _tts_gemini_chunked_bytes(
+                        cfg=cfg, text=readings_tts, voice_name=voice_read
+                    )
+                readings_path = f"AudioLectures/{identity.date}/{gen_eid}.{r_ext}"
+                upload_bytes(
+                    gcs=gcs,
+                    bucket_name=cfg.gcs_bucket_name,
+                    path=readings_path,
+                    data=r_bytes,
+                    content_type=r_mime,
+                )
+                append_immutable_row(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="audio",
+                    values_by_col={
+                        "entity_id": sha256(f"audio_lect|{gen_eid}|{readings_path}".encode("utf-8")).hexdigest()[:24],
+                        "gen_entity_id": gen_eid,
+                        "voice": voice_read,
+                        "format": r_ext,
+                        "gcs_path": readings_path,
+                    },
+                )
+                readings_path_this_run = readings_path
+                done.append("audio des lectures")
+            except Exception as ex:
+                st.warning(f"Audio des lectures non publié : {ex}")
+
+    fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+    bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
+    need_pdf = bool(
+        also_pdf_if_missing
+        and synth
+        and bucket
+        and not blob_exists(gcs=gcs, bucket_name=bucket, path=fasc_path)
+    )
+    if need_pdf:
+        try:
+            with st.spinner("Fascicule PDF sur Cloud…"):
+                img_b = _fetch_liturgy_illustration_full_bytes(gcs=gcs, cfg=cfg, date_str=date_str)
+                aud_url, aud_note = _public_app_listen_url(date_str=date_str)
+                p_aud = (bundle_audio_gcs_path or "").strip() or _synthesis_audio_gcs_path_for_gen(
+                    gs=gs, cfg=cfg, gen_entity_id=gen_eid
+                )
+                if p_aud:
+                    signed = _gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_aud)
+                    if signed:
+                        aud_url = signed
+                synth_for_pdf = synth
+                if not include_catechese_pdf:
+                    synth_for_pdf = _strip_catechese_bridge(synth_for_pdf)
+                back_cover_b = None
+                try:
+                    y = str(date_str)[:4]
+                    back_cover_b = download_bytes(
+                        gcs=gcs,
+                        bucket_name=bucket,
+                        path=f"Images/thumbs/montage_{y}.png",
+                    )
+                except Exception:
+                    back_cover_b = None
+                semaine_psautier = (getattr(identity, "semaine", None) or "").strip()
+                line1 = _liturgy_display_label(
+                    (getattr(identity, "fete", None) or "").strip()
+                    or (_jour_liturgique(identity) or "").strip()
+                    or _liturgy_cover_pdf_title(identity)
+                )
+                line2 = ""
+                if semaine_psautier and ("psautier" in semaine_psautier.lower()):
+                    lbl = _liturgy_display_label(semaine_psautier).strip()
+                    line2 = f"({lbl})" if lbl else ""
+                week_title_pdf = (line1 + ("\n" + line2 if line2 else "")).strip()
+                highlight_idx = None
+                try:
+                    manifest = json.loads(
+                        Path("data/manifests/illustration_pipeline.json").read_text(encoding="utf-8")
+                    )
+                    targets = manifest.get("targets") or []
+                    year = str(date_str)[:4]
+                    year_targets = [t for t in targets if str(t.get("date") or "").startswith(year)]
+                    year_dates = [str(t.get("date") or "")[:10] for t in year_targets]
+                    if str(date_str)[:10] in year_dates:
+                        highlight_idx = int(year_dates.index(str(date_str)[:10]))
+                except Exception:
+                    highlight_idx = None
+                rp_for_cover = (readings_path_this_run or "").strip() or (
+                    (bundle_readings_gcs_path or "").strip()
+                )
+                readings_pdf_signed = None
+                if rp_for_cover:
+                    try:
+                        readings_pdf_signed = _gcs_signed_url(
+                            gcs=gcs, bucket_name=bucket, path=rp_for_cover
+                        ) or None
+                    except Exception:
+                        readings_pdf_signed = None
+                pdf_b = build_liturgy_sunday_pdf_bytes(
+                    image_bytes=img_b,
+                    week_title=week_title_pdf,
+                    date_line=_french_long_date_label(date_str),
+                    meta_line=(
+                        f"{_liturgy_display_label(getattr(identity, 'periode', None))} · "
+                        f"Cycle {_cycle_year_display(getattr(identity, 'annee', None))} · "
+                        f"{_liturgy_display_label(getattr(identity, 'couleur', None))}"
+                    ),
+                    premiere_lecture=texts.premiere_lecture,
+                    psaume=texts.psaume,
+                    deuxieme_lecture=texts.deuxieme_lecture,
+                    evangile=texts.evangile,
+                    synthesis_text=synth_for_pdf,
+                    audio_listen_url=aud_url,
+                    audio_listen_note=aud_note,
+                    audio_readings_listen_url=readings_pdf_signed,
+                    about_markdown=_ABOUT_MARKDOWN,
+                    back_cover_image_bytes=back_cover_b,
+                    accent_hex=_liturgical_accent_hex(getattr(identity, "couleur", None)),
+                    back_cover_highlight_cell_index=highlight_idx,
+                )
+                upload_bytes(
+                    gcs=gcs,
+                    bucket_name=bucket,
+                    path=fasc_path,
+                    data=pdf_b,
+                    content_type="application/pdf",
+                )
+                st.session_state[pdf_key] = pdf_b
+                done.append("fascicule PDF")
+        except Exception as ex:
+            st.warning(f"Fascicule PDF non produit : {ex}")
+
+    if not done:
+        st.info(
+            "Rien à compléter : l’audio des lectures et le fascicule PDF sont déjà présents "
+            "(selon les cases et le stockage Cloud)."
+        )
+    else:
+        st.success("Complété : " + " · ".join(done) + ".")
+
+
 def _run_generate_sunday_flow(
     *,
     _overlay: object,
@@ -2531,6 +3177,7 @@ def _run_generate_sunday_flow(
     include_takeaways: bool,
     include_catechese_bridge: bool,
     generate_pdf: bool,
+    generate_readings_audio: bool,
     debug: bool,
     cfg: object,
 ) -> None:
@@ -2546,6 +3193,15 @@ def _run_generate_sunday_flow(
         )
     except Exception:
         templates = {}
+
+    voix_rows: list[dict] = []
+    try:
+        voix_rows = _load_voix_rules_cached(
+            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+            service_account_fingerprint=_service_account_fingerprint(getattr(cfg, "gcp_service_account", {}) or {}),
+        )
+    except Exception:
+        voix_rows = []
 
     instructions_struct = templates.get("instructions_base_md") or Path("data/instructions_ia.md").read_text(
         encoding="utf-8"
@@ -2733,6 +3389,32 @@ def _run_generate_sunday_flow(
         },
     )
 
+    voice_syn_res = resolve_voice(
+        voix_rows,
+        cible="synthese",
+        couleur=getattr(identity, "couleur", None),
+        periode=getattr(identity, "periode", None),
+    )
+    voice_syn = str(voice_syn_res["voice"])
+    perf["voice_synthese"] = voice_syn
+    perf["voice_synthese_rule_id"] = ((voice_syn_res.get("rule") or {}).get("#ID") or "")
+    perf["voice_synthese_fallback"] = bool(voice_syn_res.get("fallback"))
+    if debug:
+        if voice_syn_res.get("fallback"):
+            st.warning(
+                f"Aucune règle Voix_Audio ne matche cette synthèse — fallback voix par défaut **{voice_syn}**."
+            )
+        else:
+            st.caption(
+                f"Voix synthèse retenue : **{voice_syn}** "
+                f"(règle `#ID {perf['voice_synthese_rule_id']}`, score {voice_syn_res.get('score')})."
+            )
+    tts_payload = _compose_synthesis_tts_text(
+        body=gen.text or "",
+        templates=templates,
+        periode=getattr(identity, "periode", None),
+    )
+
     audio_route = "vertex"
     with st.spinner("Synthèse audio (Vertex AI)…"):
         try:
@@ -2744,8 +3426,8 @@ def _run_generate_sunday_flow(
                     "gemini-2.5-flash",
                     "gemini-2.0-flash",
                 ],
-                text=gen.text,
-                voice_name="Kore",
+                text=tts_payload,
+                voice_name=voice_syn,
             )
             perf["audio_vertex_s"] = round(time.perf_counter() - at0, 3)
         except Exception as e:
@@ -2757,7 +3439,7 @@ def _run_generate_sunday_flow(
                 audio_route = "gemini_api_chunked"
                 ft0 = time.perf_counter()
                 tts_api = GeminiTtsApiClient(api_key=cfg.gemini_api_key)
-                chunks = _chunk_text_for_tts(gen.text, max_chars=1400)
+                chunks = _chunk_text_for_tts(tts_payload, max_chars=1400)
                 perf["tts_chunks"] = len(chunks)
                 wav_parts_by_i: dict[int, bytes] = {}
                 tts_chunk_total_s = 0.0
@@ -2768,7 +3450,7 @@ def _run_generate_sunday_flow(
                     tts_audio = tts_api.generate_audio(
                         model="gemini-2.5-flash-preview-tts",
                         text=ch,
-                        voice_name="Kore",
+                        voice_name=voice_syn,
                     )
                     elapsed = time.perf_counter() - ct0
                     b, mt, _ = normalize_audio_bytes(audio_bytes=tts_audio.audio_bytes, mime_type=tts_audio.mime_type)
@@ -2842,7 +3524,7 @@ def _run_generate_sunday_flow(
         values_by_col={
             "entity_id": sha256(f"audio|{gen_entity_id}|{audio_path}".encode("utf-8")).hexdigest()[:24],
             "gen_entity_id": row_gen["entity_id"],
-            "voice": "Kore",
+            "voice": voice_syn,
             "format": audio_ext,
             "gcs_path": audio_path,
         },
@@ -2855,6 +3537,72 @@ def _run_generate_sunday_flow(
         audio_bytes=audio_bytes_norm,
         audio_mime=audio_mime_norm,
     )
+
+    readings_cover_signed: str | None = None
+    if generate_readings_audio:
+        readings_plain = _plain_readings_for_tts(texts)
+        if readings_plain.strip():
+            try:
+                with st.spinner("LumenVia génère l’audio des lectures (AELF)…"):
+                    voice_read_res = resolve_voice(
+                        voix_rows,
+                        cible="lectures",
+                        couleur=getattr(identity, "couleur", None),
+                        periode=getattr(identity, "periode", None),
+                    )
+                    voice_read = str(voice_read_res["voice"])
+                    perf["voice_lectures"] = voice_read
+                    perf["voice_lectures_rule_id"] = ((voice_read_res.get("rule") or {}).get("#ID") or "")
+                    perf["voice_lectures_fallback"] = bool(voice_read_res.get("fallback"))
+                    if debug:
+                        if voice_read_res.get("fallback"):
+                            st.warning(
+                                f"Aucune règle Voix_Audio (lectures) ne matche — fallback **{voice_read}**."
+                            )
+                        else:
+                            st.caption(
+                                f"Voix lectures retenue : **{voice_read}** "
+                                f"(règle `#ID {perf['voice_lectures_rule_id']}`)."
+                            )
+                    readings_tts = _compose_readings_tts_text(body=readings_plain, templates=templates)
+                    r_bytes, r_mime, r_ext = _tts_gemini_chunked_bytes(
+                        cfg=cfg, text=readings_tts, voice_name=voice_read
+                    )
+                readings_path = f"AudioLectures/{identity.date}/{gen_entity_id}.{r_ext}"
+                upload_bytes(
+                    gcs=gcs,
+                    bucket_name=cfg.gcs_bucket_name,
+                    path=readings_path,
+                    data=r_bytes,
+                    content_type=r_mime,
+                )
+                append_immutable_row(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="audio",
+                    values_by_col={
+                        "entity_id": sha256(f"audio_lect|{gen_entity_id}|{readings_path}".encode("utf-8")).hexdigest()[
+                            :24
+                        ],
+                        "gen_entity_id": row_gen["entity_id"],
+                        "voice": voice_read,
+                        "format": r_ext,
+                        "gcs_path": readings_path,
+                    },
+                )
+                try:
+                    readings_cover_signed = (
+                        _gcs_signed_url(
+                            gcs=gcs,
+                            bucket_name=str(cfg.gcs_bucket_name).strip(),
+                            path=readings_path,
+                        )
+                        or None
+                    )
+                except Exception:
+                    readings_cover_signed = None
+            except Exception as ex:
+                st.warning(f"Audio des lectures non publié (synthèse enregistrée quand même) : {ex}")
 
     # Optimisation : les downloads de vérification (Cloud → UI) sont coûteux.
     # On ne les fait que si debug est activé.
@@ -2941,6 +3689,7 @@ def _run_generate_sunday_flow(
                 synthesis_text=gen.text,
                 audio_listen_url=aud_url,
                 audio_listen_note=aud_note,
+                audio_readings_listen_url=readings_cover_signed,
                 about_markdown=_ABOUT_MARKDOWN,
                 back_cover_image_bytes=back_cover_b,
                 accent_hex=_liturgical_accent_hex(getattr(identity, "couleur", None)),
@@ -3491,15 +4240,17 @@ En tant que premier passager de cette aventure, votre retour nous est précieux 
         )
         standout = st.text_area(
             "Qu'est-ce qui vous a le plus touché ou semblé le plus utile dans cet envoi ?",
-            max_chars=480,
+            max_chars=4000,
+            height=180,
             key="fb_standout",
         )
         wish = st.text_area(
             "Une seule chose à améliorer ou à ajouter (musique d'ambiance, texte plus court, …) ?",
-            max_chars=480,
+            max_chars=4000,
+            height=180,
             key="fb_wish",
         )
-        submitted = st.form_submit_button("Envoyer mon avis")
+        submitted = st.form_submit_button("Envoyer mon avis", use_container_width=True)
 
     if submitted:
         em_clean = str(em_in or "").strip().lower()
@@ -3669,7 +4420,9 @@ def render_join() -> None:
                         key="acct_edit_ph",
                         placeholder="+33612345678",
                     )
-                    save_pf = st.form_submit_button("Enregistrer mes informations", type="primary")
+                    save_pf = st.form_submit_button(
+                        "Enregistrer mes informations", type="primary", use_container_width=True
+                    )
                 if save_pf:
                     ph_ok = True
                     if e_ph.strip():
@@ -6115,7 +6868,7 @@ def render_admin_login() -> None:
     with st.form("admin_login_form"):
         login_id = st.text_input("Identifiant", key="adm_login_id", autocomplete="username")
         pwd = st.text_input("Mot de passe", type="password", key="adm_login_pwd", autocomplete="current-password")
-        submitted = st.form_submit_button("Connexion", type="primary")
+        submitted = st.form_submit_button("Connexion", type="primary", use_container_width=True)
     if submitted:
         if login_id.strip().lower() == login_ok and pwd == pwd_ok:
             st.session_state.admin_authenticated = True
@@ -6165,15 +6918,42 @@ Le manifeste est construit **pour une année civile** (script étape 2 avec `--y
     render_admin_illustration_gen_panel(data=data, manifest_path=manifest_path)
 
 
-def render_admin_test_resources() -> None:
-    st.title("Admin - diagnostique des ressources")
-    cfg = load_config()
-    st.write("Cette page sert à valider l’accès aux ressources configurées dans `secrets.toml`.")
+_AUDIO_PROMPT_KEYS: tuple[str, ...] = (
+    "audio_style_default",
+    "audio_style_paques",
+    "audio_style_careme",
+    "audio_style_lectures",
+)
 
-    if not cfg.gcp_service_account:
-        st.error("gcp_service_account manquant dans secrets.")
-        return
 
+def _render_admin_default_behavior_summary() -> None:
+    """Encart « si je ne touche à rien » : montre le pipeline effectif par défaut."""
+    st.markdown(
+        """
+**Texte de la synthèse** *(inchangé)* :  
+socle `instructions_base_md` (Sheets) + surcouche selon les options cochées
+(`overlay_takeaways` / `overlay_no_takeaways` / `overlay_catechese_bridge`) + secret sauce.
+
+**Audio de la synthèse** :  
+préfixe `audio_style_default` (lu mais non visible) + texte de la synthèse, lu par la voix
+résolue dans **`Voix_Audio`** :
+
+| Couleur / Temps du dimanche | Voix retenue |
+|---|---|
+| Couleur **violet** (Avent / Carême) | **Sulafat** (douce) |
+| Couleur **rouge** (Pentecôte, martyrs…) | **Sadachbia** (vibrante) |
+| Temps **pascal** (sans couleur spéciale) | **Laomedeia** (tonique) |
+| Temps **Carême** (sans couleur spéciale) | **Vindemiatrix** (douce) + surcouche `audio_style_careme` |
+| Tout le reste | **Achird** (chaleureuse) |
+
+**Audio des lectures AELF** *(option à cocher au moment de la génération)* :  
+préfixe `audio_style_lectures` + 4 lectures, voix **Charon** (lecteur).
+"""
+    )
+
+
+def _render_admin_infra_diagnostic(*, cfg: object) -> None:
+    """Identité projet + Bucket GCS + Google Sheet + dépendances runtime."""
     st.subheader("Identité / projet")
     sa = dict(cfg.gcp_service_account or {})
     sa_email = str(sa.get("client_email") or "").strip()
@@ -6272,8 +7052,10 @@ def render_admin_test_resources() -> None:
     except Exception as e:
         st.warning(f"openpyxl non importable dans CE runtime Streamlit : {e}")
 
-    st.divider()
-    st.subheader("IA : Gemini API TTS et VertexAI")
+
+
+def _render_admin_ia_smoke_tests(*, cfg: object) -> None:
+    """Smoke tests : Gemini TTS court + Vertex texte court (avec sélecteur de voix)."""
     st.caption(
         "VertexAI est la voie principale (via compte de service). "
         "La Gemini API (clé `GEMINI_API_KEY`) sert de **fallback** pour la TTS si Vertex refuse l’AUDIO (allowlist) "
@@ -6284,6 +7066,26 @@ def render_admin_test_resources() -> None:
         if not cfg.gemini_api_key:
             st.info("Gemini API : non configurée (`GEMINI_API_KEY` manquante).")
         else:
+            _tnames = gemini_tts_voice_names_ordered()
+            _tmap, _ = load_gemini_tts_voice_catalog()
+            try:
+                _tix = _tnames.index("Achird")
+            except ValueError:
+                _tix = 0
+            test_voice_pick = st.selectbox(
+                "Voix pour le test TTS",
+                options=_tnames + ["__custom__"],
+                index=_tix,
+                format_func=lambda x: (_tmap.get(x) if x != "__custom__" else "Autre — saisie libre"),
+                key="adm_smoke_tts_voice",
+            )
+            test_voice_custom = ""
+            if test_voice_pick == "__custom__":
+                test_voice_custom = st.text_input("Nom de voix Gemini", key="adm_smoke_tts_voice_custom").strip()
+            test_voice_use = (
+                test_voice_custom if test_voice_pick == "__custom__" else str(test_voice_pick or "").strip()
+            ) or DEFAULT_GEMINI_TTS_VOICE
+
             if st.button("Tester Gemini TTS (court)", key="adm_test_gemini_tts"):
                 ov = loading_overlay("Test Gemini TTS…")
                 try:
@@ -6294,7 +7096,7 @@ def render_admin_test_resources() -> None:
                     res = cli.generate_audio(
                         model="gemini-2.5-flash-preview-tts",
                         text="Test audio LumenVia. Un, deux, trois.",
-                        voice_name="Kore",
+                        voice_name=test_voice_use,
                     )
                     dt = time.perf_counter() - t0
                     st.success(f"Gemini TTS OK — {len(res.audio_bytes)} octets en {dt:.2f}s ({res.mime_type})")
@@ -6324,236 +7126,503 @@ def render_admin_test_resources() -> None:
             finally:
                 ov.empty()
 
-    st.caption(
-        "Journal produit / décisions d’architecture : menu **Administration → Cahier des charges**."
-    )
 
-    st.divider()
-    st.divider()
-    st.subheader("Mes prompts à l’IA (secret sauce)")
-    st.caption(
-        "Le prompt final est composé de deux parties : "
-        "A) un **socle + surcouches** versionnés dans Sheets (`Paramètres_IA`) ; "
-        "B) une partie confidentielle (secret sauce) dans `st.secrets` (`IA_SECRET_SAUCE_MD`).\n\n"
-        "Règles importantes :\n"
-        "- **Append-only** : chaque modification crée une nouvelle ligne (Version + 1).\n"
-        "- **Par Clé_Prompt, ce n’est pas cumulatif** : une seule version est **effective** (la dernière marquée Actif).\n"
-        "- **Cumulatif entre clés uniquement si le code les assemble** : par exemple, `instructions_base_md` (socle) + "
-        "`overlay_takeaways` / `overlay_no_takeaways` (selon options) + `overlay_catechese_bridge` (si coché). "
-        "Ajouter une nouvelle Clé_Prompt ne change rien tant qu’elle n’est pas consommée dans `_build_prompt()`."
-    )
 
-    # Secret sauce : on n’affiche jamais le contenu en clair dans l’admin, seulement l’état.
+def _render_admin_voix_audio_section(*, cfg: object, gs: object) -> None:
+    """Affichage et édition des règles `Voix_Audio` (VOIX) — sans `st.dataframe`."""
+    st.caption(
+        "Règles append-only : **Cible** (`synthese`, `lectures`, `*`), **Couleur**, **Temps liturgique** (`pascal`, `careme`, … ou `*`). "
+        "La règle la plus **spécifique** l’emporte. Catalogue des voix : `data/gemini_tts_voices.json` (à jour avec la doc Google)."
+    )
     try:
-        ss = str(st.secrets.get("IA_SECRET_SAUCE_MD") or "").strip()
-    except Exception:
-        ss = ""
-    if ss:
-        st.success(f"Secret sauce : configurée ({len(ss)} caractères).")
+        voix_all = fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="Voix_Audio",
+            limit=0,
+        )
+    except Exception as ex_v:
+        voix_all = []
+        st.warning(f"Lecture `Voix_Audio` impossible : {ex_v}")
+
+    voix_actifs = [r for r in voix_all if sheet_row_status_is_live(r.get("Statut"))]
+    voix_actifs.sort(key=lambda r: str(r.get("Date_Effet") or ""), reverse=True)
+
+    if voix_actifs:
+        def _md_cell(v: object) -> str:
+            s = str(v if v is not None else "").strip().replace("|", "\\|").replace("\n", " ")
+            return s or "—"
+
+        md_lines = [
+            "| Cible | Couleur | Temps liturgique | Voix | Description | Version | Date d'effet |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for r in voix_actifs[:80]:
+            md_lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _md_cell(r.get("Cible")),
+                        _md_cell(r.get("Couleur")),
+                        _md_cell(r.get("Temps_Liturgique")),
+                        f"**{_md_cell(r.get('Voix'))}**",
+                        _md_cell(r.get("Description")),
+                        _md_cell(r.get("Version")),
+                        _md_cell(r.get("Date_Effet")),
+                    ]
+                )
+                + " |"
+            )
+        st.markdown("\n".join(md_lines))
     else:
-        st.warning("Secret sauce : absente (`IA_SECRET_SAUCE_MD` non défini).")
+        st.info(
+            "Aucune règle **Actif** dans `Voix_Audio`. Lance `python .\\tools\\init_sheets_db.py` "
+            "ou ajoute une règle ci‑dessous."
+        )
 
-    with st.expander("Fallback local minimal (dépôt public) — `data/instructions_ia.md`", expanded=False):
-        instr_path = Path("data/instructions_ia.md")
-        if not instr_path.is_file():
-            st.warning(f"Fichier introuvable : `{instr_path.as_posix()}`.")
+    cat_map, cat_readme = load_gemini_tts_voice_catalog()
+
+    with st.expander("Tester la résolution voix (simulation)", expanded=False):
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            t_cible = st.selectbox(
+                "Cible",
+                options=["synthese", "lectures"],
+                key="adm_voix_test_cible",
+            )
+        with tc2:
+            t_couleur = st.selectbox(
+                "Couleur (du dimanche)",
+                options=["", "vert", "blanc", "rouge", "violet", "rose", "noir"],
+                format_func=lambda x: x or "(non précisée)",
+                key="adm_voix_test_couleur",
+                help="Couleur liturgique renvoyée par AELF pour le dimanche concerné.",
+            )
+        with tc3:
+            t_temps = st.selectbox(
+                "Temps liturgique",
+                options=["", "pascal", "careme", "avent", "noel", "ordinaire", "pentecote", "saint"],
+                format_func=lambda x: x or "(non précisé)",
+                key="adm_voix_test_temps",
+            )
+        t_date = st.date_input("Date d’effet (simulée)", value=date.today(), key="adm_voix_test_date")
+        res_test = resolve_voice(
+            voix_actifs,
+            cible=t_cible,
+            couleur=(t_couleur or None),
+            periode=(t_temps or None),
+            today=t_date,
+        )
+        voice_lab = cat_map.get(res_test["voice"], res_test["voice"])
+        if res_test.get("fallback"):
+            st.warning(
+                f"Aucune règle ne correspond → fallback **{res_test['voice']}** *(en dur dans le code)*."
+            )
         else:
-            st.code(instr_path.read_text(encoding="utf-8").strip()[:2000] or "", language="markdown")
-            st.caption("Ce fallback doit rester minimal dans le dépôt public (il ne doit pas contenir la matière du prompt).")
+            rule_id = (res_test.get("rule") or {}).get("#ID") or ""
+            st.success(
+                f"Voix retenue : **{voice_lab}** — règle `#ID {rule_id}` (score {res_test.get('score')})."
+            )
+            st.caption(
+                "Spécificité = +1 Cible · +2 Couleur · +2 Temps. Tie-break = Version desc, puis Date_Effet desc."
+            )
 
+    with st.expander("Ajouter une règle de voix", expanded=False):
+        voice_names = gemini_tts_voice_names_ordered()
+        try:
+            _def_voice_ix = voice_names.index("Achird")
+        except ValueError:
+            _def_voice_ix = 0
+        sel_voice = st.selectbox(
+            "Voix (catalogue)",
+            options=voice_names + ["__custom__"],
+            index=_def_voice_ix,
+            format_func=lambda x: (cat_map.get(x) if x != "__custom__" else "Autre — saisie libre"),
+            key="adm_voix_pick",
+        )
+        custom_voice = ""
+        if sel_voice == "__custom__":
+            custom_voice = st.text_input("Nom technique de la voix Gemini", value="", key="adm_voix_custom").strip()
+        voix_eff = custom_voice if sel_voice == "__custom__" else sel_voice
+
+        vc1, vc2, vc3 = st.columns(3)
+        with vc1:
+            v_cible = st.selectbox("Cible", options=["*", "synthese", "lectures"], key="adm_voix_cible")
+        with vc2:
+            v_couleur = st.selectbox(
+                "Couleur (du dimanche)",
+                options=["*", "vert", "blanc", "rouge", "violet", "rose", "noir"],
+                key="adm_voix_couleur",
+                help="Couleur liturgique. `*` = la règle s'applique quelle que soit la couleur.",
+            )
+        with vc3:
+            v_temps = st.selectbox(
+                "Temps liturgique",
+                options=[
+                    "*",
+                    "pascal",
+                    "careme",
+                    "avent",
+                    "noel",
+                    "ordinaire",
+                    "pentecote",
+                    "saint",
+                ],
+                key="adm_voix_temps",
+            )
+        v_desc = st.text_input("Description (interne)", value="", key="adm_voix_desc")
+        v_date = st.date_input("Date d’effet", value=date.today(), key="adm_voix_de")
+        if cat_readme:
+            st.caption(cat_readme[:280] + ("…" if len(cat_readme) > 280 else ""))
+
+        if st.button("Ajouter la règle (append-only)", key="adm_voix_save"):
+            if not voix_eff.strip():
+                st.error("Choisis une voix.")
+            else:
+                ov = loading_overlay("Enregistrement règle Voix_Audio…")
+                try:
+                    sh = gs.open_by_key(cfg.gsheet_id)
+                    import core.sheets_db as _sdb
+
+                    ws_v = sh.worksheet(_sdb._resolve_table_name(sh=sh, table="Voix_Audio"))  # noqa: SLF001
+                    hdr = ws_v.row_values(1)
+                    if not hdr:
+                        raise RuntimeError("Voix_Audio : header vide.")
+                    max_ver = 0
+                    for r in voix_all:
+                        try:
+                            max_ver = max(max_ver, int(str(r.get("Version") or "0").strip()))
+                        except Exception:
+                            pass
+                    next_ver = str(max_ver + 1)
+                    de = str(v_date)
+                    rid = sha256(
+                        f"voix|adm|{next_ver}|{voix_eff}|{v_cible}|{v_couleur}|{v_temps}|{de}".encode("utf-8")
+                    ).hexdigest()[:18]
+                    statut = "Actif"
+                    parts_concat = [rid, statut, next_ver, de, v_cible, v_couleur, v_temps, voix_eff.strip(), v_desc.strip()]
+                    concat = " | ".join(p.strip() for p in parts_concat if str(p).strip())
+                    row_map = {
+                        "#ID": rid,
+                        "Statut": statut,
+                        "Version": next_ver,
+                        "Date_Effet": de,
+                        "Cible": v_cible,
+                        "Couleur": v_couleur,
+                        "Temps_Liturgique": v_temps,
+                        "Voix": voix_eff.strip(),
+                        "Description": v_desc.strip(),
+                        "Concaténation": concat,
+                    }
+                    ws_v.append_rows([[row_map.get(c, "") for c in hdr]], value_input_option="RAW")
+                    st.success("Règle Voix_Audio enregistrée.")
+                    try:
+                        _load_voix_rules_cached.clear()  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    st.rerun()
+                finally:
+                    ov.empty()
+
+
+def _render_admin_prompts_editor_section(
+    *,
+    cfg: object,
+    gs: object,
+    rows: list[dict],
+    audio_only: bool,
+    section_key_suffix: str,
+) -> None:
+    """Éditeur de prompts MARPA (Sheets `Paramètres_IA`).
+
+    `audio_only=True` : restreint aux clés `audio_style_*` (Levier B).
+    `audio_only=False` : restreint aux clés *non* audio (socle + surcouches texte).
+    """
     if not (cfg.gsheet_id and cfg.gcp_service_account):
         st.info("Configure `gsheet_id` + `gcp_service_account` pour gérer les templates IA ici.")
-    else:
-        gs = build_gspread_client(cfg.gcp_service_account)
+        return
+
+    if not audio_only:
         try:
-            rows = fetch_records(
-                gspread_client=gs,
-                spreadsheet_id=cfg.gsheet_id,
-                table="Paramètres_IA",
-                limit=5000,
-            )
-        except Exception as e:
-            rows = []
-            st.warning(f"Lecture `Paramètres_IA` impossible : {e}")
+            ss = str(st.secrets.get("IA_SECRET_SAUCE_MD") or "").strip()
+        except Exception:
+            ss = ""
+        if ss:
+            st.success(f"Secret sauce : configurée ({len(ss)} caractères).")
+        else:
+            st.warning("Secret sauce : absente (`IA_SECRET_SAUCE_MD` non défini).")
 
-        # Admin : on affiche uniquement les templates effectivement Actifs (pivot “latest”),
-        # sans injecter des clés “théoriques” qui n’existent pas en base.
-        latest = pick_effective_templates(rows, allowed_keys=None)
-        existing_keys = sorted([k for k, v in latest.items() if (v.content_md or "").strip()])
-        # Libellés lisibles : on prend la Description de la ligne EFFECTIVE (pivot latest),
-        # pas “la première trouvée” dans l’historique (sinon incohérences visuelles).
-        def _norm0(v: object) -> str:
-            return str(v or "").strip()
+        with st.expander("Fallback local minimal (dépôt public) — `data/instructions_ia.md`", expanded=False):
+            instr_path = Path("data/instructions_ia.md")
+            if not instr_path.is_file():
+                st.warning(f"Fichier introuvable : `{instr_path.as_posix()}`.")
+            else:
+                st.code(instr_path.read_text(encoding="utf-8").strip()[:2000] or "", language="markdown")
+                st.caption("Ce fallback doit rester minimal dans le dépôt public (il ne doit pas contenir la matière du prompt).")
 
-        desc_by_key: dict[str, str] = {}
-        for k, eff in latest.items():
-            # retrouve la ligne correspondante dans rows pour récupérer Description
-            # (en priorité via #ID, sinon via (clé, version)).
-            chosen: str = ""
-            eff_id = _norm0(getattr(eff, "id", ""))
-            eff_ver = int(getattr(eff, "version", 0) or 0)
+    latest = pick_effective_templates(rows, allowed_keys=None)
+
+    def _is_audio_key(k: str) -> bool:
+        return k in _AUDIO_PROMPT_KEYS
+
+    def _wanted(k: str) -> bool:
+        return _is_audio_key(k) if audio_only else (not _is_audio_key(k))
+
+    existing_keys = sorted(
+        [k for k, v in latest.items() if (v.content_md or "").strip() and _wanted(k)]
+    )
+
+    def _norm0(v: object) -> str:
+        return str(v or "").strip()
+
+    desc_by_key: dict[str, str] = {}
+    for k, eff in latest.items():
+        if not _wanted(k):
+            continue
+        chosen: str = ""
+        eff_id = _norm0(getattr(eff, "id", ""))
+        eff_ver = int(getattr(eff, "version", 0) or 0)
+        for r in rows:
+            if _norm0(r.get("Clé_Prompt")) != k:
+                continue
+            rid = _norm0(r.get("#ID") or r.get("ID") or r.get("id"))
+            if eff_id and rid and rid == eff_id:
+                chosen = _norm0(r.get("Description"))
+                break
+        if not chosen:
             for r in rows:
                 if _norm0(r.get("Clé_Prompt")) != k:
                     continue
-                rid = _norm0(r.get("#ID") or r.get("ID") or r.get("id"))
-                if eff_id and rid and rid == eff_id:
-                    chosen = _norm0(r.get("Description"))
+                try:
+                    rv = int(_norm0(r.get("Version") or 0) or 0)
+                except Exception:
+                    rv = 0
+                if rv != eff_ver:
+                    continue
+                chosen = _norm0(r.get("Description"))
+                if chosen:
                     break
-            if not chosen:
-                for r in rows:
-                    if _norm0(r.get("Clé_Prompt")) != k:
-                        continue
-                    try:
-                        rv = int(_norm0(r.get("Version") or 0) or 0)
-                    except Exception:
-                        rv = 0
-                    if rv != eff_ver:
-                        continue
-                    chosen = _norm0(r.get("Description"))
-                    if chosen:
-                        break
-            if chosen:
-                desc_by_key[k] = chosen
+        if chosen:
+            desc_by_key[k] = chosen
 
-        def _fmt_key(k: str) -> str:
-            d = (desc_by_key.get(k) or _PROMPT_TEMPLATE_LABELS.get(k) or "").strip()
-            return f"{k} — {d}" if d else k
+    def _fmt_key(k: str) -> str:
+        d = (desc_by_key.get(k) or _PROMPT_TEMPLATE_LABELS.get(k) or "").strip()
+        return f"{k} — {d}" if d else k
 
-        create_new = st.toggle("Créer un nouveau prompt (socle / surcouche)", value=False, key="adm_tpl_create_new")
-        if create_new:
-            picked = st.text_input(
-                "Clé_Prompt (identifiant technique stable)",
-                value="",
-                key="adm_tpl_new_key",
-                help="Exemples : `instructions_base_md` (socle), `overlay_takeaways` (surcouche), `retry_hardened_prefix` (préfixe de relance). "
-                "Évite les espaces ; utilise des minuscules + underscores.",
-            ).strip()
+    suffix = section_key_suffix
+    create_new = st.toggle(
+        "Créer un nouveau prompt", value=False, key=f"adm_tpl_create_new_{suffix}"
+    )
+    if create_new:
+        picked = st.text_input(
+            "Clé_Prompt (identifiant technique stable)",
+            value="",
+            key=f"adm_tpl_new_key_{suffix}",
+            help=(
+                "Exemples (audio) : `audio_style_default`, `audio_style_paques`, … — "
+                "Exemples (texte) : `instructions_base_md`, `overlay_takeaways`, `retry_hardened_prefix`. "
+                "Minuscules + underscores, pas d’espaces."
+            ),
+        ).strip()
+        current = ""
+        current_desc = ""
+    else:
+        if not existing_keys:
+            st.warning(
+                "Aucun prompt Actif trouvé pour cette section. "
+                "Active « Créer un nouveau prompt » ou lance `python .\\tools\\init_sheets_db.py`."
+            )
+            picked = ""
             current = ""
             current_desc = ""
         else:
-            if not existing_keys:
-                st.warning("Aucun prompt Actif trouvé en base (`Paramètres_IA`).")
-                return
+            default_key = (
+                "audio_style_default" if audio_only else "instructions_base_md"
+            )
+            default_ix = (
+                existing_keys.index(default_key) if default_key in existing_keys else 0
+            )
             picked = st.selectbox(
                 "Choisir un prompt existant (Actif)",
                 options=existing_keys,
-                index=existing_keys.index("instructions_base_md") if "instructions_base_md" in existing_keys else 0,
-                key="adm_tpl_key",
+                index=default_ix,
+                key=f"adm_tpl_key_{suffix}",
                 format_func=_fmt_key,
             )
             current = (latest.get(picked).content_md if picked in latest else "").strip()
             current_desc = (desc_by_key.get(picked) or _PROMPT_TEMPLATE_LABELS.get(picked) or "").strip()
 
-        edited_desc = st.text_input(
-            "Description (affichage dans la liste)",
-            value=current_desc,
-            key=f"adm_tpl_desc__{picked}",
-            help="Optionnel. Sert uniquement à rendre la liste plus claire (tu peux mettre un nom métier).",
-        )
-        edited = st.text_area(
-            "Contenu (Markdown)",
-            value=current,
-            height=260,
-            # IMPORTANT Streamlit: une key fixe “colle” le texte quand on change le selectbox.
-            # Une key dépendante du template garde un état par template.
-            key=f"adm_tpl_editor__{picked}",
-            help="Append-only : enregistre une nouvelle version (Version + 1).",
-        )
-        notes = st.text_input("Notes (optionnel)", key="adm_tpl_notes", value="")
-        active = st.checkbox("Activer ce prompt", value=True, key="adm_tpl_active", help="Si coché, l’ancien Actif de la même Clé_Prompt sera automatiquement désactivé.")
-        date_effet = st.date_input("Date d'effet", value=date.today(), key="adm_tpl_date_effet")
+    edited_desc = st.text_input(
+        "Description (affichage dans la liste)",
+        value=current_desc,
+        key=f"adm_tpl_desc_{suffix}__{picked or '__none__'}",
+        help="Optionnel. Sert uniquement à rendre la liste plus claire (tu peux mettre un nom métier).",
+    )
+    edited = st.text_area(
+        "Contenu (Markdown)",
+        value=current,
+        height=260,
+        key=f"adm_tpl_editor_{suffix}__{picked or '__none__'}",
+        help="Append-only : enregistre une nouvelle version (Version + 1).",
+    )
+    notes = st.text_input("Notes (optionnel)", key=f"adm_tpl_notes_{suffix}", value="")
+    active = st.checkbox(
+        "Activer ce prompt",
+        value=True,
+        key=f"adm_tpl_active_{suffix}",
+        help="Si coché, l’ancien Actif de la même Clé_Prompt sera automatiquement désactivé.",
+    )
+    date_effet = st.date_input("Date d'effet", value=date.today(), key=f"adm_tpl_date_effet_{suffix}")
 
-        disabled_save = (not bool(edited.strip())) or (create_new and not bool(picked.strip()))
-        if st.button("Enregistrer (nouvelle version dans Sheets)", type="primary", disabled=disabled_save, key="adm_tpl_save"):
-            ov = loading_overlay("Enregistrement du template IA (Sheets)…")
-            try:
-                body = edited.strip()
-                # Onglet MARPA: Paramètres_IA
-                sh = gs.open_by_key(cfg.gsheet_id)
-                ws = sh.worksheet("Paramètres_IA")
-                header = ws.row_values(1)
-                if not header:
-                    raise RuntimeError("Onglet `Paramètres_IA` non initialisé (header vide). Lance init_sheets_db.")
-                if "Description" not in header:
-                    raise RuntimeError("Colonne `Description` manquante dans `Paramètres_IA`. Relance init_sheets_db.py ou mets à jour le header.")
+    disabled_save = (not bool(edited.strip())) or (not bool(picked.strip()))
+    if st.button(
+        "Enregistrer (nouvelle version dans Sheets)",
+        type="primary",
+        disabled=disabled_save,
+        key=f"adm_tpl_save_{suffix}",
+    ):
+        ov = loading_overlay("Enregistrement du template IA (Sheets)…")
+        try:
+            body = edited.strip()
+            sh = gs.open_by_key(cfg.gsheet_id)
+            ws = sh.worksheet("Paramètres_IA")
+            header = ws.row_values(1)
+            if not header:
+                raise RuntimeError("Onglet `Paramètres_IA` non initialisé (header vide). Lance init_sheets_db.")
+            if "Description" not in header:
+                raise RuntimeError("Colonne `Description` manquante dans `Paramètres_IA`. Relance init_sheets_db.py ou mets à jour le header.")
 
-                def _norm(s: object) -> str:
-                    return str(s or "").strip()
+            def _norm(s: object) -> str:
+                return str(s or "").strip()
 
-                # Calcule la prochaine version à partir de la table (pas seulement “latest”),
-                # car la table peut contenir plusieurs versions “Actif” à assainir.
-                key_norm = _norm(picked)
-                max_ver = 0
-                for r in rows:
-                    if _norm(r.get("Clé_Prompt")) != key_norm:
-                        continue
-                    try:
-                        max_ver = max(max_ver, int(_norm(r.get("Version") or 0) or 0))
-                    except Exception:
-                        pass
-                next_ver = int(max_ver + 1)
-                de = str(date_effet)
-
-                # MARPA (sans supprimer) : on met à jour EN PLACE les lignes Actif existantes
-                # pour cette clé (Statut -> Inactif), puis on append uniquement la nouvelle version.
-                if active:
-                    try:
-                        records = ws.get_all_records()  # lignes à partir de la ligne 2
-                    except Exception:
-                        records = []
-
-                    def _make_concat(*, row_id: str, key: str, version: str, statut: str, date_effet: str) -> str:
-                        return " | ".join([_norm(row_id), _norm(key), _norm(version), _norm(statut), _norm(date_effet)])
-
-                    try:
-                        col_statut = header.index("Statut") + 1
-                        col_concat = header.index("Concaténation") + 1
-                    except Exception:
-                        col_statut = 0
-                        col_concat = 0
-
-                    # Update les cellules une par une (peu de lignes) pour rester robuste.
-                    if col_statut and col_concat:
-                        for i, r in enumerate(records):
-                            if _norm(r.get("Clé_Prompt")) != key_norm:
-                                continue
-                            if not sheet_row_status_is_live(r.get("Statut")):
-                                continue
-                            # Row number dans Sheets (header=1, records commencent à 2)
-                            row_num = i + 2
-                            ws.update_cell(row_num, col_statut, "Inactif")
-
-                            row_id = _norm(r.get("#ID") or r.get("ID") or r.get("id"))
-                            ver_str = _norm(r.get("Version"))
-                            de_str = _norm(r.get("Date_Effet")) or de
-                            ws.update_cell(row_num, col_concat, _make_concat(row_id=row_id, key=key_norm, version=ver_str, statut="Inactif", date_effet=de_str))
-
-                row_id = sha256(f"ia|{key_norm}|{next_ver}|{body}".encode("utf-8")).hexdigest()[:18]
-                statut = "Actif" if active else "Inactif"
-                concat = " | ".join([row_id, key_norm, str(next_ver), statut, de])
-                row_map = {
-                    "#ID": row_id,
-                    "Clé_Prompt": key_norm,
-                    "Description": str(edited_desc or "").strip(),
-                    "Version": str(next_ver),
-                    "Statut": statut,
-                    "Date_Effet": de,
-                    "Contenu_Markdown": body,
-                    "Concaténation": concat,
-                }
-                ws.append_rows([[row_map.get(c, "") for c in header]], value_input_option="RAW")
-
-                st.success("Paramètre IA enregistré.")
-                # Force refresh du cache prompt
+            key_norm = _norm(picked)
+            max_ver = 0
+            for r in rows:
+                if _norm(r.get("Clé_Prompt")) != key_norm:
+                    continue
                 try:
-                    _load_prompt_templates_cached.clear()  # type: ignore[attr-defined]
+                    max_ver = max(max_ver, int(_norm(r.get("Version") or 0) or 0))
                 except Exception:
                     pass
-                st.rerun()
-            finally:
-                ov.empty()
+            next_ver = int(max_ver + 1)
+            de = str(date_effet)
 
-    # (Les dépendances runtime ont été déplacées plus haut.)
+            if active:
+                try:
+                    records = ws.get_all_records()
+                except Exception:
+                    records = []
+
+                def _make_concat(*, row_id: str, key: str, version: str, statut: str, date_effet: str) -> str:
+                    return " | ".join([_norm(row_id), _norm(key), _norm(version), _norm(statut), _norm(date_effet)])
+
+                try:
+                    col_statut = header.index("Statut") + 1
+                    col_concat = header.index("Concaténation") + 1
+                except Exception:
+                    col_statut = 0
+                    col_concat = 0
+
+                if col_statut and col_concat:
+                    for i, r in enumerate(records):
+                        if _norm(r.get("Clé_Prompt")) != key_norm:
+                            continue
+                        if not sheet_row_status_is_live(r.get("Statut")):
+                            continue
+                        row_num = i + 2
+                        ws.update_cell(row_num, col_statut, "Inactif")
+                        row_id = _norm(r.get("#ID") or r.get("ID") or r.get("id"))
+                        ver_str = _norm(r.get("Version"))
+                        de_str = _norm(r.get("Date_Effet")) or de
+                        ws.update_cell(
+                            row_num,
+                            col_concat,
+                            _make_concat(row_id=row_id, key=key_norm, version=ver_str, statut="Inactif", date_effet=de_str),
+                        )
+
+            row_id = sha256(f"ia|{key_norm}|{next_ver}|{body}".encode("utf-8")).hexdigest()[:18]
+            statut = "Actif" if active else "Inactif"
+            concat = " | ".join([row_id, key_norm, str(next_ver), statut, de])
+            row_map = {
+                "#ID": row_id,
+                "Clé_Prompt": key_norm,
+                "Description": str(edited_desc or "").strip(),
+                "Version": str(next_ver),
+                "Statut": statut,
+                "Date_Effet": de,
+                "Contenu_Markdown": body,
+                "Concaténation": concat,
+            }
+            ws.append_rows([[row_map.get(c, "") for c in header]], value_input_option="RAW")
+
+            st.success("Paramètre IA enregistré.")
+            try:
+                _load_prompt_templates_cached.clear()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            st.rerun()
+        finally:
+            ov.empty()
+
+
+def render_admin_test_resources() -> None:
+    st.title("Admin — Réglages & diagnostic")
+    cfg = load_config()
+    if not cfg.gcp_service_account:
+        st.error("`gcp_service_account` manquant dans `secrets.toml`.")
+        return
+
+    st.caption(
+        "Cette page rassemble les réglages liés à la génération des contenus du dimanche. "
+        "Tout est replié par défaut — déplie uniquement ce dont tu as besoin."
+    )
+
+    with st.expander("Comportement par défaut « si je ne touche à rien »", expanded=True):
+        _render_admin_default_behavior_summary()
+
+    with st.expander("Diagnostic infrastructure (Cloud / Sheets / dépendances)", expanded=False):
+        _render_admin_infra_diagnostic(cfg=cfg)
+
+    with st.expander("Tests rapides IA (smoke TTS / texte)", expanded=False):
+        _render_admin_ia_smoke_tests(cfg=cfg)
+
+    if not (cfg.gsheet_id and cfg.gcp_service_account):
+        st.info("Configure `gsheet_id` + `gcp_service_account` pour gérer voix et prompts.")
+        return
+
+    gs = build_gspread_client(cfg.gcp_service_account)
+    try:
+        rows = fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="Paramètres_IA",
+            limit=5000,
+        )
+    except Exception as e:
+        rows = []
+        st.warning(f"Lecture `Paramètres_IA` impossible : {e}")
+
+    with st.expander("Audio — voix TTS (table `Voix_Audio`)", expanded=False):
+        _render_admin_voix_audio_section(cfg=cfg, gs=gs)
+
+    with st.expander("Audio — styles de lecture (prompts `audio_style_*`)", expanded=False):
+        st.caption(
+            "Préfixes ajoutés au texte envoyé au TTS Gemini (pas au modèle texte). "
+            "Append-only : chaque enregistrement crée une nouvelle version."
+        )
+        _render_admin_prompts_editor_section(
+            cfg=cfg, gs=gs, rows=rows, audio_only=True, section_key_suffix="audio"
+        )
+
+    with st.expander("Texte — socle + surcouches de la synthèse écrite", expanded=False):
+        st.caption(
+            "Socle anti-hallucination + surcouches utilisées par la génération **écrite** "
+            "(`instructions_base_md`, `overlay_takeaways`, `overlay_no_takeaways`, "
+            "`overlay_catechese_bridge`, `retry_hardened_prefix`)."
+        )
+        _render_admin_prompts_editor_section(
+            cfg=cfg, gs=gs, rows=rows, audio_only=False, section_key_suffix="texte"
+        )
 
 
 def render_admin_readings_cache() -> None:
@@ -6862,7 +7931,9 @@ def render_admin_feedback_insights() -> None:
             key="adm_fb_insights_force",
             disabled=not bool(prev_ins),
         )
-        gen_clicked = st.form_submit_button("Générer la synthèse IA", type="primary")
+        gen_clicked = st.form_submit_button(
+            "Générer la synthèse IA", type="primary", use_container_width=True
+        )
 
     if gen_clicked:
         force_ok = bool(force_regen)
@@ -6986,7 +8057,9 @@ def render_admin_accounts() -> None:
                 index=1,
                 key=f"adm_addsub_lenpref_{nonce}",
             )
-            do_submit = st.form_submit_button("Créer ces abonnés", type="primary")
+            do_submit = st.form_submit_button(
+                "Créer ces abonnés", type="primary", use_container_width=True
+            )
 
         if do_submit:
             # En cas d'erreur, on garde l'expander ouvert au rerun.
@@ -7319,7 +8392,7 @@ def render_admin_emailing() -> None:
     lang_fr = ("fr", "fr-fr", "france", "")
     current = pick_latest_live_email_template(rows, template_key=template_key, channel="email", language_in=lang_fr) or {}
 
-    default_subject = "🕯️ Votre halte LumenVia : Préparez la célébration du dimanche {{date_dimanche}}"
+    default_subject = "🕯️ Votre pause LumenVia : Préparez la célébration du dimanche {{date_dimanche}}"
     default_body = ""
     try:
         p = Path("data/emailing_template_raw.txt")
@@ -7365,48 +8438,11 @@ def render_admin_emailing() -> None:
         # Liens signés (si objets présents)
         origin = _lumenvia_app_origin_url() or ""
         url_app = (origin.rstrip("/") + "/?sunday=" + date_str) if origin else ""
-        url_pdf = ""
-        url_audio = ""
-        url_illu = ""
-        try:
-            gcs = build_gcs_client(cfg.gcp_service_account)
-            # PDF
-            p_pdf = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
-            s_pdf = _gcs_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), path=p_pdf) if cfg.gcs_bucket_name else None
-            url_pdf = s_pdf or ""
-            # Illustration (multi-extensions, comme ailleurs)
-            year = date_str[:4]
-            if cfg.gcs_bucket_name:
-                cand = [f"Images/illustrations/{year}/{date_str}{ext}" for ext in (".webp", ".png", ".jpg", ".jpeg")]
-                url_illu = (
-                    _gcs_first_signed_url(
-                        gcs=gcs,
-                        bucket_name=str(cfg.gcs_bucket_name).strip(),
-                        candidate_paths=cand,
-                    )
-                    or ""
-                )
-        except Exception:
-            pass
-
-        # Audio : on cherche la dernière génération puis son audio associé
-        try:
-            gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=6000)
-            gens_d = [g for g in gens if str(g.get("date") or "").strip()[:10] == date_str and str(g.get("zone") or "").strip() == "france"]
-            gens_d.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
-            gen_id = str((gens_d[0] or {}).get("entity_id") or "").strip() if gens_d else ""
-            aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=6000)
-            aud_d = [a for a in aud_rows if str(a.get("gen_entity_id") or "").strip() == gen_id]
-            aud_d.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
-            p_audio = str((aud_d[0] or {}).get("gcs_path") or "").strip() if aud_d else ""
-            if p_audio and cfg.gcs_bucket_name:
-                try:
-                    gcs = build_gcs_client(cfg.gcp_service_account)
-                    url_audio = _gcs_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), path=p_audio) or ""
-                except Exception:
-                    url_audio = ""
-        except Exception:
-            pass
+        _urls = _weekly_email_signed_urls(cfg=cfg, gs=gs, date_str=date_str, zone="france")
+        url_pdf = _urls["url_pdf"]
+        url_audio = _urls["url_audio"]
+        url_audio_readings = _urls["url_audio_readings"]
+        url_illu = _urls["url_illustration"]
 
         # Valeurs exemple (issues d'un dimanche réel)
         values = {
@@ -7422,6 +8458,7 @@ def render_admin_emailing() -> None:
             or "—",
             "url_pdf": url_pdf,
             "url_audio": url_audio,
+            "url_audio_readings": url_audio_readings,
             "url_illustration": url_illu,
             "url_app": url_app,
             "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
@@ -7432,7 +8469,7 @@ def render_admin_emailing() -> None:
 
     st.caption(
         "Astuce : pour rendre les CTA cliquables, mets directement des URLs dans le corps, par ex. "
-        "`{{url_pdf}}`, `{{url_audio}}`, `{{url_app}}`."
+        "`{{url_pdf}}`, `{{url_audio}}`, `{{url_audio_readings}}`, `{{url_app}}`."
     )
 
     st.divider()
@@ -8009,6 +9046,7 @@ def render_admin_emailing() -> None:
                 nom_dim = (values0.get("nom_du_dimanche") or "").strip()
                 url_pdf0 = (values0.get("url_pdf") or "").strip()
                 url_audio0 = (values0.get("url_audio") or "").strip()
+                url_audio_readings0 = (values0.get("url_audio_readings") or "").strip()
                 url_app0 = (values0.get("url_app") or "").strip()
                 url_illu0 = (values0.get("url_illustration") or "").strip()
                 optout0 = (values0.get("optout_url") or "").strip()
@@ -8023,20 +9061,9 @@ def render_admin_emailing() -> None:
                     enc = _q(email0) if _q else email0
                     pref_url = origin0.rstrip("/") + "/?route=join&email=" + enc
 
-                def btn(label: str, url: str) -> str:
-                    if not url:
-                        return ""
-                    return (
-                        f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
-                        'style="display:inline-block;background:#0d9488;color:white;'
-                        'padding:10px 14px;border-radius:10px;text-decoration:none;'
-                        'font-weight:700;margin:6px 0;">'
-                        f"{label}</a>"
-                    )
-
                 # Le template newsletter est rédigé "Bonjour {{prenom}}," : on force donc le prénom seul.
                 who = (prenom or "—").strip()
-                # On retire les lignes techniques / URLs signées du corps (l'illustration est rendue dans une card).
+                # On retire les lignes techniques / URLs signées du corps (l’illustration est rendue en image seule sous le texte).
                 raw_lines = [ln.strip() for ln in (intro_text or "").replace("\r\n", "\n").split("\n")]
                 raw_lines = [ln for ln in raw_lines if ln]
                 filtered: list[str] = []
@@ -8090,7 +9117,8 @@ def render_admin_emailing() -> None:
                     raw = ln.strip()
                     lead = raw.lstrip("-•").lstrip()
                     if re.match(
-                        r"(?i)^(la synth[eè]se|l['’]exp[eé]rience\s+sonore|l['’]illustration)\b",
+                        r"(?i)^(la synth[eè]se|l['’]essentiel|l['’]exp[eé]rience\s+sonore|la\s+parole"
+                        r"|l['’]audio\s+des\s+lectures|l['’]illustration)\b",
                         lead,
                     ) or raw.startswith(("-", "•")):
                         segments.append(("li", lead))
@@ -8139,7 +9167,14 @@ def render_admin_emailing() -> None:
                         href = ""
                         if url_pdf0 and re.search(r"(?i)synth[èe]se.*pdf|pdf", bb0):
                             href = url_pdf0
-                        elif url_audio0 and re.search(r"(?i)audio|[ée]couter", bb0):
+                        elif url_audio_readings0 and re.search(
+                            r"(?i)parole.*audio|lectures|textes\s+bibliques|[ée]critures", bb0
+                        ):
+                            href = url_audio_readings0
+                        elif url_audio0 and re.search(
+                            r"(?i)audio|essentiel|[ée]couter",
+                            bb0,
+                        ) and not re.search(r"(?i)lectures|parole.*\(lectures\)|textes\s+bibliques", bb0):
                             href = url_audio0
                         elif url_illu0 and re.search(r"(?i)image|illustration", bb0):
                             href = url_illu0
@@ -8282,33 +9317,17 @@ def render_admin_emailing() -> None:
                         f"<em>{html_escape(quote_txt)}</em></p>"
                     )
 
-                cards = []
-                if url_pdf0:
-                    cards.append(
-                        "<div style=\"border:1px solid #e7e5e4;border-radius:14px;padding:14px;margin:12px 0;\">"
-                        "<div style=\"font-size:16px;font-weight:800;\">Synthèse illustrée (PDF)</div>"
-                        "<div style=\"color:#334155;margin:6px 0;\">Retrouvez le fil rouge qui relie les textes.</div>"
-                        f"{btn('Télécharger le PDF', url_pdf0)}"
-                        "</div>"
-                    )
-                if url_audio0:
-                    cards.append(
-                        "<div style=\"border:1px solid #e7e5e4;border-radius:14px;padding:14px;margin:12px 0;\">"
-                        "<div style=\"font-size:16px;font-weight:800;\">Expérience sonore (Audio)</div>"
-                        "<div style=\"color:#334155;margin:6px 0;\">Écoutez la synthèse en chemin.</div>"
-                        f"{btn('Écouter l’audio', url_audio0)}"
-                        "</div>"
-                    )
+                # Bloc cartes : uniquement l’image illustrée (les PDF/audio sont déjà couverts par le corps / puces).
+                cards: list[str] = []
                 if url_illu0:
+                    _illu_href = html_escape(url_app0 or url_illu0)
+                    _illu_src = html_escape(url_illu0)
                     cards.append(
-                        "<div style=\"border:1px solid #e7e5e4;border-radius:14px;padding:14px;margin:12px 0;\">"
-                        "<div style=\"font-size:16px;font-weight:800;\">Illustration de la semaine</div>"
-                        f"<div style=\"margin:14px 0;text-align:center;\">"
-                        f"<a href=\"{url_app0 or url_illu0}\" target=\"_blank\" rel=\"noopener noreferrer\">"
-                        f"<img src=\"{url_illu0}\" alt=\"Illustration\" style=\"border-radius:12px;max-width:260px;width:100%;\">"
+                        "<div style=\"margin:16px 0;text-align:center;\">"
+                        f"<a href=\"{_illu_href}\" target=\"_blank\" rel=\"noopener noreferrer\">"
+                        f"<img src=\"{_illu_src}\" alt=\"\" "
+                        "style=\"border-radius:12px;max-width:260px;width:100%;height:auto;display:inline-block;border:0;\">"
                         "</a></div>"
-                        f"{btn('Voir l’illustration', url_illu0)}"
-                        "</div>"
                     )
 
                 footer_links = []
@@ -9493,21 +10512,14 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
             subj = str(tpl.get("subject") or "").strip()
             body = str(tpl.get("body") or "").strip()
 
-            # Liens (signés)
+            # Liens (signés) — PDF, audios, illustration
             origin = _lumenvia_app_origin_url() or ""
             url_app = (origin.rstrip("/") + "/?route=about") if origin else ""
-            url_pdf = ""
-            url_audio = ""
-            url_illu = ""
-            try:
-                gcs = build_gcs_client(cfg.gcp_service_account)
-                p_pdf = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
-                url_pdf = _gcs_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), path=p_pdf) or ""
-                year = date_str[:4]
-                cand = [f"Images/illustrations/{year}/{date_str}{ext}" for ext in (".webp", ".png", ".jpg", ".jpeg")]
-                url_illu = _gcs_first_signed_url(gcs=gcs, bucket_name=str(cfg.gcs_bucket_name).strip(), candidate_paths=cand) or ""
-            except Exception:
-                pass
+            _sched_urls = _weekly_email_signed_urls(cfg=cfg, gs=gs, date_str=date_str, zone="france")
+            url_pdf = _sched_urls["url_pdf"]
+            url_audio = _sched_urls["url_audio"]
+            url_audio_readings = _sched_urls["url_audio_readings"]
+            url_illu = _sched_urls["url_illustration"]
 
             # SMTP/Twilio config réutilise _secret_get de la page Emailing (simple)
             def _secret_get(*keys: str) -> str:
@@ -9543,6 +10555,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 "date_dimanche": french_day_month_year(sunday),
                 "url_pdf": url_pdf,
                 "url_audio": url_audio,
+                "url_audio_readings": url_audio_readings,
                 "url_illustration": url_illu,
                 "url_app": url_app,
             }

@@ -1,0 +1,17 @@
+{
+  "_readme": "Liste des voix préconfigurées Gemini 2.5 TTS (prebuiltVoiceConfig). À mettre à jour quand Google enrichit ou renomme des voix — voir la doc officielle « Gemini TTS voices » / Vertex AI.",
+  "doc_hint": "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/gemini",
+  "voices": [
+    {"name": "Achird", "label_fr": "Achird — chaleureuse, conviviale (Friendly)", "style": "Friendly"},
+    {"name": "Aoede", "label_fr": "Aoede — légère, lumineuse (Breezy)", "style": "Breezy"},
+    {"name": "Charon", "label_fr": "Charon — claire, pédagogique (Informative)", "style": "Informative"},
+    {"name": "Fenrir", "label_fr": "Fenrir — dynamique (Excitable)", "style": "Excitable"},
+    {"name": "Kore", "label_fr": "Kore — neutre, posée (Firm)", "style": "Firm"},
+    {"name": "Laomedeia", "label_fr": "Laomedeia — tonique, joyeuse (Upbeat)", "style": "Upbeat"},
+    {"name": "Puck", "label_fr": "Puck — espiègle (Playful)", "style": "Playful"},
+    {"name": "Sadachbia", "label_fr": "Sadachbia — très vive (Lively)", "style": "Lively"},
+    {"name": "Sulafat", "label_fr": "Sulafat — douce chaleur (Warm)", "style": "Warm"},
+    {"name": "Vindemiatrix", "label_fr": "Vindemiatrix — douce, posée (Gentle)", "style": "Gentle"},
+    {"name": "Zephyr", "label_fr": "Zephyr — lumineuse et claire (Bright)", "style": "Bright"}
+  ]
+}

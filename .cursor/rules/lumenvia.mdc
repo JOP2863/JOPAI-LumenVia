@@ -38,6 +38,9 @@ Pour chaque table:
 ## Style visuel
 Respecter la charte CSS liturgique fournie dans le cahier des charges (or, crème, typo serif, accent par saison).
 
+## UX — composants Streamlit proscrits
+- **Ne jamais** utiliser `st.dataframe(...)` ni `st.table(...)` (apparence générique « grille de calcul » qui jure avec la charte liturgique). Préférer un **tableau Markdown** via `st.markdown(..., unsafe_allow_html=False)` ou un **rendu HTML stylé** maison.
+
 Assets marque : répertoire `assets/branding/` (`logo_mark.svg`, optionnel `favicon.png` pour `page_icon`).
 
 ## Identité de marque — footer JOPAI© (immuable)
@@ -62,5 +65,6 @@ Assets marque : répertoire `assets/branding/` (`logo_mark.svg`, optionnel `favi
 - **Lectionnaire de poche** : cache disque des lectures via `core/local_aelf_cache.py` (`.cache/lumenvia/`) + message hors-ligne si l’API échoue. *(À étendre : cache de la dernière synthèse / audio.)*
 - **PWA** : fichier `assets/pwa/site.webmanifest` ; une installation complète « Add to Home Screen » dépend du **reverse-proxy / hébergeur** (en-têtes, HTTPS, chemin manifest). Streamlit seul n’injecte pas le manifest dans `<head>` sans couche externe.
 - **Typologie biblique / Psaume « Ma réponse »** : consignes dans `data/instructions_ia.md` ; pas de sources hors AELF.
+- **Voix TTS Gemini** : table Sheets `Voix_Audio` (**VOIX**), alias dans `AliasTables` ; catalogue optionnel des noms de voix dans `data/gemini_tts_voices.json` (mis à jour quand Google enrichit les voix préconfigurées).
 - **Mémo « Graine de Parole »** : bouton d’inspiration (point « À retenir »), champ `resolution` (Sheets + corps Markdown GCS). **PDF mensuel** : prévoir un encart doré fin de document pour les résolutions (quand le générateur PDF sera branché).
 

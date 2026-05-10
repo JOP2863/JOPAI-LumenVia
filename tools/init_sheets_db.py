@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date
+from hashlib import sha256
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+import core.sheets_db as sheets_db_mod
 from core.config import load_config_from_secrets_toml
-from core.sheets_db import default_tables, ensure_database, build_gspread_client
+from core.sheets_db import (
+    build_gspread_client,
+    default_tables,
+    ensure_database,
+    fetch_records,
+    sheet_row_status_is_live,
+)
 
 
 def _suggest_aliases() -> dict[str, str]:
@@ -36,6 +45,7 @@ def _suggest_aliases() -> dict[str, str]:
         "audiences": "AUDC",
         "experience_feedback": "RSTN",
         "feedback_insights": "FBIN",
+        "Voix_Audio": "VOIX",
         # AliasTables garde son nom long (table maître)
     }
 
@@ -90,6 +100,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
         "audiences": "Audiences (ciblage)",
         "experience_feedback": "Retours / mini-questionnaires post-envoi",
         "feedback_insights": "Synthèses IA (historique questionnaires)",
+        "Voix_Audio": "Règles de voix TTS Gemini (synthèse / lectures)",
         "CMPG": "Campagnes d’envoi (scheduler)",
         "RUNS": "Exécutions (scheduler)",
         "RSTN": "Retours / mini-questionnaires post-envoi",
@@ -160,6 +171,146 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
         ws_alias.update(cleaned, "A2")
 
 
+def _concat_ia(parts: list[str]) -> str:
+    return " | ".join(p.strip() for p in parts if str(p).strip())
+
+
+def _concat_voix(parts: list[str]) -> str:
+    return " | ".join(p.strip() for p in parts if str(p).strip())
+
+
+def _seed_voix_audio_defaults(*, gc, gsheet_id: str) -> int:
+    """Ajoute les règles VOIX par défaut uniquement si la table est vide (aucune ligne de données)."""
+    rows = fetch_records(gspread_client=gc, spreadsheet_id=gsheet_id, table="Voix_Audio", limit=0)
+    if rows:
+        return 0
+
+    sh = gc.open_by_key(gsheet_id)
+    ws_name = sheets_db_mod._resolve_table_name(sh=sh, table="Voix_Audio")  # noqa: SLF001
+    ws = sh.worksheet(ws_name)
+    if not ws.row_values(1):
+        raise RuntimeError("Voix_Audio: header vide après ensure_database.")
+
+    today = date.today().isoformat()
+    specs: list[tuple[str, str, str, str, str]] = [
+        ("*", "*", "*", "Achird", "Défaut — toutes cibles / tous temps"),
+        ("synthese", "*", "pascal", "Laomedeia", "Synthèse — temps pascal (tonique)"),
+        ("synthese", "*", "careme", "Vindemiatrix", "Synthèse — Carême (douce)"),
+        ("synthese", "violet", "*", "Sulafat", "Synthèse — liturgie violette"),
+        ("synthese", "rouge", "*", "Sadachbia", "Synthèse — liturgie rouge"),
+        ("lectures", "*", "*", "Charon", "Lectures AELF — voix claire / lecteur"),
+    ]
+
+    bulk: list[list[str]] = []
+    ver = "1"
+    statut = "Actif"
+    for cible, couleur, temps, voix, description in specs:
+        rid = sha256(f"voix|{cible}|{couleur}|{temps}|{voix}|{ver}".encode("utf-8")).hexdigest()[:18]
+        concat = _concat_voix([rid, statut, ver, today, cible, couleur, temps, voix, description])
+        bulk.append([rid, statut, ver, today, cible, couleur, temps, voix, description, concat])
+
+    ws.append_rows(bulk, value_input_option="RAW")
+    return len(bulk)
+
+
+_AUDIO_PROMPT_SPECS: list[tuple[str, str, str]] = [
+    (
+        "audio_style_default",
+        "TTS — style oral par défaut (synthèse)",
+        (
+            "Tu es la voix de LumenVia. Lis le texte suivant en français avec un ton chaleureux et posé, "
+            "comme un accompagnateur qui partage la Parole du dimanche.\n"
+            "Rythme : débit moyen ; courte pause après chaque titre de section ; un peu plus lent sur les citations "
+            "ou répliques entre guillemets.\n"
+            "Ne reformule pas le texte : lis-le tel quel."
+        ),
+    ),
+    (
+        "audio_style_paques",
+        "TTS — surcouche temps pascal (synthèse)",
+        (
+            "Accent léger de joie et de clarté : comme une bonne nouvelle qui se déploie, sans emphase théâtrale."
+        ),
+    ),
+    (
+        "audio_style_careme",
+        "TTS — surcouche Carême (synthèse)",
+        (
+            "Garde une gravité paisible : registre un peu plus bas, silences un peu plus longs entre les paragraphes ; "
+            "pas de dramatisation."
+        ),
+    ),
+    (
+        "audio_style_lectures",
+        "TTS — style lectures du lectionnaire",
+        (
+            "Tu es lecteur du lectionnaire dominical : lis avec sobriété liturgique ; marque clairement le passage "
+            "d'une lecture à l'autre par une courte pause ; pour l'Évangile, une légère élévation respectueuse."
+        ),
+    ),
+]
+
+
+def _max_prompt_version_for_key(records: list[dict], key: str) -> int:
+    mx = 0
+    for r in records:
+        if str(r.get("Clé_Prompt") or "").strip() != key:
+            continue
+        try:
+            mx = max(mx, int(str(r.get("Version") or "0").strip()))
+        except Exception:
+            pass
+    return mx
+
+
+def _prompt_has_active(records: list[dict], key: str) -> bool:
+    for r in records:
+        if str(r.get("Clé_Prompt") or "").strip() != key:
+            continue
+        if sheet_row_status_is_live(r.get("Statut")):
+            return True
+    return False
+
+
+def _seed_parametres_ia_audio_styles(*, gc, gsheet_id: str) -> int:
+    """Ajoute les clés TTS (Levier B) si aucune ligne Actif n'existe pour ces Clé_Prompt."""
+    sh = gc.open_by_key(gsheet_id)
+    ws_name = sheets_db_mod._resolve_table_name(sh=sh, table="Paramètres_IA")  # noqa: SLF001
+    ws = sh.worksheet(ws_name)
+    header = ws.row_values(1)
+    if not header:
+        raise RuntimeError("Paramètres_IA: header vide.")
+
+    try:
+        records = ws.get_all_records(numericise_ignore=["all"])
+    except Exception:
+        records = []
+
+    today = date.today().isoformat()
+    appended = 0
+    for key, description, body in _AUDIO_PROMPT_SPECS:
+        if _prompt_has_active(records, key):
+            continue
+        ver = str(_max_prompt_version_for_key(records, key) + 1)
+        rid = sha256(f"ia|{key}|{ver}|{body}".encode("utf-8")).hexdigest()[:18]
+        statut = "Actif"
+        concat = _concat_ia([rid, key, ver, statut, today])
+        row_map = {
+            "#ID": rid,
+            "Clé_Prompt": key,
+            "Description": description,
+            "Version": ver,
+            "Statut": statut,
+            "Date_Effet": today,
+            "Contenu_Markdown": body,
+            "Concaténation": concat,
+        }
+        ws.append_rows([[row_map.get(c, "") for c in header]], value_input_option="RAW")
+        records.append(dict(row_map))
+        appended += 1
+    return appended
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Initialise la base Google Sheets (onglets + headers).")
     p.add_argument("--gsheet-id", default=None, help="Override gsheet_id (sinon lit .streamlit/secrets.toml)")
@@ -186,6 +337,12 @@ def main(argv: list[str]) -> int:
     try:
         ensure_database(gspread_client=gc, spreadsheet_id=gsheet_id, tables=default_tables())
         migrate_alias_tables_and_rename(gc=gc, gsheet_id=gsheet_id)
+        n_voix = _seed_voix_audio_defaults(gc=gc, gsheet_id=gsheet_id)
+        n_aud = _seed_parametres_ia_audio_styles(gc=gc, gsheet_id=gsheet_id)
+        if n_voix:
+            print(f"OK: seed Voix_Audio — {n_voix} ligne(s).")
+        if n_aud:
+            print(f"OK: seed Paramètres_IA (prompts TTS) — {n_aud} ligne(s).")
     except PermissionError:
         print("\nERREUR: accès refusé (403) au Google Sheet.\n", file=sys.stderr)
         print("Actions à faire (dans l’ordre) :", file=sys.stderr)

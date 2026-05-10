@@ -1,4 +1,4 @@
-Objet : 🕯️ Votre halte LumenVia : Préparez la célébration du dimanche {{date_dimanche}}
+Objet : 🕯️ Votre pause LumenVia : Préparez la célébration du dimanche {{date_dimanche}}
 Corps du message :
 Bonjour {{prenom}} {{nom}},
 La fin de semaine approche et, avec elle, l’invitation à déposer le bruit du monde pour se tourner vers l'essentiel.

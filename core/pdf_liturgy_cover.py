@@ -99,6 +99,7 @@ def build_liturgy_cover_pdf_bytes(
     date_line: str,
     meta_line: str | None = None,
     audio_listen_url: str | None = None,
+    audio_readings_listen_url: str | None = None,
     accent_hex: str | None = None,
     footer: str | None = None,
 ) -> bytes:
@@ -160,17 +161,28 @@ def build_liturgy_cover_pdf_bytes(
         c.setFont("Helvetica-Oblique", 9.5)
         c.drawCentredString(w / 2, h / 2 - 32 * mm, ml[:220])
 
-    # Audio : lien cliquable sur la couverture (remonte "Écouter la synthèse" en 1ère page).
-    url = (audio_listen_url or "").strip()
-    if url:
-        y = h / 2 - 44 * mm
+    # Audio : liens cliquables sur la couverture (lectures au-dessus de la synthèse si les deux sont présents).
+    ru = (audio_readings_listen_url or "").strip()
+    su = (audio_listen_url or "").strip()
+
+    def _cover_audio_link(*, label: str, url: str, y_pdf: float) -> None:
         c.setFont("Helvetica-Bold", 10)
         c.setFillColorRGB(0x15 / 255.0, 0x65 / 255.0, 0xC0 / 255.0)
-        label = "Écouter la synthèse audio"
         tw = c.stringWidth(label, "Helvetica-Bold", 10)
         x = (w - tw) / 2
-        c.drawString(x, y, label)
-        c.linkURL(url, (x, y - 2, x + tw, y + 10), relative=0)
+        c.drawString(x, y_pdf, label)
+        c.linkURL(url, (x, y_pdf - 2, x + tw, y_pdf + 10), relative=0)
+
+    # Espace type « retour à la ligne » sous date / ligne méta avant les liens audio (meilleure séparation visuelle).
+    _audio_y_first = h / 2 - 48 * mm
+    _audio_y_second = h / 2 - 64 * mm
+    if ru and su:
+        _cover_audio_link(label="Écouter les lectures", url=ru, y_pdf=_audio_y_first)
+        _cover_audio_link(label="Écouter la synthèse audio", url=su, y_pdf=_audio_y_second)
+    elif ru:
+        _cover_audio_link(label="Écouter les lectures", url=ru, y_pdf=_audio_y_first)
+    elif su:
+        _cover_audio_link(label="Écouter la synthèse audio", url=su, y_pdf=_audio_y_first)
 
     draw_jopai_footer_bar(c, w, h)
 
