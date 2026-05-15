@@ -60,6 +60,25 @@ def render_sunday() -> None:
         """Retourne le dimanche de la semaine ISO contenant d (dimanche inclus)."""
         return d + timedelta(days=(6 - d.weekday()) % 7)
 
+    def _readings_cache_date_key(raw: object) -> str:
+        """Normalise une date Sheets vers ISO (YYYY-MM-DD) pour la recherche dans RDC."""
+        s = str(raw or "").strip()
+        if not s:
+            return ""
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            return s[:10]
+        for sep in ("/", "."):
+            if sep in s[:10]:
+                parts = s.replace(".", "/").split("/")
+                if len(parts) == 3:
+                    try:
+                        if len(parts[0]) == 4:
+                            return date(int(parts[0]), int(parts[1]), int(parts[2])).isoformat()
+                        return date(int(parts[2]), int(parts[1]), int(parts[0])).isoformat()
+                    except Exception:
+                        pass
+        return s[:10]
+
     # UX: l’utilisateur peut choisir n’importe quel jour ; on affiche le DIMANCHE de la semaine.
     default = date.today()
     if "_lumenvia_sunday_qs" in st.session_state:
@@ -251,11 +270,11 @@ def render_sunday() -> None:
                         ),
                     ),
                 )
-                rc = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=800)
+                rc = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=6000)
                 hits = [
                     r
                     for r in rc
-                    if str(r.get("date") or "").strip() == date_str[:10]
+                    if _readings_cache_date_key(r.get("date")) == date_str[:10]
                     and str(r.get("zone") or "").strip() == zone
                     and sheet_row_status_is_live(r.get("status"))
                     and not str(r.get("error") or "").strip()
@@ -316,13 +335,35 @@ def render_sunday() -> None:
                         )
                     except Exception:
                         pass
-            except Exception:
+            except Exception as aelf_err:
                 snap = load_aelf_snapshot(date_str, zone)
                 if not snap:
-                    st.error(
+                    has_published_bundle = False
+                    if cfg.gcp_service_account and cfg.gsheet_id:
+                        try:
+                            gs_chk = build_gspread_client(cfg.gcp_service_account)
+                            gen_row = ap._latest_generation_row_for_sunday(
+                                gs=gs_chk, cfg=cfg, date_str=date_str, zone=zone
+                            )
+                            has_published_bundle = bool(
+                                gen_row and str(gen_row.get("text_gcs_path") or "").strip()
+                            )
+                        except Exception:
+                            has_published_bundle = False
+                    msg = (
                         "Impossible de joindre l’API AELF pour ce jour, et aucune copie locale n’est encore disponible. "
                         "Réessaie avec du réseau, ou choisis une date déjà consultée récemment sur cet appareil."
                     )
+                    if has_published_bundle:
+                        msg += (
+                            "\n\n**Note :** le calendrier peut indiquer une synthèse, un audio ou un PDF déjà publiés "
+                            "pour ce dimanche — cela ne remplace pas les lectures liturgiques AELF. "
+                            "En administration, ouvre **Cache lectures** et précharge le mois concerné "
+                            "(table `readings_cache` / **RDC**)."
+                        )
+                    st.error(msg)
+                    if st.session_state.get("admin_authenticated"):
+                        st.caption(f"Détail technique (admin) : {type(aelf_err).__name__} — {aelf_err}")
                     return
                 identity, texts, cached_at = snap
                 offline = True
