@@ -140,6 +140,42 @@ class VertexGeminiClient:
         text = _extract_text(raw)
         return VertexTextResult(model=f"{used_location}:{used_model}", text=text, raw=raw)
 
+    def generate_text_multimodal_auto(
+        self,
+        *,
+        preferred_models: list[str],
+        image_bytes: bytes,
+        image_mime_type: str,
+        prompt: str,
+        max_output_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> VertexTextResult:
+        """Texte à partir d’une image (inline) + consigne — modèles Gemini multimodaux Vertex."""
+        mime = (image_mime_type or "image/png").strip()
+        if not mime.lower().startswith("image/"):
+            mime = "image/png"
+        parts: list[dict[str, Any]] = [
+            {
+                "inlineData": {
+                    "mimeType": mime,
+                    "data": base64.b64encode(image_bytes).decode("ascii"),
+                }
+            },
+            {"text": prompt},
+        ]
+        raw, used_location, used_model = self._generate_auto(
+            preferred_models=preferred_models,
+            contents=[{"role": "user", "parts": parts}],
+            generation_config={
+                "temperature": float(temperature),
+                "topP": 0.9,
+                "maxOutputTokens": int(max_output_tokens),
+            },
+            timeout_s=120,
+        )
+        text = _extract_text(raw)
+        return VertexTextResult(model=f"{used_location}:{used_model}", text=text, raw=raw)
+
     def generate_audio(
         self,
         *,

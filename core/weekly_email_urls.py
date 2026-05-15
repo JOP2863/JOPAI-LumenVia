@@ -4,7 +4,44 @@ from __future__ import annotations
 
 from core.gcp_clients import build_gcs_client
 from core.gcs_signed_urls import gcs_first_signed_url, gcs_signed_url
-from core.sheets_db import fetch_records
+from core.sheets_db import fetch_records, sheet_row_status_is_live
+
+
+def _latest_illustration_description_from_ilus(
+    *,
+    gspread_client: object,
+    spreadsheet_id: str,
+    date_str: str,
+    zone: str,
+) -> str:
+    """Dernière ligne **Actif** de ``liturgy_illustrations`` / ILUS pour (date, zone)."""
+    sid = str(spreadsheet_id or "").strip()
+    if not sid:
+        return ""
+    d = str(date_str or "").strip()[:10]
+    z = str(zone or "").strip()
+    if len(d) != 10:
+        return ""
+    try:
+        rows = fetch_records(
+            gspread_client=gspread_client,
+            spreadsheet_id=sid,
+            table="liturgy_illustrations",
+            limit=0,
+        )
+    except Exception:
+        return ""
+    cand = [
+        r
+        for r in rows
+        if str(r.get("date") or "").strip()[:10] == d
+        and str(r.get("zone") or "").strip() == z
+        and sheet_row_status_is_live(r.get("status"))
+    ]
+    if not cand:
+        return ""
+    cand.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return str((cand[0] or {}).get("description_illustration") or "").strip()
 
 
 def is_readings_audio_gcs_path(path: str) -> bool:
@@ -21,7 +58,13 @@ def weekly_email_signed_urls(
     zone: str = "france",
 ) -> dict[str, str]:
     """PDF, audio synthèse, audio lectures (AudioLectures/), illustration — URLs signées pour l’e-mail hebdo."""
-    out = {"url_pdf": "", "url_audio": "", "url_audio_readings": "", "url_illustration": ""}
+    out: dict[str, str] = {
+        "url_pdf": "",
+        "url_audio": "",
+        "url_audio_readings": "",
+        "url_illustration": "",
+        "illustration_description": "",
+    }
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
     if not bucket or not getattr(cfg, "gcp_service_account", None):
         return out
@@ -29,6 +72,17 @@ def weekly_email_signed_urls(
         gcs = build_gcs_client(cfg.gcp_service_account)
     except Exception:
         return out
+    gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    if gsheet_id:
+        try:
+            out["illustration_description"] = _latest_illustration_description_from_ilus(
+                gspread_client=gs,
+                spreadsheet_id=gsheet_id,
+                date_str=date_str,
+                zone=zone,
+            )
+        except Exception:
+            pass
     p_pdf = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
     try:
         out["url_pdf"] = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_pdf) or ""
@@ -43,7 +97,7 @@ def weekly_email_signed_urls(
     except Exception:
         pass
     try:
-        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=6000)
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0)
         gens_d = [
             g
             for g in gens
@@ -53,7 +107,7 @@ def weekly_email_signed_urls(
         gen_id = str((gens_d[0] or {}).get("entity_id") or "").strip() if gens_d else ""
         if not gen_id:
             return out
-        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=6000)
+        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0)
         aud_d = [a for a in aud_rows if str(a.get("gen_entity_id") or "").strip() == gen_id]
         syn_rows = [a for a in aud_d if not is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))]
         read_rows = [a for a in aud_d if is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))]

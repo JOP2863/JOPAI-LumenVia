@@ -21,6 +21,7 @@ from core.liturgy_theme import liturgical_accent_hex
 from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
 from core.gcs_signed_urls import gcs_signed_url
+from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.pages.about import _ABOUT_MARKDOWN
 
 
@@ -203,6 +204,17 @@ def _run_incremental_sunday_outputs(
                         ) or None
                     except Exception:
                         readings_pdf_signed = None
+                ilus_desc_pdf = ""
+                if str(cfg.gsheet_id or "").strip():
+                    try:
+                        ilus_desc_pdf = _latest_illustration_description_from_ilus(
+                            gspread_client=gs,
+                            spreadsheet_id=str(cfg.gsheet_id).strip(),
+                            date_str=date_str,
+                            zone=zone,
+                        )
+                    except Exception:
+                        ilus_desc_pdf = ""
                 pdf_b = build_liturgy_sunday_pdf_bytes(
                     image_bytes=img_b,
                     week_title=week_title_pdf,
@@ -220,6 +232,7 @@ def _run_incremental_sunday_outputs(
                     audio_listen_url=aud_url,
                     audio_listen_note=aud_note,
                     audio_readings_listen_url=readings_pdf_signed,
+                    illustration_description=ilus_desc_pdf or None,
                     about_markdown=_ABOUT_MARKDOWN,
                     back_cover_image_bytes=back_cover_b,
                     accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
@@ -766,6 +779,18 @@ def _run_generate_sunday_flow(
             except Exception:
                 highlight_idx = None
 
+            ilus_desc_pdf = ""
+            if str(cfg.gsheet_id or "").strip():
+                try:
+                    ilus_desc_pdf = _latest_illustration_description_from_ilus(
+                        gspread_client=gs,
+                        spreadsheet_id=str(cfg.gsheet_id).strip(),
+                        date_str=date_str,
+                        zone=zone,
+                    )
+                except Exception:
+                    ilus_desc_pdf = ""
+
             aud_url, aud_note = ap._public_app_listen_url(date_str=date_str)
             pdf_b = build_liturgy_sunday_pdf_bytes(
                 image_bytes=img_b,
@@ -784,6 +809,7 @@ def _run_generate_sunday_flow(
                 audio_listen_url=aud_url,
                 audio_listen_note=aud_note,
                 audio_readings_listen_url=readings_cover_signed,
+                illustration_description=ilus_desc_pdf or None,
                 about_markdown=_ABOUT_MARKDOWN,
                 back_cover_image_bytes=back_cover_b,
                 accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),

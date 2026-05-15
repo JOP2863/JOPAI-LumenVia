@@ -874,6 +874,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     "url_audio": url_audio,
                     "url_audio_readings": url_audio_readings,
                     "url_illustration": url_illu,
+                    "illustration_description": (_sched_urls.get("illustration_description") or "").strip(),
                     "url_app": url_app,
                 }
     

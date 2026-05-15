@@ -57,6 +57,38 @@ def draw_lumenvia_pdf_dev_notice(c: canvas.Canvas, page_width: float, page_heigh
     c.restoreState()
 
 
+def _wrap_cover_lines_for_canvas(
+    c: canvas.Canvas,
+    text: str,
+    *,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+) -> list[str]:
+    """Retours à la ligne pour un bloc de texte pleine largeur (mesure ``stringWidth``)."""
+    raw = " ".join((text or "").replace("\r", " ").split())
+    if not raw:
+        return []
+    words = raw.split(" ")
+    lines: list[str] = []
+    current: list[str] = []
+    for w in words:
+        trial = (" ".join(current + [w])).strip() if current else w
+        if c.stringWidth(trial, font_name, font_size) <= max_width:
+            current.append(w)
+        else:
+            if current:
+                lines.append(" ".join(current))
+            if c.stringWidth(w, font_name, font_size) <= max_width:
+                current = [w]
+            else:
+                lines.append(w)
+                current = []
+    if current:
+        lines.append(" ".join(current))
+    return lines
+
+
 def draw_jopai_footer_bar(c: canvas.Canvas, page_width: float, page_height: float) -> None:
     """Bandeau bas pleine largeur + texte marque immuable."""
     hbar = 9.0 * mm
@@ -100,6 +132,7 @@ def build_liturgy_cover_pdf_bytes(
     meta_line: str | None = None,
     audio_listen_url: str | None = None,
     audio_readings_listen_url: str | None = None,
+    illustration_description: str | None = None,
     accent_hex: str | None = None,
     footer: str | None = None,
 ) -> bytes:
@@ -109,6 +142,7 @@ def build_liturgy_cover_pdf_bytes(
     - ``image_bytes`` : PNG/JPEG/WebP lisible par ReportLab (``ImageReader``).
     - ``week_title`` : ex. « 14ème Dimanche du Temps Ordinaire\n(semaine II du Psautier) ».
     - ``date_line`` : ex. « Dimanche 23 mars 2026 ».
+    - ``illustration_description`` : légende sous les liens audio (petit corps italique).
     - ``footer`` : ignoré (conservé pour compatibilité) ; le pied de page est toujours la marque **JOP AI Production**.
     """
     buf = BytesIO()
@@ -176,13 +210,39 @@ def build_liturgy_cover_pdf_bytes(
     # Espace type « retour à la ligne » sous date / ligne méta avant les liens audio (meilleure séparation visuelle).
     _audio_y_first = h / 2 - 48 * mm
     _audio_y_second = h / 2 - 64 * mm
+    last_audio_baseline = _audio_y_first
     if ru and su:
         _cover_audio_link(label="Écouter les lectures", url=ru, y_pdf=_audio_y_first)
         _cover_audio_link(label="Écouter la synthèse audio", url=su, y_pdf=_audio_y_second)
+        last_audio_baseline = _audio_y_second
     elif ru:
         _cover_audio_link(label="Écouter les lectures", url=ru, y_pdf=_audio_y_first)
+        last_audio_baseline = _audio_y_first
     elif su:
         _cover_audio_link(label="Écouter la synthèse audio", url=su, y_pdf=_audio_y_first)
+        last_audio_baseline = _audio_y_first
+
+    desc = (illustration_description or "").strip()
+    if desc:
+        font_desc = "Helvetica-Oblique"
+        size_desc = 8.2
+        leading = 3.55 * mm
+        max_w = w - 2 * margin
+        y_min = 26 * mm
+        c.setFont(font_desc, size_desc)
+        c.setFillColorRGB(0.204, 0.180, 0.161)
+        wrapped = _wrap_cover_lines_for_canvas(
+            c, desc[:2400], font_name=font_desc, font_size=size_desc, max_width=max_w
+        )
+        # Ligne vide (équivalent d’un retour chariot) entre les liens audio et la légende.
+        y_cursor = last_audio_baseline - 5.5 * mm - leading
+        avail = max(0.0, y_cursor - y_min)
+        max_lines = max(1, int(avail // leading) + 1) if leading > 0 else 8
+        for ln in wrapped[:max_lines]:
+            if y_cursor < y_min:
+                break
+            c.drawCentredString(w / 2, y_cursor, ln[:500])
+            y_cursor -= leading
 
     draw_jopai_footer_bar(c, w, h)
 

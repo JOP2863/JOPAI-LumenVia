@@ -559,6 +559,7 @@ def render_emailing_manual_broadcast(
                 "url_audio": _urls_send["url_audio"],
                 "url_audio_readings": _urls_send["url_audio_readings"],
                 "url_illustration": _urls_send["url_illustration"],
+                "illustration_description": (_urls_send.get("illustration_description") or "").strip(),
                 "url_app": url_app,
                 "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
             }

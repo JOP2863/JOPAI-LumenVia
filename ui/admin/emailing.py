@@ -160,6 +160,7 @@ def render_admin_emailing() -> None:
             "url_audio": url_audio,
             "url_audio_readings": url_audio_readings,
             "url_illustration": url_illu,
+            "illustration_description": (_urls.get("illustration_description") or "").strip(),
             "url_app": url_app,
             "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
         }
@@ -169,7 +170,7 @@ def render_admin_emailing() -> None:
 
     st.caption(
         "Astuce : pour rendre les CTA cliquables, mets directement des URLs dans le corps, par ex. "
-        "`{{url_pdf}}`, `{{url_audio}}`, `{{url_audio_readings}}`, `{{url_app}}`."
+        "`{{url_pdf}}`, `{{url_audio}}`, `{{url_audio_readings}}`, `{{url_illustration}}`, `{{illustration_description}}`, `{{url_app}}`."
     )
 
     st.divider()

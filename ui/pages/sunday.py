@@ -31,6 +31,7 @@ from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
 from core.liturgy_theme import inject_liturgical_accent_style, liturgical_accent_hex
 from core.gcs_signed_urls import gcs_signed_url
 from core.sunday_calendar_status import compute_month_content_status
+from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import loading_overlay
 from ui.liturgy_render import render_liturgy_block
 from ui.pages.about import _ABOUT_MARKDOWN
@@ -78,6 +79,13 @@ def render_sunday() -> None:
                     except Exception:
                         pass
         return s[:10]
+
+    def _readings_have_body(prem: str | None, ps: str | None, deux: str | None, ev: str | None) -> bool:
+        """True si au moins une lecture textuelle est présente (cache Sheets exploitable sans API)."""
+        for x in (prem, ps, deux, ev):
+            if (x or "").strip():
+                return True
+        return False
 
     # UX: l’utilisateur peut choisir n’importe quel jour ; on affiche le DIMANCHE de la semaine.
     default = date.today()
@@ -283,26 +291,31 @@ def render_sunday() -> None:
                     best = sorted(hits, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
                     from core.aelf import AelfDayIdentity, AelfTexts
 
-                    identity = AelfDayIdentity(
-                        date=str(best.get("date") or date_str[:10]),
-                        zone=str(best.get("zone") or zone),
-                        periode=str(best.get("periode") or "") or None,
-                        semaine=str(best.get("semaine") or "") or None,
-                        annee=str(best.get("annee") or "") or None,
-                        couleur=str(best.get("couleur") or "") or None,
-                        fete=str(best.get("fete") or "") or None,
-                        jour_liturgique_nom=str(best.get("jour_liturgique_nom") or "") or None,
-                    )
-                    texts = AelfTexts(
-                        premiere_lecture=_normalize_aelf_text_for_cache(str(best.get("premiere_lecture") or "")) or None,
-                        psaume=_normalize_aelf_text_for_cache(str(best.get("psaume") or "")) or None,
-                        deuxieme_lecture=_normalize_aelf_text_for_cache(str(best.get("deuxieme_lecture") or "")) or None,
-                        evangile=_normalize_aelf_text_for_cache(str(best.get("evangile") or "")) or None,
-                    )
+                    p1 = _normalize_aelf_text_for_cache(str(best.get("premiere_lecture") or "")) or None
+                    ps = _normalize_aelf_text_for_cache(str(best.get("psaume") or "")) or None
+                    p2 = _normalize_aelf_text_for_cache(str(best.get("deuxieme_lecture") or "")) or None
+                    ev = _normalize_aelf_text_for_cache(str(best.get("evangile") or "")) or None
+                    if _readings_have_body(p1, ps, p2, ev):
+                        identity = AelfDayIdentity(
+                            date=str(best.get("date") or date_str[:10]),
+                            zone=str(best.get("zone") or zone),
+                            periode=str(best.get("periode") or "") or None,
+                            semaine=str(best.get("semaine") or "") or None,
+                            annee=str(best.get("annee") or "") or None,
+                            couleur=str(best.get("couleur") or "") or None,
+                            fete=str(best.get("fete") or "") or None,
+                            jour_liturgique_nom=str(best.get("jour_liturgique_nom") or "") or None,
+                        )
+                        texts = AelfTexts(
+                            premiere_lecture=p1,
+                            psaume=ps,
+                            deuxieme_lecture=p2,
+                            evangile=ev,
+                        )
             except Exception:
                 pass
 
-        # 2) AELF API (cache streamlit) + snapshot disque
+        # 2) AELF API (cache streamlit) + snapshot disque — sauté si lectures déjà fournies par RDC (Sheets).
         if identity is None or texts is None:
             try:
                 identity, texts = ap.cached_aelf(date_str, zone=zone, _identity_schema=4)
@@ -465,7 +478,7 @@ def render_sunday() -> None:
         if has_readings_fmt:
             st.markdown(
                 "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.4;color:#5f4f3a;"
-                "font-size:0.95rem;\"><strong>Écouter les lectures</strong></p>",
+                "font-size:0.95rem;\"><strong>Écouter les lectures (intégrales)</strong></p>",
                 unsafe_allow_html=True,
             )
             st.audio(bundle_readings_audio[0], format=bundle_readings_audio[1])
@@ -488,7 +501,7 @@ def render_sunday() -> None:
             if has_audio_fmt:
                 st.markdown(
                     "<p style=\"text-align:center;margin:0 0 0.3rem;line-height:1.35;color:#5f4f3a;"
-                    "font-size:0.95rem;\"><strong>Audio</strong></p>",
+                    "font-size:0.95rem;\"><strong>Audio de la synthèse</strong></p>",
                     unsafe_allow_html=True,
                 )
                 if bundle_from_disk:
@@ -585,6 +598,18 @@ def render_sunday() -> None:
                                 ) or None
                             except Exception:
                                 readings_pdf_cover = None
+                        ilus_desc_pdf = ""
+                        if str(cfg.gsheet_id or "").strip():
+                            try:
+                                gs_pdf = build_gspread_client(cfg.gcp_service_account)
+                                ilus_desc_pdf = _latest_illustration_description_from_ilus(
+                                    gspread_client=gs_pdf,
+                                    spreadsheet_id=str(cfg.gsheet_id).strip(),
+                                    date_str=date_str,
+                                    zone=zone,
+                                )
+                            except Exception:
+                                ilus_desc_pdf = ""
                         synth_for_pdf = bundle_synth_text if has_any_synthesis else ""
                         if not include_catechese_pdf:
                             synth_for_pdf = ap._strip_catechese_bridge(synth_for_pdf)
@@ -644,6 +669,7 @@ def render_sunday() -> None:
                             audio_listen_url=aud_url,
                             audio_listen_note=aud_note,
                             audio_readings_listen_url=readings_pdf_cover,
+                            illustration_description=ilus_desc_pdf or None,
                             about_markdown=_ABOUT_MARKDOWN,
                             back_cover_image_bytes=back_cover_b,
                             accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
@@ -668,10 +694,19 @@ def render_sunday() -> None:
             st.caption("Administration — synthèse (texte + audio)")
             already_has_bundle = bool((bundle_synth_text or "").strip()) or (bundle_audio is not None)
             if already_has_bundle:
+                _tail = (
+                    "Les supports **PDF**, **audio synthèse** et **texte** disponibles sont regroupés en haut de la page."
+                )
+                if not bundle_readings_audio:
+                    _tail += (
+                        " **L’audio des lectures** (bloc « Écouter les lectures (intégrales) ») n’apparaît que si une ligne "
+                        "existe dans la table `audio` avec un chemin `AudioLectures/…` lié à la génération du jour ; "
+                        "sinon utilise **Compléter les manquants** avec la case « Audio des lectures » cochée."
+                    )
+                else:
+                    _tail += " **L’audio des lectures** figure au-dessus des trois colonnes."
                 st.info(
-                    "Une synthèse existe déjà pour ce dimanche (texte et/ou audio). "
-                    "Tout est **téléchargeable en haut de la page**. "
-                    "Tu peux régénérer ci-dessous si besoin.",
+                    "Une synthèse existe déjà pour ce dimanche (texte et/ou audio). " + _tail + " Tu peux régénérer ci-dessous si besoin.",
                     icon="ℹ️",
                 )
             pct = st.segmented_control(

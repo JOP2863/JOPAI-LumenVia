@@ -46,6 +46,7 @@ def _suggest_aliases() -> dict[str, str]:
         "experience_feedback": "RSTN",
         "feedback_insights": "FBIN",
         "Voix_Audio": "VOIX",
+        "liturgy_illustrations": "ILUS",
         # AliasTables garde son nom long (table maître)
     }
 
@@ -101,6 +102,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
         "experience_feedback": "Retours / mini-questionnaires post-envoi",
         "feedback_insights": "Synthèses IA (historique questionnaires)",
         "Voix_Audio": "Règles de voix TTS Gemini (synthèse / lectures)",
+        "liturgy_illustrations": "Visuels dominicaux (GCS, descriptions / légendes IA ou manuel)",
         "CMPG": "Campagnes d’envoi (scheduler)",
         "RUNS": "Exécutions (scheduler)",
         "RSTN": "Retours / mini-questionnaires post-envoi",

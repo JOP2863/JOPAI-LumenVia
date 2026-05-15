@@ -118,6 +118,7 @@ def supported_tags() -> tuple[str, ...]:
         "url_audio",
         "url_audio_readings",
         "url_illustration",
+        "illustration_description",
         "url_app",
         "optout_url",
     )

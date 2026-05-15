@@ -123,6 +123,25 @@ def with_concat(columns: list[str]) -> list[str]:
     return [*columns, "concat"]
 
 
+def liturgy_illustrations_table_spec() -> TableSpec:
+    """Métadonnées et légendes des visuels dominicaux (MARPA, alias logique ``liturgy_illustrations`` / ILUS)."""
+    return TableSpec(
+        name="liturgy_illustrations",
+        columns=with_concat(
+            [
+                *BASE_COLUMNS,
+                "date",
+                "zone",
+                "gcs_path",
+                "description_illustration",
+                "gen_entity_id",
+                "caption_source",
+                "caption_model",
+            ]
+        ),
+    )
+
+
 def default_tables() -> list[TableSpec]:
     return [
         TableSpec(
@@ -365,6 +384,7 @@ def default_tables() -> list[TableSpec]:
                 ]
             ),
         ),
+        liturgy_illustrations_table_spec(),
         TableSpec(
             name="pdf_exports",
             columns=with_concat(

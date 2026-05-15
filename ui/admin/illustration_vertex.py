@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from datetime import date
+from hashlib import sha256
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +18,7 @@ from core.gcp_clients import build_gcs_client
 from core.illustration_thumbs import gcs_thumb_path_from_source_blob
 from core.storage import blob_exists, download_bytes, upload_bytes
 from core.vertex_gemini import VertexGeminiClient
+from core.sheets_db import append_immutable_row, build_gspread_client, fetch_records, sheet_row_status_is_live
 from ui.components import loading_overlay
 
 
@@ -141,11 +143,35 @@ def _admin_execute_image_generations(
     dry_run: bool,
     preferred_models: list[str],
     skip_existing: bool,
+    caption_after_upload: bool = False,
+    caption_models: list[str] | None = None,
+    zone_liturgy: str = "france",
 ) -> list[str]:
     lines: list[str] = []
     n = len(to_run)
     prog = st.progress(0.0)
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
+    gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    cap_models = [x for x in (caption_models or []) if str(x).strip()]
+    want_cap = bool(caption_after_upload and (not dry_run) and gsheet_id and cap_models)
+    caption_gs = None
+    ilus_rows: list[dict] = []
+    if want_cap:
+        try:
+            caption_gs = build_gspread_client(cfg.gcp_service_account)
+            ilus_rows = fetch_records(
+                gspread_client=caption_gs,
+                spreadsheet_id=gsheet_id,
+                table="liturgy_illustrations",
+                limit=0,
+            )
+        except Exception as ex:
+            lines.append(
+                f"KO — client Sheets / lecture ILUS : {ex} "
+                "(légendes après upload ignorées pour ce lot)."
+            )
+            want_cap = False
+
     for i, t in enumerate(to_run):
         ds = str(t.get("date") or "")
         if skip_existing and _admin_target_has_illustration(gcs=gcs, bucket_name=bucket, target=t):
@@ -195,6 +221,21 @@ def _admin_execute_image_generations(
                     content_type=ct,
                 )
                 lines.append(f"OK {ds} → `gs://{bucket}/{dest}` ({img_res.model})")
+                if want_cap and caption_gs is not None:
+                    z = str(zone_liturgy or "").strip() or "france"
+                    cap_ln = _admin_try_append_ilus_caption_single(
+                        cfg=cfg,
+                        gcs=gcs,
+                        vx=vx,
+                        gs=caption_gs,
+                        ilus_rows=ilus_rows,
+                        t=t,
+                        path=dest,
+                        zone_liturgy=z,
+                        skip_existing=False,
+                        caption_models=cap_models,
+                    )
+                    lines.append(cap_ln)
             except Exception as ex:
                 lines.append(f"Upload KO {ds} — {ex}")
 
@@ -206,15 +247,21 @@ def _admin_execute_image_generations(
     return lines
 
 
-def _admin_finish_generation_log(lines: list[str], *, dry_run: bool) -> None:
+def _admin_finish_generation_log(lines: list[str], *, dry_run: bool, caption_ilus: bool = False) -> None:
     if not lines:
         return
     log_txt = "\n".join(lines)
     st.text_area("Journal du lot", value=log_txt, height=min(260, 80 + 18 * max(len(lines), 1)))
     if any(ln.startswith("OK ") for ln in lines):
-        st.success(
-            "Au moins une image est enregistrée sur le bucket. Cherche les lignes **OK … → `gs://`** ci-dessus."
-        )
+        if caption_ilus:
+            st.success(
+                "Au moins une **description** a été enregistrée dans **ILUS**. "
+                "Cherche les lignes **OK … ILUS** ci-dessus."
+            )
+        else:
+            st.success(
+                "Au moins une image est enregistrée sur le bucket. Cherche les lignes **OK … → `gs://`** ci-dessus."
+            )
     elif dry_run and lines:
         st.warning("Mode **aperçu seulement** : aucun fichier n’a été envoyé sur Cloud.")
 
@@ -252,6 +299,237 @@ def _admin_pick_gcs_path_for_upload(target: dict, mime_type: str) -> str:
     ds = str(target.get("date") or "").strip()
     y = ds[:4] if len(ds) >= 4 else "2026"
     return f"Images/illustrations/{y}/{ds}.png"
+
+
+def _guess_image_mime_from_gcs_path(path: str) -> str:
+    p = (path or "").lower()
+    if p.endswith(".webp"):
+        return "image/webp"
+    if p.endswith(".png"):
+        return "image/png"
+    if p.endswith(".jpg") or p.endswith(".jpeg"):
+        return "image/jpeg"
+    return "image/png"
+
+
+def _ilus_stable_entity_id(date_str: str, zone: str) -> str:
+    return sha256(f"lumen_via|ilus|{date_str}|{zone}".encode("utf-8")).hexdigest()[:24]
+
+
+def _ilus_latest_live_has_description(rows: list[dict], *, date_str: str, zone: str) -> bool:
+    d = str(date_str).strip()[:10]
+    z = str(zone or "").strip()
+    cand = [
+        r
+        for r in rows
+        if str(r.get("date") or "").strip()[:10] == d
+        and str(r.get("zone") or "").strip() == z
+        and sheet_row_status_is_live(r.get("status"))
+    ]
+    if not cand:
+        return False
+    cand.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return bool(str((cand[0] or {}).get("description_illustration") or "").strip())
+
+
+def _ilus_next_version(rows: list[dict], entity_id: str) -> int:
+    ge = str(entity_id or "").strip()
+    mx = 0
+    for r in rows:
+        if str(r.get("entity_id") or "").strip() != ge:
+            continue
+        try:
+            mx = max(mx, int(str(r.get("version") or "0").strip()))
+        except Exception:
+            pass
+    return mx + 1
+
+
+def _admin_build_illus_caption_prompt_fr(
+    target: dict,
+    date_str: str,
+    *,
+    identity: object | None = None,
+) -> str:
+    tempo = str(target.get("temps_liturgique") or "").strip()
+    col = str(target.get("couleur") or "").strip()
+    kw = target.get("keywords") or []
+    kw_txt = ", ".join(str(x) for x in kw[:14] if str(x).strip())
+    lit_lines: list[str] = []
+    if identity is not None:
+        try:
+            import app as ap
+
+            jn = ap._jour_liturgique(identity)  # type: ignore[arg-type]
+            ft = str(getattr(identity, "fete", None) or "").strip()
+            per = str(getattr(identity, "periode", None) or "").strip()
+            sem = str(getattr(identity, "semaine", None) or "").strip()
+            an = str(getattr(identity, "annee", None) or "").strip()
+            if jn:
+                lit_lines.append(f"- Nom du jour (AELF) : {jn}")
+            if ft:
+                lit_lines.append(f"- Fête / solennité (AELF) : {ft}")
+            if per:
+                lit_lines.append(f"- Temps liturgique (AELF) : {ap._liturgy_display_label(per) or per}")
+            if sem:
+                lit_lines.append(f"- Semaine (AELF) : {sem}")
+            if an:
+                lit_lines.append(f"- Année liturgique (AELF) : {ap._cycle_year_display(an) or an}")
+        except Exception:
+            pass
+    lit_block = ("\n" + "\n".join(lit_lines)) if lit_lines else ""
+    return (
+        "Tu es un assistant pour LumenVia (application catholique francophone).\n\n"
+        f"On te montre l’illustration dominicale déjà produite pour le dimanche **{date_str}**.\n"
+        "Contexte du manifeste (préparation dominicale, ambiance) :\n"
+        f"- Temps liturgique (manifeste) : {tempo or '—'}\n"
+        f"- Couleur liturgique (manifeste) : {col or '—'}\n"
+        f"- Mots-clés (manifeste) : {kw_txt or '—'}"
+        f"{lit_block}\n\n"
+        "Ces indications servent à **situer** l’image dans la semaine du dimanche ; la description doit rester "
+        "**fidèle au visible** dans l’image, sans inventer de détails non visibles.\n\n"
+        "Tâche : rédige **uniquement en français**, **2 à 4 phrases courtes**, une description accessible pour un lecteur.\n\n"
+        "Règles strictes :\n"
+        "- Décris composition, lumière, couleurs dominantes, symboles visibles sans interpréter au-delà de ce que l’image montre.\n"
+        "- **N’invente pas** de versets, titres de messes ou texte affiché (normalement aucune inscription lisible).\n"
+        "- Ton sobre et contemplatif ; pas de jargon technique (« IA », « prompt », etc.).\n\n"
+        "Réponds par la description seule, sans titre ni liste à puces."
+    )
+
+
+def _admin_try_append_ilus_caption_single(
+    *,
+    cfg: object,
+    gcs: object,
+    vx: VertexGeminiClient,
+    gs: object,
+    ilus_rows: list[dict],
+    t: dict,
+    path: str,
+    zone_liturgy: str,
+    skip_existing: bool,
+    caption_models: list[str],
+) -> str:
+    """Une cible : télécharge l’image sur GCS, légende Vertex multimodal, append ILUS. Met à jour ``ilus_rows``."""
+    gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    bucket_name = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
+    if not gsheet_id:
+        return "KO — gsheet_id manquant."
+    ds = str(t.get("date") or "").strip()[:10]
+    path = str(path or "").strip()
+    if len(ds) < 10:
+        return f"KO {ds or '?'} — date invalide."
+    if not path:
+        return f"KO {ds} — chemin GCS vide."
+    if skip_existing and _ilus_latest_live_has_description(ilus_rows, date_str=ds, zone=zone_liturgy):
+        return f"Skip {ds} — description ILUS déjà présente (Actif)."
+
+    overlay = loading_overlay(f"Légende ILUS — {ds}…")
+    try:
+        try:
+            img_bytes = download_bytes(gcs=gcs, bucket_name=bucket_name, path=path)
+        except Exception as ex:
+            return f"KO {ds} — téléchargement GCS : {ex}"
+        if not img_bytes:
+            return f"KO {ds} — fichier vide sur Cloud."
+        mime = _guess_image_mime_from_gcs_path(path)
+        ident_cap: object | None = None
+        try:
+            import app as ap
+
+            ident_cap, _tx = ap.cached_aelf(ds, zone=zone_liturgy, _identity_schema=4)
+        except Exception:
+            ident_cap = None
+        prompt = _admin_build_illus_caption_prompt_fr(t, ds, identity=ident_cap)
+        models = caption_models or ["gemini-2.0-flash"]
+        try:
+            res = vx.generate_text_multimodal_auto(
+                preferred_models=models,
+                image_bytes=img_bytes,
+                image_mime_type=mime,
+                prompt=prompt,
+                max_output_tokens=768,
+                temperature=0.2,
+            )
+        except Exception as ex:
+            return f"KO {ds} — Vertex : {ex}"
+        desc = (res.text or "").strip()
+        if not desc:
+            return f"KO {ds} — réponse Vertex vide."
+
+        eid = _ilus_stable_entity_id(ds, zone_liturgy)
+        ver = _ilus_next_version(ilus_rows, eid)
+        try:
+            new_row = append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=gsheet_id,
+                table="liturgy_illustrations",
+                values_by_col={
+                    "entity_id": eid,
+                    "version": ver,
+                    "date": ds,
+                    "zone": zone_liturgy,
+                    "gcs_path": path,
+                    "description_illustration": desc,
+                    "gen_entity_id": "",
+                    "caption_source": "vertex",
+                    "caption_model": str(res.model or ""),
+                },
+            )
+            ilus_rows.append(dict(new_row))
+            return f"OK {ds} — ILUS v{ver} ({res.model})"
+        except Exception as ex:
+            return f"KO {ds} — Sheets ILUS : {ex}"
+    finally:
+        overlay.empty()
+
+
+def _admin_execute_illus_caption_writes(
+    *,
+    cfg: object,
+    gcs: object,
+    vx: VertexGeminiClient,
+    gs: object,
+    targets_with_paths: list[tuple[dict, str]],
+    zone_liturgy: str,
+    skip_existing: bool,
+    pause_s: float,
+    caption_models: list[str],
+) -> tuple[list[str], list[dict]]:
+    """Écrit dans ILUS ; enrichit la liste locale pour les versions suivantes."""
+    lines: list[str] = []
+    gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    if not gsheet_id:
+        return (["KO — gsheet_id manquant dans les secrets."], [])
+    ilus_rows: list[dict] = fetch_records(
+        gspread_client=gs,
+        spreadsheet_id=gsheet_id,
+        table="liturgy_illustrations",
+        limit=0,
+    )
+    n = len(targets_with_paths)
+    prog = st.progress(0.0)
+    for i, (t, path) in enumerate(targets_with_paths):
+        line = _admin_try_append_ilus_caption_single(
+            cfg=cfg,
+            gcs=gcs,
+            vx=vx,
+            gs=gs,
+            ilus_rows=ilus_rows,
+            t=t,
+            path=path,
+            zone_liturgy=zone_liturgy,
+            skip_existing=skip_existing,
+            caption_models=caption_models,
+        )
+        lines.append(line)
+
+        prog.progress(min(1.0, (i + 1) / max(n, 1)))
+        if pause_s > 0 and i < n - 1:
+            time.sleep(float(pause_s))
+
+    prog.progress(1.0)
+    return lines, ilus_rows
 
 
 def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> None:
@@ -355,6 +633,35 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
         value=False,
         key="adm_img_dry",
     )
+
+    gsheet_ok = bool(str(cfg.gsheet_id or "").strip())
+    if gsheet_ok:
+        cz, cm = st.columns(2)
+        with cz:
+            zone_ilus = st.selectbox(
+                "Zone liturgique (ILUS)",
+                options=["france"],
+                index=0,
+                key="adm_ilus_zone",
+            )
+        with cm:
+            cap_models_line = st.text_input(
+                "Modèles Vertex **texte + vision** (légendes ILUS, ordre, virgules)",
+                value="gemini-2.0-flash,gemini-2.5-flash,gemini-2.5-pro",
+                key="adm_ilus_models",
+                help="Utilisés après chaque upload (si coché) et dans la section « Descriptions ILUS ».",
+            )
+        caption_models = [x.strip() for x in cap_models_line.split(",") if x.strip()] or ["gemini-2.0-flash"]
+        caption_after_upload = st.checkbox(
+            "Après chaque **upload réussi** : générer la **légende ILUS** (Vertex) et l’écrire dans Sheets",
+            value=True,
+            key="adm_img_caption_after",
+        )
+    else:
+        zone_ilus = "france"
+        caption_models = ["gemini-2.0-flash"]
+        caption_after_upload = False
+        st.caption("Sans `gsheet_id` dans les secrets, les légendes ILUS (y compris après upload) ne sont pas disponibles.")
 
     # --- Grille 10 × 6 : semaine ISO, vignette ou sélection si manquant ---
     st.divider()
@@ -491,8 +798,15 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
                 dry_run=dry_run,
                 preferred_models=preferred_models,
                 skip_existing=False,
+                caption_after_upload=bool(caption_after_upload),
+                caption_models=caption_models,
+                zone_liturgy=str(zone_ilus).strip() or "france",
             )
-            _admin_finish_generation_log(lines, dry_run=dry_run)
+            _admin_finish_generation_log(
+                lines,
+                dry_run=dry_run,
+                caption_ilus=any(" — ILUS v" in ln for ln in lines),
+            )
             if not dry_run and any(ln.startswith("OK ") for ln in lines):
                 _admin_cached_manifest_cloud_presence.clear()
 
@@ -515,10 +829,112 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
                 dry_run=dry_run,
                 preferred_models=preferred_models,
                 skip_existing=False,
+                caption_after_upload=bool(caption_after_upload),
+                caption_models=caption_models,
+                zone_liturgy=str(zone_ilus).strip() or "france",
             )
-            _admin_finish_generation_log(lines, dry_run=dry_run)
+            _admin_finish_generation_log(
+                lines,
+                dry_run=dry_run,
+                caption_ilus=any(" — ILUS v" in ln for ln in lines),
+            )
             if not dry_run and any(ln.startswith("OK ") for ln in lines):
                 _admin_cached_manifest_cloud_presence.clear()
+
+    st.divider()
+    st.subheader("Descriptions ILUS (Vertex)")
+    st.caption(
+        "Pour les **fichiers déjà sur Cloud** (sans régénérer les pixels) : envoi de l’image à Gemini (multimodal), "
+        "puis **append** dans la table **`liturgy_illustrations` / ILUS** (MARPA). "
+        "Même **zone** et **modèles texte + vision** que ceux au-dessus de la grille (y compris pour la légende juste après upload)."
+    )
+    if not str(cfg.gsheet_id or "").strip():
+        st.warning("Configure `gsheet_id` dans les secrets pour écrire dans ILUS.")
+    else:
+        pause_cap = st.number_input(
+            "Pause entre deux légendes (secondes)",
+            min_value=0,
+            max_value=120,
+            value=1,
+            step=1,
+            key="adm_ilus_pause",
+        )
+        skip_ilus_existing = st.checkbox(
+            "Ignorer les dimanches qui ont déjà une description ILUS **Actif**",
+            value=True,
+            key="adm_ilus_skip",
+        )
+        cap_run_page = st.button(
+            "Générer les descriptions — **page grille courante** (avec fichier Cloud)",
+            key="adm_ilus_run_page",
+        )
+        with st.expander("Lot complet du manifeste", expanded=False):
+            st.caption(
+                "Traite **tous** les dimanches du manifeste pour lesquels un fichier existe sur le bucket — "
+                "plusieurs dizaines d’appels Vertex possibles."
+            )
+            cap_confirm_all = st.checkbox(
+                "Je confirme le lot complet sur tout le manifeste",
+                value=False,
+                key="adm_ilus_confirm_all",
+            )
+            cap_run_all = st.button(
+                "Générer les descriptions — **tout le manifeste**",
+                key="adm_ilus_run_all",
+                type="primary",
+            )
+
+        targets_page_caps: list[tuple[dict, str]] = []
+        for gi in range(slice_start, min(slice_start + per_page, n_targets)):
+            if not has_map[gi]:
+                continue
+            fp = first_paths[gi]
+            if fp:
+                targets_page_caps.append((sorted_targets[gi], fp))
+
+        targets_all_caps: list[tuple[dict, str]] = [
+            (sorted_targets[i], first_paths[i])
+            for i in range(n_targets)
+            if has_map[i] and first_paths[i]
+        ]
+
+        if cap_run_page:
+            if not targets_page_caps:
+                st.info("Aucune illustration Cloud sur cette page de grille.")
+            else:
+                gs_ilus = build_gspread_client(cfg.gcp_service_account)
+                lines_ilus, _ = _admin_execute_illus_caption_writes(
+                    cfg=cfg,
+                    gcs=gcs,
+                    vx=vx,
+                    gs=gs_ilus,
+                    targets_with_paths=targets_page_caps,
+                    zone_liturgy=str(zone_ilus).strip() or "france",
+                    skip_existing=bool(skip_ilus_existing),
+                    pause_s=float(pause_cap),
+                    caption_models=caption_models or ["gemini-2.0-flash"],
+                )
+                _admin_finish_generation_log(lines_ilus, dry_run=False, caption_ilus=True)
+
+        if cap_run_all:
+            if not cap_confirm_all:
+                st.error("Coche la confirmation pour lancer le lot complet.")
+            elif not targets_all_caps:
+                st.info("Aucune illustration présente sur Cloud pour ce manifeste.")
+            else:
+                gs_ilus = build_gspread_client(cfg.gcp_service_account)
+                lines_ilus, _ = _admin_execute_illus_caption_writes(
+                    cfg=cfg,
+                    gcs=gcs,
+                    vx=vx,
+                    gs=gs_ilus,
+                    targets_with_paths=targets_all_caps,
+                    zone_liturgy=str(zone_ilus).strip() or "france",
+                    skip_existing=bool(skip_ilus_existing),
+                    pause_s=float(pause_cap),
+                    caption_models=caption_models or ["gemini-2.0-flash"],
+                )
+                _admin_finish_generation_log(lines_ilus, dry_run=False, caption_ilus=True)
 
 
 

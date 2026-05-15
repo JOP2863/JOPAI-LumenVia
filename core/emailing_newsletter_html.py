@@ -53,6 +53,7 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     url_audio_readings0 = (values0.get("url_audio_readings") or "").strip()
     url_app0 = (values0.get("url_app") or "").strip()
     url_illu0 = (values0.get("url_illustration") or "").strip()
+    illu_desc0 = (values0.get("illustration_description") or "").strip()
     optout0 = (values0.get("optout_url") or "").strip()
     email0 = (values0.get("email") or "").strip().lower()
 
@@ -133,6 +134,53 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             continue
         segments.append(("p", raw))
 
+    fb_url0 = ap.lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None)
+
+    def _newsletter_cta_href(bb0: str, right: str) -> str:
+        """URL du bouton pill pour une ligne « … 👉 libellé » (corps newsletter)."""
+        href = ""
+        if url_pdf0 and re.search(r"(?i)synth[èe]se.*pdf|pdf", bb0):
+            href = url_pdf0
+        elif url_audio_readings0 and re.search(
+            r"(?i)parole.*audio|lectures|textes\s+bibliques|[ée]critures", bb0
+        ):
+            href = url_audio_readings0
+        elif url_audio0 and re.search(
+            r"(?i)audio|essentiel|[ée]couter",
+            bb0,
+        ) and not re.search(r"(?i)lectures|parole.*\(lectures\)|textes\s+bibliques", bb0):
+            href = url_audio0
+        elif url_illu0 and re.search(r"(?i)image|illustration", bb0):
+            href = url_illu0
+        if not href and fb_url0 and re.search(
+            r"(?i)donner\s+mon\s+avis|avis\s+sur\s+cette\s+expérience|donner\s+votre\s+avis",
+            right,
+        ):
+            href = fb_url0
+        return href
+
+    _cta_button_labels: list[str] = []
+    for _k, _ch in segments:
+        if _k not in ("li", "cta"):
+            continue
+        _bb = (_ch or "").strip()
+        if "👉" not in _bb:
+            continue
+        _, _rt = _bb.split("👉", 1)
+        _rt = (_rt or "").strip().lstrip("👉").strip()
+        if _newsletter_cta_href(_bb, _rt):
+            _cta_button_labels.append(_rt)
+
+    def _uniform_pill_width_px(labels: list[str]) -> int | None:
+        if not labels:
+            return None
+        longest = max(labels, key=len)
+        # ~14px bold sans-serif : ordre de grandeur ~8px/caractère (FR) + padding horizontal du <a>
+        w = int(len(longest) * 8.2) + 52
+        return min(480, max(216, w))
+
+    newsletter_cta_uniform_px = _uniform_pill_width_px(_cta_button_labels)
+
     _wrap_lo: int | None = None
     _wrap_hi: int | None = None
     for _wi, (_wk, _wch) in enumerate(segments):
@@ -162,44 +210,54 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             .replace('"', "&quot;")
         )
 
+    def _pill_cta_button(*, href: str, label: str, uniform_width_px: int | None) -> str:
+        """Bouton type « carte » LumenVia (turquoise #0d9488, texte blanc gras) — compatible clients mail (table)."""
+        h = html_escape((href or "").strip())
+        lab = html_escape((label or "").strip())
+        if not h or not lab:
+            return ""
+        w = uniform_width_px if uniform_width_px and uniform_width_px > 0 else None
+        td_wh = ""
+        a_disp = 'display:inline-block;padding:11px 22px;'
+        if w:
+            td_wh = f"width:{w}px;min-width:{w}px;"
+            a_disp = (
+                "display:block;width:100%;box-sizing:border-box;text-align:center;"
+                "padding:11px 16px;"
+            )
+        a_style = (
+            f"{a_disp}"
+            "font-family:Montserrat,Helvetica,Arial,sans-serif;"
+            "font-size:14px;font-weight:700;line-height:1.35;color:#ffffff !important;text-decoration:none;"
+            "border-radius:10px;mso-line-height-rule:exactly;"
+        )
+        return (
+            '<table role="presentation" cellspacing="0" cellpadding="0" border="0" '
+            'style="margin:10px 0 14px 0;border-collapse:separate;">'
+            '<tr><td align="left" style="border-radius:10px;background:#0d9488;mso-padding-alt:0;'
+            f'{td_wh}">'
+            f'<a href="{h}" target="_blank" rel="noopener noreferrer" style="{a_style}">'
+            f"{lab}</a>"
+            "</td></tr></table>"
+        )
+
     def _bullet_html(b: str) -> str:
         bb0 = (b or "").strip()
         if "👉" in bb0:
             left, right = bb0.split("👉", 1)
             left = left.strip()
-            right = right.strip()
-            href = ""
-            if url_pdf0 and re.search(r"(?i)synth[èe]se.*pdf|pdf", bb0):
-                href = url_pdf0
-            elif url_audio_readings0 and re.search(
-                r"(?i)parole.*audio|lectures|textes\s+bibliques|[ée]critures", bb0
-            ):
-                href = url_audio_readings0
-            elif url_audio0 and re.search(
-                r"(?i)audio|essentiel|[ée]couter",
-                bb0,
-            ) and not re.search(r"(?i)lectures|parole.*\(lectures\)|textes\s+bibliques", bb0):
-                href = url_audio0
-            elif url_illu0 and re.search(r"(?i)image|illustration", bb0):
-                href = url_illu0
-            fb_url = ap.lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None)
-            if not href and fb_url and re.search(
-                r"(?i)donner\s+mon\s+avis|avis\s+sur\s+cette\s+expérience|donner\s+votre\s+avis",
-                right,
-            ):
-                href = fb_url
+            right = (right or "").strip().lstrip("👉").strip()
+            href = _newsletter_cta_href(bb0, right)
             if href:
+                btn = _pill_cta_button(
+                    href=href, label=right, uniform_width_px=newsletter_cta_uniform_px
+                )
                 if left:
-                    return (
-                        f"{_esc(left)}<br>"
-                        f"👉 <a href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\"><strong>{_esc(right)}</strong></a>"
-                    ).strip()
-                return (
-                    f"👉 <a href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\"><strong>{_esc(right)}</strong></a>"
-                ).strip()
+                    return (f"{_esc(left)}{btn}").strip()
+                return btn.strip()
             if left:
-                return f"{_esc(left)}<br>👉 <strong>{_esc(right)}</strong>".strip()
-            return f"👉 <strong>{_esc(right)}</strong>".strip()
+                return f"{_esc(left)}<br><strong>{_esc(right)}</strong>".strip()
+            return f"<strong>{_esc(right)}</strong>".strip()
         return _esc(bb0)
 
     intro_html = ""
@@ -326,13 +384,20 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     if url_illu0:
         _illu_href = html_escape(url_app0 or url_illu0)
         _illu_src = html_escape(url_illu0)
+        _alt = html_escape((illu_desc0[:180] + "…") if len(illu_desc0) > 180 else illu_desc0) if illu_desc0 else ""
         cards.append(
             "<div style=\"margin:16px 0;text-align:center;\">"
             f"<a href=\"{_illu_href}\" target=\"_blank\" rel=\"noopener noreferrer\">"
-            f"<img src=\"{_illu_src}\" alt=\"\" "
+            f"<img src=\"{_illu_src}\" alt=\"{_alt}\" "
             "style=\"border-radius:12px;max-width:260px;width:100%;height:auto;display:inline-block;border:0;\">"
             "</a></div>"
         )
+        if illu_desc0:
+            cards.append(
+                "<p style=\"margin:8px auto 0 auto;max-width:32rem;text-align:center;"
+                "font-size:13px;line-height:1.5;color:#475569;\">"
+                f"{html_escape(illu_desc0)}</p>"
+            )
 
     footer_links = []
     # Liens de footer (cibles fixes)
