@@ -39,7 +39,12 @@ from core.emailing_newsletter_html import (
     email_body_to_minimal_html,
 )
 from core.weekly_email_urls import weekly_email_signed_urls
-from ui.admin.broadcast_recipients import lumenvia_manual_broadcast_users
+from ui.admin.broadcast_recipients import (
+    count_skipped_weekly_broadcast_recipients,
+    is_broadcast_email_ok,
+    lumenvia_manual_broadcast_recipient_pairs,
+    lumenvia_manual_broadcast_users,
+)
 from ui.components import loading_overlay
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url
 
@@ -221,15 +226,38 @@ def render_emailing_manual_broadcast(
                 users_rows=users_preview,
                 subs_rows=subs_preview,
                 send_to_all=True,
+                for_email=bool(send_email),
+                for_sms=bool(send_sms),
+            )
+            skip_stats = count_skipped_weekly_broadcast_recipients(
+                users_rows=users_preview,
+                subs_rows=subs_preview,
+                for_email=bool(send_email),
+                for_sms=bool(send_sms),
             )
             em_list = sorted(
                 {
                     str(u.get("email") or "").strip().lower()
                     for u in rec_preview
-                    if str(u.get("email") or "").strip()
+                    if is_broadcast_email_ok(str(u.get("email") or ""))
                 }
             )
-            st.caption(f"Destinataires détectés : **{len(rec_preview)}** (e-mails valides : **{len(em_list)}**)")
+            st.caption(
+                f"Destinataires retenus pour cet envoi : **{len(rec_preview)}** "
+                f"(e-mails valides : **{len(em_list)}**)."
+            )
+            if skip_stats["no_user"] or skip_stats["no_email"] or skip_stats["no_phone"]:
+                parts: list[str] = []
+                if skip_stats["no_user"]:
+                    parts.append(f"{skip_stats['no_user']} sans fiche `users`")
+                if skip_stats["no_email"] and send_email:
+                    parts.append(f"{skip_stats['no_email']} sans e-mail valide")
+                if skip_stats["no_phone"] and send_sms:
+                    parts.append(f"{skip_stats['no_phone']} sans téléphone E.164")
+                st.info(
+                    "Abonnements hebdo ignorés pour cet envoi : " + ", ".join(parts) + ".",
+                    icon="ℹ️",
+                )
 
             # Exclusions (optionnel)
             excl_pick = st.multiselect(
@@ -331,40 +359,34 @@ def render_emailing_manual_broadcast(
             users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
             subs_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=6000)
 
-            def _latest_sub_by_uid() -> dict[str, dict]:
-                by: dict[str, dict] = {}
-                for r in subs_rows:
-                    if str(r.get("type") or "").strip() != "weekly_friday":
-                        continue
-                    uid0 = str(r.get("user_entity_id") or "").strip()
-                    if not uid0:
-                        continue
-                    prev = by.get(uid0)
-                    if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
-                        by[uid0] = r
-                return by
-
-            latest_sub = _latest_sub_by_uid()
-
-            by_uid_user: dict[str, dict] = {}
-            for u in users_rows:
-                uid0 = str(u.get("entity_id") or "").strip()
-                if not uid0:
-                    continue
-                prev = by_uid_user.get(uid0)
-                if not prev or str(u.get("created_at") or "") > str(prev.get("created_at") or ""):
-                    by_uid_user[uid0] = u
-
             recipients: list[tuple[str, dict]] = []
             if send_to_all:
-                for uid0, subr in latest_sub.items():
-                    if not sheet_row_status_is_live(subr.get("status")):
-                        continue
-                    if str(subr.get("opt_in") or "").strip().lower() not in ("true", "1", "oui", "yes"):
-                        continue
-                    if str(subr.get("active") or "").strip().lower() not in ("true", "1", "oui", "yes", "active"):
-                        continue
-                    recipients.append((uid0, by_uid_user.get(uid0) or {}))
+                recipients = lumenvia_manual_broadcast_recipient_pairs(
+                    users_rows=users_rows,
+                    subs_rows=subs_rows,
+                    send_to_all=True,
+                    for_email=bool(send_email),
+                    for_sms=bool(send_sms),
+                )
+                skip_send = count_skipped_weekly_broadcast_recipients(
+                    users_rows=users_rows,
+                    subs_rows=subs_rows,
+                    for_email=bool(send_email),
+                    for_sms=bool(send_sms),
+                )
+                if skip_send["no_user"] or skip_send["no_email"] or skip_send["no_phone"]:
+                    st.caption(
+                        "Ignorés : "
+                        + ", ".join(
+                            p
+                            for p in (
+                                f"{skip_send['no_user']} sans fiche users" if skip_send["no_user"] else "",
+                                f"{skip_send['no_email']} sans e-mail" if skip_send["no_email"] and send_email else "",
+                                f"{skip_send['no_phone']} sans téléphone" if skip_send["no_phone"] and send_sms else "",
+                            )
+                            if p
+                        )
+                    )
                 # Applique exclusions / limite (si demandées dans l’aperçu)
                 if excluded_emails:
                     recipients = [

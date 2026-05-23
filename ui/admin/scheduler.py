@@ -682,13 +682,17 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
         date_str = sunday.isoformat()[:10]
 
         _tf_mail = lambda v: str(v or "").strip().lower() in ("true", "1", "oui", "yes")
+        chan_em = _tf_mail(camp_snap.get("send_email"))
+        chan_sm = _tf_mail(camp_snap.get("send_sms"))
         users_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
         subs_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
         rec_preview = lumenvia_manual_broadcast_users(
-            users_rows=users_preview, subs_rows=subs_preview, send_to_all=send_to_all
+            users_rows=users_preview,
+            subs_rows=subs_preview,
+            send_to_all=send_to_all,
+            for_email=chan_em,
+            for_sms=chan_sm,
         )
-        chan_em = _tf_mail(camp_snap.get("send_email"))
-        chan_sm = _tf_mail(camp_snap.get("send_sms"))
         n_em = (
             sum(1 for u in rec_preview if str(u.get("email") or "").strip())
             if chan_em
@@ -810,7 +814,11 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
                 subs_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
                 recipients = lumenvia_manual_broadcast_users(
-                    users_rows=users_rows, subs_rows=subs_rows, send_to_all=send_to_all
+                    users_rows=users_rows,
+                    subs_rows=subs_rows,
+                    send_to_all=send_to_all,
+                    for_email=do_email,
+                    for_sms=do_sms,
                 )
                 # Applique les exclusions choisies dans l’aperçu (sécurité)
                 if send_to_all and excluded_emails:
