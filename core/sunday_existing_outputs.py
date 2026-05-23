@@ -142,6 +142,43 @@ def synthesis_audio_gcs_path_for_gen(*, gs: object, cfg: object, gen_entity_id: 
         return None
 
 
+def pdf_synthesis_listen_url(
+    *,
+    date_str: str,
+    public_app_url: str | None,
+    gcs: object,
+    bucket_name: str,
+    gcs_audio_path: str | None = None,
+    gs: object | None = None,
+    cfg: object | None = None,
+    gen_entity_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    """
+    Lien « Écouter la synthèse » pour la couverture PDF.
+
+    Préfère une URL signée GCS (fichier ``Audio/…``) lorsqu’elle est disponible ;
+    sinon retombe sur le lien public app (``PUBLIC_APP_URL`` + ``?sunday=``).
+    """
+    from core.gcs_signed_urls import gcs_signed_url
+    from core.public_listen_url import public_app_listen_url
+
+    url, note = public_app_listen_url(date_str=date_str, base_public_app_url=public_app_url)
+    p = (gcs_audio_path or "").strip()
+    if not p and gs is not None and cfg is not None:
+        ge = str(gen_entity_id or "").strip()
+        if ge:
+            p = synthesis_audio_gcs_path_for_gen(gs=gs, cfg=cfg, gen_entity_id=ge) or ""
+    bucket = str(bucket_name or "").strip()
+    if p and bucket:
+        try:
+            signed = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p)
+            if signed:
+                return signed, note
+        except Exception:
+            pass
+    return url, note
+
+
 def fetch_existing_sunday_bundle(
     *,
     gs: object,

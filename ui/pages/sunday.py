@@ -30,6 +30,7 @@ from core.local_aelf_cache import load_aelf_snapshot, persist_aelf_snapshot
 from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
 from core.liturgy_theme import inject_liturgical_accent_style, liturgical_accent_hex
 from core.gcs_signed_urls import gcs_signed_url
+from core.sunday_existing_outputs import pdf_synthesis_listen_url
 from core.sunday_calendar_status import compute_month_content_status
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import loading_overlay
@@ -610,15 +611,37 @@ def render_sunday() -> None:
                                 st.info("PDF déjà généré — réutilisation depuis Cloud.")
                                 cached_pdf = None
                         img_b = ap._fetch_liturgy_illustration_full_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
-                        aud_url, aud_note = ap._public_app_listen_url(date_str=date_str)
-                        if bundle_audio_gcs_path:
-                            signed = gcs_signed_url(
-                                gcs=gcs_top,
-                                bucket_name=str(cfg.gcs_bucket_name).strip(),
-                                path=bundle_audio_gcs_path,
-                            )
-                            if signed:
-                                aud_url = signed
+                        _base_pub = ""
+                        try:
+                            s = st.secrets
+                            _base_pub = str(
+                                s.get("PUBLIC_APP_URL") or s.get("public_app_url") or ""
+                            ).strip()
+                        except Exception:
+                            pass
+                        _gen_eid = ""
+                        if gs_top:
+                            try:
+                                _gr = ap._latest_generation_row_for_sunday(
+                                    gs=gs_top,
+                                    cfg=cfg,
+                                    date_str=date_str,
+                                    zone=zone,
+                                )
+                                if _gr:
+                                    _gen_eid = str(_gr.get("entity_id") or "").strip()
+                            except Exception:
+                                _gen_eid = ""
+                        aud_url, aud_note = pdf_synthesis_listen_url(
+                            date_str=date_str,
+                            public_app_url=_base_pub or None,
+                            gcs=gcs_top,
+                            bucket_name=str(cfg.gcs_bucket_name).strip(),
+                            gcs_audio_path=bundle_audio_gcs_path,
+                            gs=gs_top,
+                            cfg=cfg,
+                            gen_entity_id=_gen_eid or None,
+                        )
                         readings_pdf_cover = None
                         if bundle_readings_gcs_path:
                             try:

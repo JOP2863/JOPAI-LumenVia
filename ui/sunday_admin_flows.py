@@ -25,7 +25,7 @@ from core.liturgy_theme import liturgical_accent_hex
 from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
 from core.gcs_signed_urls import gcs_signed_url
-from core.sunday_existing_outputs import has_readings_audio_for_gen
+from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
 from core.sunday_gemini_tts import tts_gemini_chunked_bytes
 from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
@@ -198,14 +198,23 @@ def _run_incremental_sunday_outputs(
         try:
             with st.spinner("Fascicule PDF sur Cloud…"):
                 img_b = ap._fetch_liturgy_illustration_full_bytes(gcs=gcs, cfg=cfg, date_str=date_str)
-                aud_url, aud_note = ap._public_app_listen_url(date_str=date_str)
-                p_aud = (bundle_audio_gcs_path or "").strip() or ap._synthesis_audio_gcs_path_for_gen(
-                    gs=gs, cfg=cfg, gen_entity_id=gen_eid
+                _base_pub = ""
+                try:
+                    s = st.secrets
+                    _base_pub = str(s.get("PUBLIC_APP_URL") or s.get("public_app_url") or "").strip()
+                except Exception:
+                    pass
+                aud_url, aud_note = pdf_synthesis_listen_url(
+                    date_str=date_str,
+                    public_app_url=_base_pub or None,
+                    gcs=gcs,
+                    bucket_name=bucket,
+                    gcs_audio_path=(bundle_audio_gcs_path or "").strip()
+                    or ap._synthesis_audio_gcs_path_for_gen(gs=gs, cfg=cfg, gen_entity_id=gen_eid),
+                    gs=gs,
+                    cfg=cfg,
+                    gen_entity_id=gen_eid,
                 )
-                if p_aud:
-                    signed = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_aud)
-                    if signed:
-                        aud_url = signed
                 synth_for_pdf = synth
                 if not include_catechese_pdf:
                     synth_for_pdf = ap._strip_catechese_bridge(synth_for_pdf)
@@ -845,7 +854,19 @@ def _run_generate_sunday_flow(
                 except Exception:
                     ilus_desc_pdf = ""
 
-            aud_url, aud_note = ap._public_app_listen_url(date_str=date_str)
+            _base_pub = ""
+            try:
+                s = st.secrets
+                _base_pub = str(s.get("PUBLIC_APP_URL") or s.get("public_app_url") or "").strip()
+            except Exception:
+                pass
+            aud_url, aud_note = pdf_synthesis_listen_url(
+                date_str=date_str,
+                public_app_url=_base_pub or None,
+                gcs=gcs,
+                bucket_name=str(cfg.gcs_bucket_name).strip(),
+                gcs_audio_path=audio_path,
+            )
             pdf_b = build_liturgy_sunday_pdf_bytes(
                 image_bytes=img_b,
                 week_title=week_title_pdf,
