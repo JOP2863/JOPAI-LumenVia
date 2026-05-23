@@ -26,6 +26,8 @@ from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
 from core.gcs_signed_urls import gcs_signed_url
 from core.sunday_existing_outputs import has_readings_audio_for_gen
+from core.sunday_gemini_tts import tts_gemini_chunked_bytes
+from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.pages.about import _ABOUT_MARKDOWN
 
@@ -116,7 +118,7 @@ def _run_incremental_sunday_outputs(
                 "Clé GEMINI_API_KEY absente des secrets — impossible de générer l’audio des lectures."
             )
         else:
-            readings_plain = ap._plain_readings_for_tts(texts)
+            readings_plain = plain_readings_for_tts(texts)
             if not readings_plain.strip():
                 issues.append(
                     "Texte des lectures vide pour ce dimanche — impossible de produire l’audio. "
@@ -149,10 +151,10 @@ def _run_incremental_sunday_outputs(
                             couleur=getattr(identity, "couleur", None),
                             periode=getattr(identity, "periode", None),
                         )
-                        readings_tts = ap._compose_readings_tts_text(
+                        readings_tts = compose_readings_tts_text(
                             body=readings_plain, templates=templates_ia
                         )
-                        r_bytes, r_mime, r_ext = ap._tts_gemini_chunked_bytes(
+                        r_bytes, r_mime, r_ext = tts_gemini_chunked_bytes(
                             cfg=cfg, text=readings_tts, voice_name=voice_read
                         )
                     day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
@@ -686,7 +688,7 @@ def _run_generate_sunday_flow(
 
     readings_cover_signed: str | None = None
     if generate_readings_audio:
-        readings_plain = ap._plain_readings_for_tts(texts)
+        readings_plain = plain_readings_for_tts(texts)
         if readings_plain.strip():
             try:
                 with st.spinner("LumenVia génère l’audio des lectures (AELF)…"):
@@ -710,8 +712,8 @@ def _run_generate_sunday_flow(
                                 f"Voix lectures retenue : **{voice_read}** "
                                 f"(règle `#ID {perf['voice_lectures_rule_id']}`)."
                             )
-                    readings_tts = ap._compose_readings_tts_text(body=readings_plain, templates=templates)
-                    r_bytes, r_mime, r_ext = ap._tts_gemini_chunked_bytes(
+                    readings_tts = compose_readings_tts_text(body=readings_plain, templates=templates)
+                    r_bytes, r_mime, r_ext = tts_gemini_chunked_bytes(
                         cfg=cfg, text=readings_tts, voice_name=voice_read
                     )
                 day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
