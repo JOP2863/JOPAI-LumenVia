@@ -211,7 +211,7 @@ def render_admin_plan_consolide() -> None:
       </td>
     </tr>
     <tr>
-      <td>IA — « Passerelle catéchèse » (<strong>Stone Card</strong>) dans la synthèse + option PDF</td>
+      <td>IA — « Passerelle catéchèse » dans la synthèse + option PDF</td>
       <td><span class="lv-st-partiel">Livré base</span></td>
       <td>
         Section dédiée dans la synthèse + chapitre PDF séparé ; option d’exclusion PDF côté UI.

@@ -215,10 +215,11 @@ def _seed_voix_audio_defaults(*, gc, gsheet_id: str) -> int:
     return len(bulk)
 
 
+# Levier B : consignes documentaires (admin / Voix_Audio) — non concaténées au texte TTS (voir spoken_text_for_tts).
 _AUDIO_PROMPT_SPECS: list[tuple[str, str, str]] = [
     (
         "audio_style_default",
-        "TTS — style oral par défaut (synthèse)",
+        "TTS — style oral par défaut (synthèse) — consigne admin",
         (
             "Tu es la voix de LumenVia. Lis le texte suivant en français avec un ton chaleureux et posé, "
             "comme un accompagnateur qui partage la Parole du dimanche.\n"
@@ -229,14 +230,14 @@ _AUDIO_PROMPT_SPECS: list[tuple[str, str, str]] = [
     ),
     (
         "audio_style_paques",
-        "TTS — surcouche temps pascal (synthèse)",
+        "TTS — surcouche temps pascal (synthèse) — consigne admin",
         (
             "Accent léger de joie et de clarté : comme une bonne nouvelle qui se déploie, sans emphase théâtrale."
         ),
     ),
     (
         "audio_style_careme",
-        "TTS — surcouche Carême (synthèse)",
+        "TTS — surcouche Carême (synthèse) — consigne admin",
         (
             "Garde une gravité paisible : registre un peu plus bas, silences un peu plus longs entre les paragraphes ; "
             "pas de dramatisation."
@@ -244,7 +245,7 @@ _AUDIO_PROMPT_SPECS: list[tuple[str, str, str]] = [
     ),
     (
         "audio_style_lectures",
-        "TTS — style lectures du lectionnaire",
+        "TTS — style lectures du lectionnaire — consigne admin",
         (
             "Tu es lecteur du lectionnaire dominical : lis avec sobriété liturgique ; marque clairement le passage "
             "d'une lecture à l'autre par une courte pause ; pour l'Évangile, une légère élévation respectueuse."

@@ -499,20 +499,23 @@ def build_liturgy_body_pdf_bytes(
             from PIL import ImageDraw
 
             pil = PILImage.open(BytesIO(back_cover_image_bytes)).convert("RGB")
-            # Liseré très fin autour du montage (accent liturgique si disponible)
+            # Accent liturgique (liseré montage + encadrement vignette courante)
+            accent_rgb = (212, 175, 55)  # #D4AF37
+            try:
+                hx = str(accent_hex or "").strip() or "#D4AF37"
+                stroke_rl = colors.HexColor(hx)
+                accent_rgb = (
+                    int(round(stroke_rl.red * 255)),
+                    int(round(stroke_rl.green * 255)),
+                    int(round(stroke_rl.blue * 255)),
+                )
+            except Exception:
+                pass
+            # Liseré très fin autour du montage
             try:
                 draw0 = ImageDraw.Draw(pil)
-                hx = str(accent_hex or "").strip() or "#D4AF37"
-                stroke = colors.HexColor(hx)
-                # ReportLab -> PIL RGB
-                rgb = (
-                    int(round(stroke.red * 255)),
-                    int(round(stroke.green * 255)),
-                    int(round(stroke.blue * 255)),
-                )
                 w, h0 = pil.size
-                # 1px : très fin, discret
-                draw0.rectangle([1, 1, max(1, w - 2), max(1, h0 - 2)], outline=rgb, width=1)
+                draw0.rectangle([1, 1, max(1, w - 2), max(1, h0 - 2)], outline=accent_rgb, width=1)
             except Exception:
                 pass
             # Encadre la vignette correspondant au dimanche du PDF (index dans la grille annuelle)
@@ -531,9 +534,12 @@ def build_liturgy_body_pdf_bytes(
                     x1 = x_cell + cell
                     y1 = y_cell + cell
                     draw = ImageDraw.Draw(pil)
-                    stroke = (13, 148, 136)  # turquoise JOPAI
                     for w in (7, 5, 3):
-                        draw.rectangle([x_cell + w, y_cell + w, x1 - w, y1 - w], outline=stroke, width=2)
+                        draw.rectangle(
+                            [x_cell + w, y_cell + w, x1 - w, y1 - w],
+                            outline=accent_rgb,
+                            width=2,
+                        )
                 except Exception:
                     pass
             iw, ih = pil.size

@@ -45,7 +45,7 @@ _PROMPT_TEMPLATE_LABELS: dict[str, str] = {
     "instructions_base_md": "Socle — consignes générales (structure du prompt)",
     "overlay_takeaways": "Surcouche — inclure « Le Psaume » + « À retenir »",
     "overlay_no_takeaways": "Surcouche — sans section « À retenir »",
-    "overlay_catechese_bridge": "Surcouche — passerelle catéchèse (Stone Card)",
+    "overlay_catechese_bridge": "Surcouche — passerelle catéchèse",
     "retry_hardened_prefix": "Surcouche — préfixe de relance (anti-hallucination renforcée)",
     "audio_style_default": "TTS — style oral par défaut (synthèse)",
     "audio_style_paques": "TTS — surcouche temps pascal (synthèse)",
@@ -70,19 +70,19 @@ socle `instructions_base_md` (Sheets) + surcouche selon les options cochées
 (`overlay_takeaways` / `overlay_no_takeaways` / `overlay_catechese_bridge`) + secret sauce.
 
 **Audio de la synthèse** :  
-préfixe `audio_style_default` (lu mais non visible) + texte de la synthèse, lu par la voix
-résolue dans **`Voix_Audio`** :
+texte de la synthèse seul (les clés `audio_style_*` sont des **consignes admin**, non lues à voix haute),
+lu par la voix résolue dans **`Voix_Audio`** :
 
 | Couleur / Temps du dimanche | Voix retenue |
 |---|---|
 | Couleur **violet** (Avent / Carême) | **Sulafat** (douce) |
 | Couleur **rouge** (Pentecôte, martyrs…) | **Sadachbia** (vibrante) |
 | Temps **pascal** (sans couleur spéciale) | **Laomedeia** (tonique) |
-| Temps **Carême** (sans couleur spéciale) | **Vindemiatrix** (douce) + surcouche `audio_style_careme` |
+| Temps **Carême** (sans couleur spéciale) | **Vindemiatrix** (douce) |
 | Tout le reste | **Achird** (chaleureuse) |
 
 **Audio des lectures AELF** *(option à cocher au moment de la génération)* :  
-préfixe `audio_style_lectures` + 4 lectures, voix **Charon** (lecteur).
+4 lectures AELF (sans lire `audio_style_lectures` à voix haute — consigne admin uniquement), voix **Charon** (lecteur).
 """
     )
 
@@ -775,12 +775,13 @@ def render_admin_test_resources() -> None:
         _render_admin_voix_audio_section(cfg=cfg, gs=gs)
 
     with st.expander(
-        "Audio — styles de lecture (prompts `audio_style_*`)",
+        "Audio — consignes de style (prompts `audio_style_*`, documentation)",
         expanded=False,
         key="adm_res_exp_audio",
     ):
         st.caption(
-            "Préfixes ajoutés au texte envoyé au TTS Gemini (pas au modèle texte). "
+            "Ces textes ne sont **pas** envoyés au TTS (Vertex / Gemini) : ils documentent le style attendu "
+            "et complètent la table `Voix_Audio`. Seul le corps liturgique ou la synthèse est lu à voix haute. "
             "Append-only : chaque enregistrement crée une nouvelle version."
         )
         _render_admin_prompts_editor_section(

@@ -9,6 +9,8 @@ import requests
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 
+from core.sunday_readings_tts import spoken_text_for_tts
+
 
 @dataclass(frozen=True)
 class VertexTextResult:
@@ -183,6 +185,7 @@ class VertexGeminiClient:
         text: str,
         voice_name: str = "Kore",
     ) -> VertexAudioResult:
+        text = spoken_text_for_tts(text)
         raw, used_location, used_model = self._generate_auto(
             preferred_models=[model],
             contents=[{"role": "user", "parts": [{"text": text}]}],
@@ -214,6 +217,7 @@ class VertexGeminiClient:
         text: str,
         voice_name: str = "Kore",
     ) -> VertexAudioResult:
+        text = spoken_text_for_tts(text)
         raw, used_location, used_model = self._generate_auto(
             preferred_models=preferred_models,
             contents=[{"role": "user", "parts": [{"text": text}]}],

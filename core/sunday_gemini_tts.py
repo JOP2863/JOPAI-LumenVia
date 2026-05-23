@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.audio_utils import join_wav_bytes, normalize_audio_bytes
 from core.gemini_tts_api import GeminiTtsApiClient
+from core.sunday_readings_tts import spoken_text_for_tts
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
 
 
@@ -49,7 +50,8 @@ def tts_gemini_chunked_bytes(*, cfg: object, text: str, voice_name: str | None =
     """Synthèse vocale longue via Gemini API (fragments), même stratégie que le fallback synthèse."""
     if voice_name is None or not str(voice_name).strip():
         voice_name = DEFAULT_GEMINI_TTS_VOICE
-    if not (text or "").strip():
+    text = spoken_text_for_tts(text)
+    if not text:
         raise ValueError("Texte vide")
     if not getattr(cfg, "gemini_api_key", None):
         raise RuntimeError("GEMINI_API_KEY requise pour l’audio des lectures (TTS fragmenté).")

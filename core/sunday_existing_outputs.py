@@ -5,7 +5,7 @@ from __future__ import annotations
 from core.audio_utils import normalize_audio_bytes
 from core.illustration_thumbs import THUMB_GCS_PREFIX
 from core.sheets_db import fetch_records
-from core.storage import download_bytes
+from core.storage import blob_exists, download_bytes
 from core.weekly_email_urls import is_readings_audio_gcs_path as _is_readings_audio_gcs_path
 
 
@@ -88,16 +88,33 @@ def latest_generation_row_for_sunday(*, gs: object, cfg: object, date_str: str, 
         return None
 
 
-def has_readings_audio_for_gen(*, gs: object, cfg: object, gen_entity_id: str) -> bool:
+def has_readings_audio_for_gen(
+    *,
+    gs: object,
+    cfg: object,
+    gen_entity_id: str,
+    gcs: object | None = None,
+) -> bool:
+    """True si une ligne ``audio`` lectures existe et que l’objet GCS est présent (si ``gcs`` fourni)."""
     ge = str(gen_entity_id or "").strip()
     if not ge:
         return False
+    bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
     try:
         audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0)
         for a in audios:
             if str(a.get("gen_entity_id") or "").strip() != ge:
                 continue
-            if _is_readings_audio_gcs_path(str(a.get("gcs_path") or "")):
+            path = str(a.get("gcs_path") or "").strip()
+            if not path or not _is_readings_audio_gcs_path(path):
+                continue
+            if gcs is not None and bucket:
+                try:
+                    if blob_exists(gcs=gcs, bucket_name=bucket, path=path):
+                        return True
+                except Exception:
+                    continue
+            else:
                 return True
         return False
     except Exception:

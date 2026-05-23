@@ -1,11 +1,31 @@
-"""Préparation texte pour TTS des lectures et de la synthèse."""
+"""Préparation texte pour TTS des lectures et de la synthèse (Vertex + Gemini API)."""
 
 from __future__ import annotations
 
 import re
 
 from core.aelf_text_cleanup import clean_aelf_text_for_display
-from core.liturgy_theme import norm_key
+
+# Clés ``Paramètres_IA`` (Levier B) : documentation admin / choix de voix — jamais lues à voix haute.
+AUDIO_STYLE_TEMPLATE_KEYS = frozenset(
+    {
+        "audio_style_default",
+        "audio_style_paques",
+        "audio_style_careme",
+        "audio_style_lectures",
+    }
+)
+
+
+def spoken_text_for_tts(body: str) -> str:
+    """
+    Texte envoyé tel quel à Vertex ou Gemini TTS.
+
+    Les modèles ne distinguent pas « consigne » et « contenu » : tout le champ ``text``
+    est prononcé. Le style oral est porté par ``Voix_Audio`` (nom de voix), pas par les
+    clés ``audio_style_*`` dans Sheets.
+    """
+    return (body or "").strip()
 
 
 def plain_readings_for_tts(texts: object) -> str:
@@ -26,30 +46,18 @@ def plain_readings_for_tts(texts: object) -> str:
     return "\n\n".join(parts).strip()
 
 
-def compose_synthesis_tts_text(*, body: str, templates: dict[str, str], periode: str | None) -> str:
-    """Préfixe instructions TTS (Levier B) + corps synthèse."""
-    base = (templates.get("audio_style_default") or "").strip()
-    k = norm_key(periode)
-    extras: list[str] = []
-    if k == "pascal" or "pascal" in k:
-        x = (templates.get("audio_style_paques") or "").strip()
-        if x:
-            extras.append(x)
-    elif "careme" in k:
-        x = (templates.get("audio_style_careme") or "").strip()
-        if x:
-            extras.append(x)
-    parts: list[str] = []
-    if base:
-        parts.append(base)
-    parts.extend(extras)
-    parts.append((body or "").strip())
-    return "\n\n".join(parts)
+def compose_synthesis_tts_text(
+    *,
+    body: str,
+    templates: dict[str, str] | None = None,
+    periode: str | None = None,
+) -> str:
+    """Texte lu pour l’audio de la synthèse (sans préfixes ``audio_style_*``)."""
+    del templates, periode  # compatibilité des appels existants
+    return spoken_text_for_tts(body)
 
 
-def compose_readings_tts_text(*, body: str, templates: dict[str, str]) -> str:
-    lect = (templates.get("audio_style_lectures") or "").strip()
-    b = (body or "").strip()
-    if lect:
-        return lect + "\n\n" + b
-    return b
+def compose_readings_tts_text(*, body: str, templates: dict[str, str] | None = None) -> str:
+    """Texte lu pour l’audio des lectures intégrales (sans préfixe ``audio_style_lectures``)."""
+    del templates
+    return spoken_text_for_tts(body)

@@ -49,6 +49,7 @@ from core.sunday_readings_tts import (
     compose_readings_tts_text as _compose_readings_tts_text,
     compose_synthesis_tts_text as _compose_synthesis_tts_text,
     plain_readings_for_tts as _plain_readings_for_tts,
+    spoken_text_for_tts as _spoken_text_for_tts,
 )
 from core.synthesis_vertex_prompt import build_sunday_vertex_synthesis_prompt as _build_prompt
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url, top_nav

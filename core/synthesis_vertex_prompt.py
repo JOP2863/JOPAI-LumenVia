@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# Budget fixe pour la section « Passerelle catéchèse — L’écho des paraboles » (indépendant du % synthèse).
+CATECHESE_BRIDGE_TARGET_WORDS = 275
+
 
 def build_sunday_vertex_synthesis_prompt(
     *,
@@ -9,6 +12,7 @@ def build_sunday_vertex_synthesis_prompt(
     length_words: int,
     include_takeaways: bool,
     include_catechese_bridge: bool,
+    catechese_bridge_words: int | None = None,
     templates: dict[str, str] | None = None,
     identity: dict,
     readings: dict,
@@ -35,10 +39,12 @@ def build_sunday_vertex_synthesis_prompt(
     )
 
     catechese_block = ""
+    bridge_words = 0
     if include_catechese_bridge:
+        bridge_words = int(catechese_bridge_words or CATECHESE_BRIDGE_TARGET_WORDS)
         catechese_block = tpls.get("overlay_catechese_bridge") or (
             "\nAjouter à la fin une section titrée exactement : « Passerelle catéchèse — L’écho des paraboles ».\n"
-            "Cette section doit être une “Stone Card” structurée en 5 sous-parties (titres exacts) :\n"
+            "Cette passerelle catéchèse doit être structurée en 5 sous-parties (titres exacts) :\n"
             "Important : ne mets pas de numérotation (pas de « 1) », « 2) », etc.).\n"
             "Important : n'utilise aucun emoji, aucune puce décorative, aucun symbole (ni carrés, ni ronds), et aucun caractère isolé en préfixe.\n"
             "Chaque sous-partie doit commencer par le TITRE SEUL sur une ligne (ex: « La Scène Visuelle »), puis le texte sur les lignes suivantes.\n"
@@ -53,11 +59,26 @@ def build_sunday_vertex_synthesis_prompt(
             "- Si un point théologique est complexe/controversé, inviter à en parler avec un animateur/catéchiste.\n"
         )
 
+    takeaways_note = ', section « À retenir » incluse' if include_takeaways else ""
+    length_synth = (
+        f"Contrainte de longueur — synthèse générale (mise en situation, développement{takeaways_note}, "
+        f"hors passerelle catéchèse) : vise environ {length_words} mots (+/- 10%)."
+    )
+    length_parts = [length_synth]
+    if include_catechese_bridge:
+        length_parts.append(
+            f"Contrainte de longueur — passerelle catéchèse seule (« Passerelle catéchèse — L’écho des paraboles ») : "
+            f"vise environ {bridge_words} mots (+/- 10%), indépendamment du pourcentage de synthèse ; "
+            f"ne rogne pas cette section pour respecter la synthèse générale."
+        )
+    length_block = "\n".join(length_parts)
+
     return f"""
 {instructions}
 
 Paramètres:
-- length_words: {length_words}
+- length_words_synthesis: {length_words}
+- length_words_catechese_bridge: {bridge_words if include_catechese_bridge else 0}
 - include_takeaways: {takeaways}
 - include_catechese_bridge: {"true" if include_catechese_bridge else "false"}
 - style: simple
@@ -74,5 +95,5 @@ Commence par un court paragraphe de mise en situation : comment la couleur litur
 Ensuite, rédige la synthèse en français en respectant STRICTEMENT les contraintes (zéro invention).
 {psalm_block}
 {catechese_block}
-Contrainte de longueur: vise {length_words} mots (+/- 10%). Ne termine pas avant d'avoir atteint la longueur cible.
+{length_block}
 """.strip()

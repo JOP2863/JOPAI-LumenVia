@@ -14,6 +14,10 @@ from core.audio_utils import join_wav_bytes, normalize_audio_bytes
 from core.gcp_clients import build_gcs_client
 from core.gemini_tts_api import GeminiTtsApiClient
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
+from core.synthesis_vertex_prompt import (
+    CATECHESE_BRIDGE_TARGET_WORDS,
+    build_sunday_vertex_synthesis_prompt,
+)
 from core.sheets_db import append_immutable_row, build_gspread_client
 from core.storage import blob_exists, download_bytes, upload_bytes, upload_text
 from core.local_bundle_cache import persist_sunday_bundle
@@ -21,8 +25,31 @@ from core.liturgy_theme import liturgical_accent_hex
 from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
 from core.gcs_signed_urls import gcs_signed_url
+from core.sunday_existing_outputs import has_readings_audio_for_gen
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.pages.about import _ABOUT_MARKDOWN
+
+
+def _incremental_flash_payload(*, done: list[str], issues: list[str], skipped: list[str]) -> dict[str, str]:
+    """Message utilisateur après « Compléter les manquants » (survit au rerun Streamlit)."""
+    if done:
+        return {"level": "success", "message": "Complété : " + " · ".join(done) + "."}
+    if issues:
+        return {"level": "warning", "message": " ".join(issues)}
+    if skipped:
+        return {
+            "level": "info",
+            "message": "Rien à compléter : "
+            + " · ".join(skipped)
+            + " (selon les cases cochées et le stockage Cloud).",
+        }
+    return {
+        "level": "warning",
+        "message": (
+            "Aucune action effectuée. Coche **Audio des lectures** et/ou **fascicule PDF**, "
+            "ou vérifie que la synthèse du dimanche est bien enregistrée."
+        ),
+    }
 
 
 def _run_incremental_sunday_outputs(
@@ -40,20 +67,27 @@ def _run_incremental_sunday_outputs(
     also_pdf_if_missing: bool,
     also_readings_if_missing: bool,
     pdf_key: str,
-) -> None:
+) -> dict[str, str]:
     """Sans nouvelle synthèse Vertex : audio des lectures (TTS) et/ou fascicule PDF si absents sur Cloud."""
     import app as ap
     date_str = str(identity.date)
+    done: list[str] = []
+    issues: list[str] = []
+    skipped: list[str] = []
     gen_row = ap._latest_generation_row_for_sunday(gs=gs, cfg=cfg, date_str=date_str, zone=zone)
     if not gen_row:
-        st.error(
-            "Aucune synthèse enregistrée pour cette date. Utilise d’abord « Tout régénérer (long) »."
-        )
-        return
+        return {
+            "level": "error",
+            "message": (
+                "Aucune synthèse enregistrée pour cette date. Utilise d’abord « Tout régénérer (long) »."
+            ),
+        }
     gen_eid = str(gen_row.get("entity_id") or "").strip()
     if not gen_eid:
-        st.error("Enregistrement de génération invalide (identifiant manquant).")
-        return
+        return {
+            "level": "error",
+            "message": "Enregistrement de génération invalide (identifiant manquant).",
+        }
 
     synth = (bundle_synth_text or "").strip()
     if not synth:
@@ -69,81 +103,95 @@ def _run_incremental_sunday_outputs(
                 st.warning(f"Lecture du texte de synthèse sur Cloud impossible : {ex}")
                 synth = ""
 
-    done: list[str] = []
     readings_path_this_run: str | None = None
+    has_readings_audio = has_readings_audio_for_gen(
+        gs=gs, cfg=cfg, gen_entity_id=gen_eid, gcs=gcs
+    )
 
-    if (
-        also_readings_if_missing
-        and not ap._has_readings_audio_for_gen(gs=gs, cfg=cfg, gen_entity_id=gen_eid)
-    ):
-        readings_plain = ap._plain_readings_for_tts(texts)
-        if not readings_plain.strip():
-            st.warning("Texte des lectures vide — impossible de produire l’audio des lectures.")
+    if also_readings_if_missing:
+        if has_readings_audio:
+            skipped.append("audio des lectures déjà publié")
+        elif not getattr(cfg, "gemini_api_key", None):
+            issues.append(
+                "Clé GEMINI_API_KEY absente des secrets — impossible de générer l’audio des lectures."
+            )
         else:
-            try:
-                with st.spinner("Audio des lectures (TTS)…"):
-                    templates_ia: dict[str, str] = {}
-                    voix_r: list[dict] = []
-                    try:
-                        templates_ia = ap._load_prompt_templates_cached(
-                            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
-                            service_account_fingerprint=ap._service_account_fingerprint(
-                                getattr(cfg, "gcp_service_account", {}) or {}
-                            ),
-                        )
-                        voix_r = ap._load_voix_rules_cached(
-                            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
-                            service_account_fingerprint=ap._service_account_fingerprint(
-                                getattr(cfg, "gcp_service_account", {}) or {}
-                            ),
-                        )
-                    except Exception:
-                        templates_ia = {}
-                        voix_r = []
-                    voice_read = pick_voice_name(
-                        voix_r,
-                        cible="lectures",
-                        couleur=getattr(identity, "couleur", None),
-                        periode=getattr(identity, "periode", None),
-                    )
-                    readings_tts = ap._compose_readings_tts_text(body=readings_plain, templates=templates_ia)
-                    r_bytes, r_mime, r_ext = ap._tts_gemini_chunked_bytes(
-                        cfg=cfg, text=readings_tts, voice_name=voice_read
-                    )
-                day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
-                readings_path = f"AudioLectures/{day_for_path_inc}/{gen_eid}.{r_ext}"
-                upload_bytes(
-                    gcs=gcs,
-                    bucket_name=cfg.gcs_bucket_name,
-                    path=readings_path,
-                    data=r_bytes,
-                    content_type=r_mime,
+            readings_plain = ap._plain_readings_for_tts(texts)
+            if not readings_plain.strip():
+                issues.append(
+                    "Texte des lectures vide pour ce dimanche — impossible de produire l’audio. "
+                    "Ouvre **Cache lectures** et précharge le mois, ou vérifie l’API AELF."
                 )
-                append_immutable_row(
-                    gspread_client=gs,
-                    spreadsheet_id=cfg.gsheet_id,
-                    table="audio",
-                    values_by_col={
-                        "entity_id": sha256(f"audio_lect|{gen_eid}|{readings_path}".encode("utf-8")).hexdigest()[:24],
-                        "gen_entity_id": gen_eid,
-                        "voice": voice_read,
-                        "format": r_ext,
-                        "gcs_path": readings_path,
-                    },
-                )
-                readings_path_this_run = readings_path
-                done.append("audio des lectures")
-            except Exception as ex:
-                st.warning(f"Audio des lectures non publié : {ex}")
+            else:
+                try:
+                    with st.spinner("Audio des lectures (TTS)…"):
+                        templates_ia: dict[str, str] = {}
+                        voix_r: list[dict] = []
+                        try:
+                            templates_ia = ap._load_prompt_templates_cached(
+                                gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+                                service_account_fingerprint=ap._service_account_fingerprint(
+                                    getattr(cfg, "gcp_service_account", {}) or {}
+                                ),
+                            )
+                            voix_r = ap._load_voix_rules_cached(
+                                gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+                                service_account_fingerprint=ap._service_account_fingerprint(
+                                    getattr(cfg, "gcp_service_account", {}) or {}
+                                ),
+                            )
+                        except Exception:
+                            templates_ia = {}
+                            voix_r = []
+                        voice_read = pick_voice_name(
+                            voix_r,
+                            cible="lectures",
+                            couleur=getattr(identity, "couleur", None),
+                            periode=getattr(identity, "periode", None),
+                        )
+                        readings_tts = ap._compose_readings_tts_text(
+                            body=readings_plain, templates=templates_ia
+                        )
+                        r_bytes, r_mime, r_ext = ap._tts_gemini_chunked_bytes(
+                            cfg=cfg, text=readings_tts, voice_name=voice_read
+                        )
+                    day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
+                    readings_path = f"AudioLectures/{day_for_path_inc}/{gen_eid}.{r_ext}"
+                    upload_bytes(
+                        gcs=gcs,
+                        bucket_name=cfg.gcs_bucket_name,
+                        path=readings_path,
+                        data=r_bytes,
+                        content_type=r_mime,
+                    )
+                    append_immutable_row(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="audio",
+                        values_by_col={
+                            "entity_id": sha256(
+                                f"audio_lect|{gen_eid}|{readings_path}".encode("utf-8")
+                            ).hexdigest()[:24],
+                            "gen_entity_id": gen_eid,
+                            "voice": voice_read,
+                            "format": r_ext,
+                            "gcs_path": readings_path,
+                        },
+                    )
+                    readings_path_this_run = readings_path
+                    done.append("audio des lectures")
+                except Exception as ex:
+                    issues.append(f"Audio des lectures non publié : {ex}")
 
     fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
-    need_pdf = bool(
-        also_pdf_if_missing
-        and synth
-        and bucket
-        and not blob_exists(gcs=gcs, bucket_name=bucket, path=fasc_path)
-    )
+    pdf_on_cloud = bool(bucket and blob_exists(gcs=gcs, bucket_name=bucket, path=fasc_path))
+    need_pdf = bool(also_pdf_if_missing and synth and bucket and not pdf_on_cloud)
+    if also_pdf_if_missing:
+        if pdf_on_cloud:
+            skipped.append("fascicule PDF déjà sur Cloud")
+        elif not synth:
+            issues.append("Synthèse introuvable — le fascicule PDF ne peut pas être produit.")
     if need_pdf:
         try:
             with st.spinner("Fascicule PDF sur Cloud…"):
@@ -248,15 +296,9 @@ def _run_incremental_sunday_outputs(
                 st.session_state[pdf_key] = pdf_b
                 done.append("fascicule PDF")
         except Exception as ex:
-            st.warning(f"Fascicule PDF non produit : {ex}")
+            issues.append(f"Fascicule PDF non produit : {ex}")
 
-    if not done:
-        st.info(
-            "Rien à compléter : l’audio des lectures et le fascicule PDF sont déjà présents "
-            "(selon les cases et le stockage Cloud)."
-        )
-    else:
-        st.success("Complété : " + " · ".join(done) + ".")
+    return _incremental_flash_payload(done=done, issues=issues, skipped=skipped)
 
 
 def _run_generate_sunday_flow(
@@ -276,9 +318,10 @@ def _run_generate_sunday_flow(
 ) -> None:
     import app as ap
     target_words = max(80, int(total_words * (pct / 100.0)))
-    # La Passerelle catéchèse ajoute un module structuré : on augmente le budget pour éviter qu’elle disparaisse.
-    if include_catechese_bridge:
-        target_words += 180
+    catechese_bridge_words = (
+        CATECHESE_BRIDGE_TARGET_WORDS if include_catechese_bridge else 0
+    )
+    total_words_budget = target_words + catechese_bridge_words
     templates: dict[str, str] = {}
     try:
         templates = ap._load_prompt_templates_cached(
@@ -314,11 +357,14 @@ def _run_generate_sunday_flow(
             f"- Année / cycle ({identity.annee or '—'}): {ap._explain_liturgical_cycle(identity.annee)}",
         ]
     )
-    prompt = ap._build_prompt(
+    prompt = build_sunday_vertex_synthesis_prompt(
         instructions=instructions,
         length_words=int(target_words),
         include_takeaways=bool(include_takeaways),
         include_catechese_bridge=bool(include_catechese_bridge),
+        catechese_bridge_words=(
+            int(catechese_bridge_words) if include_catechese_bridge else None
+        ),
         templates=templates,
         identity={
             "date": identity.date,
@@ -351,7 +397,7 @@ def _run_generate_sunday_flow(
         try:
             # Évite les synthèses tronquées : 2048 tokens est souvent trop court pour une synthèse “longue”.
             # Heuristique simple (français) : ~2.2 tokens / mot avec marge.
-            max_out = min(8192, max(2048, int(target_words * 2.2)))
+            max_out = min(8192, max(2048, int(total_words_budget * 2.2)))
             gen = vx.generate_text_auto(
                 preferred_models=[
                     "gemini-2.5-flash",
@@ -377,7 +423,9 @@ def _run_generate_sunday_flow(
     fr = str(cand0.get("finishReason") or "").strip().upper()
     words_out = len((gen.text or "").split())
     has_citations = bool((cand0.get("citationMetadata") or {}).get("citations")) if isinstance(cand0, dict) else False
-    looks_truncated = (fr in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (words_out < int(target_words * 0.85))
+    looks_truncated = (fr in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (
+        words_out < int(total_words_budget * 0.85)
+    )
     if looks_truncated or has_citations:
         # Prompt “durci” : aucune URL / aucune citation / uniquement textes fournis.
         hardened_prefix = templates.get("retry_hardened_prefix") or (
@@ -398,7 +446,9 @@ def _run_generate_sunday_flow(
             fr2 = str(cand0b.get("finishReason") or "").strip().upper()
             words2 = len((gen2.text or "").split())
             cites2 = bool((cand0b.get("citationMetadata") or {}).get("citations")) if isinstance(cand0b, dict) else False
-            if (fr2 in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (words2 < int(target_words * 0.85)) or cites2:
+            if (fr2 in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (
+                words2 < int(total_words_budget * 0.85)
+            ) or cites2:
                 st.error(
                     "Synthèse incomplète malgré une relance automatique (MAX_TOKENS ou contenu trop court / citations). "
                     "Réessaie plus tard, ou réduis le % demandé."
@@ -437,7 +487,9 @@ def _run_generate_sunday_flow(
                 "totalTokenCount": usage.get("totalTokenCount"),
                 "text_chars": len(gen.text or ""),
                 "text_words": len((gen.text or "").split()),
-                "target_words": int(target_words),
+                "target_words_synthesis": int(target_words),
+                "target_words_catechese_bridge": int(catechese_bridge_words),
+                "target_words_total": int(total_words_budget),
                 "maxOutputTokens": int(max_out),
             }
         )

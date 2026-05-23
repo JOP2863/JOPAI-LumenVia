@@ -37,6 +37,37 @@ from ui.liturgy_render import render_liturgy_block
 from ui.pages.about import _ABOUT_MARKDOWN
 from ui.sunday_admin_flows import _run_generate_sunday_flow, _run_incremental_sunday_outputs
 
+_SUNDAY_FLASH_KEY = "_lumenvia_sunday_flash"
+
+
+def _set_sunday_admin_flash(*, date_str: str, level: str, message: str) -> None:
+    st.session_state[f"{_SUNDAY_FLASH_KEY}_{date_str}"] = {
+        "level": level,
+        "message": message,
+    }
+
+
+def _pop_sunday_admin_flash(date_str: str) -> dict[str, str] | None:
+    return st.session_state.pop(f"{_SUNDAY_FLASH_KEY}_{date_str}", None)
+
+
+def _show_sunday_admin_flash(date_str: str) -> None:
+    payload = _pop_sunday_admin_flash(date_str)
+    if not payload:
+        return
+    level = str(payload.get("level") or "info")
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        return
+    if level == "success":
+        st.success(message)
+    elif level == "error":
+        st.error(message)
+    elif level == "warning":
+        st.warning(message)
+    else:
+        st.info(message)
+
 
 def render_sunday() -> None:
     import app as ap
@@ -692,6 +723,7 @@ def render_sunday() -> None:
                         ov_pdf.empty()
                 st.divider()
             st.caption("Administration — synthèse (texte + audio)")
+            _show_sunday_admin_flash(date_str)
             already_has_bundle = bool((bundle_synth_text or "").strip()) or (bundle_audio is not None)
             if already_has_bundle:
                 _tail = (
@@ -720,9 +752,12 @@ def render_sunday() -> None:
                 "Inclure “À retenir” (3–5 points)", value=True, key=f"adm_sunday_takeaways_{date_str}"
             )
             include_catechese_bridge_gen = st.checkbox(
-                "Inclure « Passerelle catéchèse — L’écho des paraboles » (Stone Card)",
+                "Inclure « Passerelle catéchèse — L’écho des paraboles »",
                 value=True,
-                help="Ajoute un encart pédagogique structuré pour la transmission (jeunes / catéchèse).",
+                help=(
+                    "Ajoute la passerelle catéchèse (5 sous-parties) en fin de synthèse. "
+                    "Sa longueur (~275 mots) est fixe et indépendante du pourcentage ci-dessus."
+                ),
                 key=f"adm_sunday_catech_{date_str}",
             )
             auto_pdf = st.checkbox(
@@ -777,7 +812,7 @@ def render_sunday() -> None:
                             include_cat_state = bool(
                                 st.session_state.get(f"pdf_catechese_{date_str}", True)
                             )
-                            _run_incremental_sunday_outputs(
+                            flash = _run_incremental_sunday_outputs(
                                 cfg=cfg,
                                 gs=gs_inc,
                                 gcs=gcs_inc,
@@ -788,14 +823,17 @@ def render_sunday() -> None:
                                 bundle_audio_gcs_path=bundle_audio_gcs_path,
                                 bundle_readings_gcs_path=bundle_readings_gcs_path,
                                 include_catechese_pdf=include_cat_state,
-                                also_pdf_if_missing=bool(
-                                    st.session_state.get(f"adm_sunday_auto_pdf_{date_str}", False)
-                                ),
-                                also_readings_if_missing=bool(
-                                    st.session_state.get(f"adm_sunday_audio_readings_{date_str}", True)
-                                ),
+                                also_pdf_if_missing=bool(auto_pdf),
+                                also_readings_if_missing=bool(audio_readings_gen),
                                 pdf_key=pdf_key,
                             )
+                            _set_sunday_admin_flash(
+                                date_str=date_str,
+                                level=str(flash.get("level") or "info"),
+                                message=str(flash.get("message") or ""),
+                            )
+                            if flash.get("level") == "success":
+                                _month_content_status.clear()
                             st.rerun()
                         finally:
                             overlay_inc.empty()
