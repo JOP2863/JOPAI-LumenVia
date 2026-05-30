@@ -181,6 +181,7 @@ def resolve_email_nom_du_dimanche(
             spreadsheet_id=sid,
             table="readings_cache",
             limit=0,
+            use_cache=True,
         )
     except Exception:
         return "—"

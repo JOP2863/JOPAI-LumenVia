@@ -59,9 +59,15 @@ def render_emailing_manual_broadcast(
     lang_fr: tuple[str, ...],
     subject: str,
     body: str,
+    sa_json: str = "",
+    tpl_rows: list[dict] | None = None,
 ) -> None:
     """Suite de `render_admin_emailing` : destinataires, confirmation, envoi."""
     import app as ap
+
+    from ui.streamlit_caches import adm_sheets_fetch_cached
+
+    gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
 
     st.divider()
     st.subheader("Déclencher un envoi (manuel)")
@@ -91,8 +97,12 @@ def render_emailing_manual_broadcast(
         return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_lc)) if email_lc else False
 
     # Dry-run : prioritaire depuis la table users (source = dry_run/test_emailing)
-    # Un peu plus large que 6000 pour fiabiliser la recherche "par e-mail" en mode test.
-    users_rows_for_dry = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=9000)
+    # Cache 90 s : un rerun Streamlit ne relit pas 9000 lignes à chaque widget.
+    users_rows_for_dry = (
+        adm_sheets_fetch_cached(gsheet_id, "users", 9000, sa_json)
+        if sa_json and gsheet_id
+        else fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="users", limit=9000, use_cache=True)
+    )
     dry_candidates = [
         u
         for u in users_rows_for_dry
@@ -226,8 +236,28 @@ def render_emailing_manual_broadcast(
             icon="⚠️",
         )
         with st.expander("Aperçu des destinataires (avant envoi)", expanded=True):
-            users_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
-            subs_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
+            users_preview = (
+                users_rows_for_dry
+                if sa_json and gsheet_id
+                else fetch_records(
+                    gspread_client=gs,
+                    spreadsheet_id=gsheet_id,
+                    table="users",
+                    limit=8000,
+                    use_cache=True,
+                )
+            )
+            subs_preview = (
+                adm_sheets_fetch_cached(gsheet_id, "subscriptions", 8000, sa_json)
+                if sa_json and gsheet_id
+                else fetch_records(
+                    gspread_client=gs,
+                    spreadsheet_id=gsheet_id,
+                    table="subscriptions",
+                    limit=8000,
+                    use_cache=True,
+                )
+            )
             rec_preview = lumenvia_manual_broadcast_users(
                 users_rows=users_preview,
                 subs_rows=subs_preview,
@@ -347,7 +377,18 @@ def render_emailing_manual_broadcast(
             import traceback
 
             try:
-                _tpl_mail_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
+                if tpl_rows is not None:
+                    _tpl_mail_rows = tpl_rows
+                elif sa_json and gsheet_id:
+                    _tpl_mail_rows = adm_sheets_fetch_cached(gsheet_id, "email_templates", 0, sa_json)
+                else:
+                    _tpl_mail_rows = fetch_records(
+                        gspread_client=gs,
+                        spreadsheet_id=gsheet_id,
+                        table="email_templates",
+                        limit=0,
+                        use_cache=True,
+                    )
             except Exception:
                 _tpl_mail_rows = []
             _tpl_live_mail = pick_latest_live_email_template(
@@ -385,8 +426,32 @@ def render_emailing_manual_broadcast(
                     )
 
             # recipients
-            users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
-            subs_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=6000)
+            users_rows = (
+                users_rows_for_dry
+                if send_to_all and sa_json and gsheet_id
+                else (
+                    adm_sheets_fetch_cached(gsheet_id, "users", 8000, sa_json)
+                    if sa_json and gsheet_id
+                    else fetch_records(
+                        gspread_client=gs,
+                        spreadsheet_id=gsheet_id,
+                        table="users",
+                        limit=8000,
+                        use_cache=True,
+                    )
+                )
+            )
+            subs_rows = (
+                adm_sheets_fetch_cached(gsheet_id, "subscriptions", 8000, sa_json)
+                if sa_json and gsheet_id
+                else fetch_records(
+                    gspread_client=gs,
+                    spreadsheet_id=gsheet_id,
+                    table="subscriptions",
+                    limit=8000,
+                    use_cache=True,
+                )
+            )
 
             recipients: list[tuple[str, dict]] = []
             if send_to_all:

@@ -2,9 +2,35 @@
 
 from __future__ import annotations
 
+import time
+
 from core.gcp_clients import build_gcs_client
 from core.gcs_signed_urls import gcs_first_signed_url, gcs_signed_url
 from core.sheets_db import fetch_records, sheet_row_status_is_live
+
+_WEEKLY_URLS_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
+_WEEKLY_URLS_CACHE_TTL_S = 90.0
+
+
+def invalidate_weekly_email_urls_cache(
+    *,
+    spreadsheet_id: str | None = None,
+    date_str: str | None = None,
+    zone: str | None = None,
+) -> None:
+    sid = str(spreadsheet_id or "").strip()
+    ds = str(date_str or "").strip()[:10]
+    z = str(zone or "").strip()
+    if not sid and not ds and not z:
+        _WEEKLY_URLS_CACHE.clear()
+        return
+    drop = [
+        k
+        for k in _WEEKLY_URLS_CACHE
+        if (not sid or k[0] == sid) and (not ds or k[1] == ds) and (not z or k[2] == z)
+    ]
+    for k in drop:
+        _WEEKLY_URLS_CACHE.pop(k, None)
 
 
 def _latest_illustration_description_from_ilus(
@@ -28,6 +54,7 @@ def _latest_illustration_description_from_ilus(
             spreadsheet_id=sid,
             table="liturgy_illustrations",
             limit=0,
+            use_cache=True,
         )
     except Exception:
         return ""
@@ -58,6 +85,15 @@ def weekly_email_signed_urls(
     zone: str = "france",
 ) -> dict[str, str]:
     """PDF, audio synthèse, audio lectures (AudioLectures/), illustration — URLs signées pour l’e-mail hebdo."""
+    gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    ds = str(date_str or "").strip()[:10]
+    z = str(zone or "france").strip()
+    cache_key = (gsheet_id, ds, z)
+    now = time.time()
+    cached = _WEEKLY_URLS_CACHE.get(cache_key)
+    if cached and now - cached[0] < _WEEKLY_URLS_CACHE_TTL_S:
+        return dict(cached[1])
+
     out: dict[str, str] = {
         "url_pdf": "",
         "url_audio": "",
@@ -67,12 +103,13 @@ def weekly_email_signed_urls(
     }
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
     if not bucket or not getattr(cfg, "gcp_service_account", None):
+        _WEEKLY_URLS_CACHE[cache_key] = (now, dict(out))
         return out
     try:
         gcs = build_gcs_client(cfg.gcp_service_account)
     except Exception:
+        _WEEKLY_URLS_CACHE[cache_key] = (now, dict(out))
         return out
-    gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
     if gsheet_id:
         try:
             out["illustration_description"] = _latest_illustration_description_from_ilus(
@@ -97,7 +134,13 @@ def weekly_email_signed_urls(
     except Exception:
         pass
     try:
-        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0)
+        gens = fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="generations",
+            limit=0,
+            use_cache=True,
+        )
         gens_d = [
             g
             for g in gens
@@ -106,8 +149,15 @@ def weekly_email_signed_urls(
         gens_d.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
         gen_id = str((gens_d[0] or {}).get("entity_id") or "").strip() if gens_d else ""
         if not gen_id:
+            _WEEKLY_URLS_CACHE[cache_key] = (now, dict(out))
             return out
-        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0)
+        aud_rows = fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="audio",
+            limit=0,
+            use_cache=True,
+        )
         aud_d = [a for a in aud_rows if str(a.get("gen_entity_id") or "").strip() == gen_id]
         syn_rows = [a for a in aud_d if not is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))]
         read_rows = [a for a in aud_d if is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))]
@@ -121,4 +171,5 @@ def weekly_email_signed_urls(
             out["url_audio_readings"] = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_read) or ""
     except Exception:
         pass
+    _WEEKLY_URLS_CACHE[cache_key] = (now, dict(out))
     return out

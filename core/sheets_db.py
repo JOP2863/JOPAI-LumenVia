@@ -85,17 +85,89 @@ def describe_gspread_api_error(
     )
 
 
+_SPREADSHEET_CACHE: dict[str, tuple[float, gspread.Spreadsheet]] = {}
+_FETCH_RECORDS_CACHE: dict[tuple[str, str, int | None], tuple[float, list[dict[str, Any]]]] = {}
+_SHEETS_CACHE_TTL_S = 90.0
+
+
+def _is_gspread_quota_error(ex: BaseException) -> bool:
+    msg = str(ex)
+    if "429" in msg or "Quota exceeded" in msg:
+        return True
+    resp = getattr(ex, "response", None)
+    if resp is not None:
+        try:
+            return int(getattr(resp, "status_code", 0)) == 429
+        except (TypeError, ValueError):
+            pass
+    return False
+
+
+def _gspread_call_with_retry(
+    fn,
+    *,
+    max_retries: int = 5,
+    base_sleep_s: float = 1.5,
+):
+    last_ex: BaseException | None = None
+    for i in range(max(1, int(max_retries))):
+        try:
+            return fn()
+        except GspreadAPIError as ex:
+            last_ex = ex
+            if not _is_gspread_quota_error(ex):
+                raise
+            time.sleep(base_sleep_s * (2**i))
+        except Exception as ex:
+            last_ex = ex
+            if not _is_gspread_quota_error(ex):
+                raise
+            time.sleep(base_sleep_s * (2**i))
+    if last_ex:
+        raise last_ex
+    raise RuntimeError("Appel Google Sheets échoué après plusieurs tentatives.")
+
+
+def invalidate_fetch_records_cache(
+    *,
+    spreadsheet_id: str | None = None,
+    table: str | None = None,
+) -> None:
+    """Invalide le cache court TTL de ``fetch_records`` (après écriture admin)."""
+    sid = str(spreadsheet_id or "").strip()
+    tbl = str(table or "").strip()
+    if not sid and not tbl:
+        _FETCH_RECORDS_CACHE.clear()
+        _SPREADSHEET_CACHE.clear()
+        return
+    drop_keys = [
+        k
+        for k in _FETCH_RECORDS_CACHE
+        if (not sid or k[0] == sid) and (not tbl or k[1] == tbl)
+    ]
+    for k in drop_keys:
+        _FETCH_RECORDS_CACHE.pop(k, None)
+    if sid:
+        _SPREADSHEET_CACHE.pop(sid, None)
+
+
 def open_spreadsheet(
     gspread_client: gspread.Client,
     spreadsheet_id: str,
     *,
     service_account_email: str | None = None,
+    use_cache: bool = True,
 ) -> gspread.Spreadsheet:
     sid = str(spreadsheet_id or "").strip()
     if not sid:
         raise ValueError("gsheet_id vide — renseignez `gsheet_id` dans les secrets Streamlit.")
+    now = time.time()
+    if use_cache:
+        cached = _SPREADSHEET_CACHE.get(sid)
+        if cached and now - cached[0] < _SHEETS_CACHE_TTL_S:
+            return cached[1]
     try:
-        return gspread_client.open_by_key(sid)
+        sh = _gspread_call_with_retry(lambda: gspread_client.open_by_key(sid))
     except GspreadAPIError as ex:
         raise RuntimeError(
             describe_gspread_api_error(
@@ -104,6 +176,9 @@ def open_spreadsheet(
                 service_account_email=service_account_email,
             )
         ) from ex
+    if use_cache:
+        _SPREADSHEET_CACHE[sid] = (now, sh)
+    return sh
 
 
 def utc_now_iso() -> str:
@@ -808,6 +883,7 @@ def append_immutable_row(
 
     ordered = [row.get(c, "") for c in header]
     _append_rows_with_retry(ws, [ordered])
+    invalidate_fetch_records_cache(spreadsheet_id=spreadsheet_id, table=table)
     return row
 
 
@@ -869,6 +945,7 @@ def append_immutable_rows_bulk(
         chunk = rows_payload[i : i + step]
         _append_rows_with_retry(ws, chunk)
         added += len(chunk)
+    invalidate_fetch_records_cache(spreadsheet_id=spreadsheet_id, table=table)
     return added
 
 
@@ -878,16 +955,34 @@ def fetch_records(
     spreadsheet_id: str,
     table: str,
     limit: int = 500,
+    use_cache: bool = False,
 ) -> list[dict[str, Any]]:
-    sh = open_spreadsheet(gspread_client, spreadsheet_id)
-    ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
+    sid = str(spreadsheet_id or "").strip()
+    tbl = str(table or "").strip()
+    lim_key: int | None = None if limit is None or limit <= 0 else int(limit)
+    now = time.time()
+    cache_key = (sid, tbl, lim_key)
+    if use_cache:
+        cached = _FETCH_RECORDS_CACHE.get(cache_key)
+        if cached and now - cached[0] < _SHEETS_CACHE_TTL_S:
+            return list(cached[1])
+
+    sh = open_spreadsheet(gspread_client, sid, use_cache=use_cache)
+    ws = sh.worksheet(_resolve_table_name(sh=sh, table=tbl))
     # Important: preserve phone numbers like "+336..." and other identifiers as strings.
     # gspread may "numericise" values (cast to int/float) which would drop leading "+" / zeros.
-    records = ws.get_all_records(numericise_ignore=["all"])
+    records = _gspread_call_with_retry(
+        lambda: ws.get_all_records(numericise_ignore=["all"])
+    )
     # limit<=0 ou None : conserve tout l’onglet (important pour tables append-only anciennes lignes en tête).
     if limit is None or limit <= 0:
-        return records
-    if len(records) > limit:
-        return records[-limit:]
-    return records
+        out = records
+    elif len(records) > limit:
+        out = records[-limit:]
+    else:
+        out = records
+
+    if use_cache:
+        _FETCH_RECORDS_CACHE[cache_key] = (now, list(out))
+    return out
 

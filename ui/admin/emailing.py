@@ -11,23 +11,26 @@ import streamlit as st
 
 from core.config import load_config
 from core.sheets_db import (
-    BASE_COLUMNS,
     SHEETS_ROW_STATUS_ACTIVE,
     SHEETS_ROW_STATUS_INACTIVE,
-    TableSpec,
+    _DEFAULT_TABLE_ACRONYMS,
     append_immutable_row,
     build_gspread_client,
     compute_concat,
-    ensure_table,
     fetch_records,
+    invalidate_fetch_records_cache,
     sheet_row_status_is_live,
     utc_now_iso,
-    with_concat,
 )
 from core.weekly_email_urls import weekly_email_signed_urls
 from ui.admin.emailing_manual_broadcast import render_emailing_manual_broadcast
 from ui.components import loading_overlay
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    service_account_json_fingerprint,
+)
 
 
 def render_admin_emailing() -> None:
@@ -44,52 +47,12 @@ def render_admin_emailing() -> None:
     try:
         gs = build_gspread_client(cfg.gcp_service_account)
         sa_email = str(cfg.gcp_service_account.get("client_email") or "").strip()
+        sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
     except ValueError as ex:
         st.error(str(ex))
         return
 
-    try:
-        ensure_table(
-            gspread_client=gs,
-            spreadsheet_id=cfg.gsheet_id,
-            table=TableSpec(
-                name="email_templates",
-                columns=with_concat(
-                    [
-                        *BASE_COLUMNS,
-                        "template_key",
-                        "channel",
-                        "language",
-                        "subject",
-                        "body",
-                        "active",  # colonne facultative sur la feuille ; pas utilisée pour filtrer le template (seul `status` compte).
-                        "status_note",
-                    ]
-                ),
-            ),
-        )
-    except Exception as ex:
-        from core.sheets_db import describe_gspread_api_error
-
-        msg = str(ex)
-        if not msg or "HTTP" not in msg:
-            msg = describe_gspread_api_error(
-                ex,
-                spreadsheet_id=cfg.gsheet_id,
-                service_account_email=sa_email or None,
-            )
-        st.error(msg)
-        if sa_email:
-            st.caption(f"Compte de service à ajouter comme **Éditeur** sur le Google Sheet : `{sa_email}`")
-        return
-
-    from core.sheets_db import _resolve_table_name, open_spreadsheet
-
-    try:
-        sh_etpl_hint = open_spreadsheet(gs, cfg.gsheet_id, service_account_email=sa_email or None)
-        etpl_tab = _resolve_table_name(sh=sh_etpl_hint, table="email_templates")
-    except Exception:
-        etpl_tab = "ETPL"
+    etpl_tab = _DEFAULT_TABLE_ACRONYMS.get("email_templates", "ETPL")
 
     template_key = "weekly_friday_lumenvia"
     st.caption(
@@ -114,9 +77,19 @@ def render_admin_emailing() -> None:
     )
 
     try:
-        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
-    except Exception:
-        rows = []
+        rows = adm_sheets_fetch_cached(cfg.gsheet_id, "email_templates", 0, sa_json)
+    except Exception as ex:
+        from core.sheets_db import describe_gspread_api_error
+
+        msg = describe_gspread_api_error(
+            ex,
+            spreadsheet_id=cfg.gsheet_id,
+            service_account_email=sa_email or None,
+        )
+        st.error(msg)
+        if sa_email:
+            st.caption(f"Compte de service à ajouter comme **Éditeur** sur le Google Sheet : `{sa_email}`")
+        return
 
     lang_fr = ("fr", "fr-fr", "france", "")
     current = pick_latest_live_email_template(rows, template_key=template_key, channel="email", language_in=lang_fr) or {}
@@ -232,9 +205,15 @@ def render_admin_emailing() -> None:
         try:
             # Inactivation (historique) de la version précédente active (si elle existe)
             try:
-                rows2 = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
+                rows2 = fetch_records(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="email_templates",
+                    limit=0,
+                    use_cache=False,
+                )
             except Exception:
-                rows2 = []
+                rows2 = list(rows)
             prev = pick_latest_live_email_template(rows2, template_key=template_key, channel="email", language_in=lang_fr)
             body_n = body.strip()
             subj_n = subject.strip()
@@ -287,6 +266,9 @@ def render_admin_emailing() -> None:
                     if col_concat_etpl:
                         ws_etpl.update_cell(row_num, col_concat_etpl, compute_concat(merged, header=header_etpl))
 
+                invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="email_templates")
+                invalidate_adm_sheets_fetch_cache()
+
                 # 2) Version suivante à partir de l’historique (toutes lignes série, pas seulement actives)
                 max_tpl_ver = 0
                 for r0 in rows2:
@@ -318,6 +300,8 @@ def render_admin_emailing() -> None:
                     },
                     version=next_tpl_ver,
                 )
+                invalidate_adm_sheets_fetch_cache()
+                invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="email_templates")
                 st.success("Template enregistré.")
                 st.rerun()
         finally:
@@ -330,4 +314,6 @@ def render_admin_emailing() -> None:
         lang_fr=lang_fr,
         subject=subject,
         body=body,
+        sa_json=sa_json,
+        tpl_rows=rows,
     )

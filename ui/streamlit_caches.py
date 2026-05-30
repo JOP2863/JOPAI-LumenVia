@@ -13,6 +13,42 @@ from core.prompt_template_keys import PROMPT_TEMPLATE_KEYS
 from core.sheets_db import build_gspread_client, fetch_records
 
 
+def service_account_json_fingerprint(service_account_info: dict | None) -> str:
+    """Clé stable pour @st.cache_data (ne jamais passer le dict brut à cache_data)."""
+    if not service_account_info:
+        return ""
+    return json.dumps(service_account_info, sort_keys=True, ensure_ascii=False)
+
+
+@st.cache_data(ttl=90, max_entries=64, show_spinner=False)
+def adm_sheets_fetch_cached(
+    spreadsheet_id: str,
+    table: str,
+    limit: int,
+    service_account_json: str,
+) -> list[dict]:
+    """
+    Court TTL : les reruns Streamlit (widgets, expanders) ne relisent pas Sheets à chaque fois.
+    ``limit <= 0`` = onglet entier (comme ``fetch_records``).
+    """
+    if not spreadsheet_id or not service_account_json:
+        return []
+    info = json.loads(service_account_json)
+    gs = build_gspread_client(info)
+    return fetch_records(
+        gspread_client=gs,
+        spreadsheet_id=spreadsheet_id,
+        table=table,
+        limit=limit,
+        use_cache=True,
+    )
+
+
+def invalidate_adm_sheets_fetch_cache() -> None:
+    """À appeler après une écriture Sheets depuis l’admin (template, etc.)."""
+    adm_sheets_fetch_cached.clear()
+
+
 @st.cache_data(ttl=75, max_entries=40, show_spinner=False)
 def adm_feedback_sheet_fetch_cached(
     spreadsheet_id: str,
@@ -21,14 +57,7 @@ def adm_feedback_sheet_fetch_cached(
     service_account_json: str,
 ) -> list[dict]:
     """Court TTL : les reruns Streamlit (expanders, widgets) ne refont pas un aller-retour Sheets à chaque fois."""
-    info = json.loads(service_account_json)
-    gs = build_gspread_client(info)
-    return fetch_records(
-        gspread_client=gs,
-        spreadsheet_id=spreadsheet_id,
-        table=table,
-        limit=limit,
-    )
+    return adm_sheets_fetch_cached(spreadsheet_id, table, limit, service_account_json)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
