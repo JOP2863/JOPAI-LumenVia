@@ -31,6 +31,7 @@ from core.sheets_db import (
 from core.emailing import (
     EmailTemplate,
     french_day_month_year,
+    normalize_email_template_text,
     pick_latest_live_email_template,
     render_template,
 )
@@ -65,7 +66,9 @@ def render_emailing_manual_broadcast(
     st.subheader("Déclencher un envoi (manuel)")
     st.caption(
         "Par défaut, c’est un **dry-run** : envoi uniquement vers les coordonnées de test (secrets). "
-        "Coche l’option pour envoyer à tous les inscrits opt-in."
+        "Coche l’option pour envoyer à tous les inscrits opt-in. "
+        "L’envoi manuel reprend **exactement** l’objet et le corps du formulaire (comme l’aperçu) — "
+        "pensez à **Enregistrer le template** pour que le scheduler utilise la même version."
     )
 
     # UI simplifiée : 3 cases uniquement
@@ -349,13 +352,36 @@ def render_emailing_manual_broadcast(
             _tpl_live_mail = pick_latest_live_email_template(
                 _tpl_mail_rows, template_key=template_key, channel="email", language_in=("fr", "fr-fr", "france", "")
             )
+            _live_subj = (
+                str(_tpl_live_mail.get("subject") or "").strip() if _tpl_live_mail else ""
+            )
+            _live_body = str(_tpl_live_mail.get("body") or "").strip() if _tpl_live_mail else ""
+            # Aligné sur l’aperçu : le formulaire prime (Sheets sert de secours si le champ est vide).
+            subject_rt = (subject or "").strip() or _live_subj
+            body_rt = (body or "").strip() or _live_body
+            if not subject_rt or not body_rt:
+                st.error(
+                    "Objet ou corps vide — complétez le formulaire ou enregistrez un template **Actif** sur Sheets."
+                )
+                ov.empty()
+                st.stop()
             if not _tpl_live_mail:
                 st.warning(
                     "Aucune ligne avec **`status` = Actif** pour ce template (clé `weekly_friday_lumenvia`, e-mail, FR). "
-                    "L’envoi utilise le **texte du formulaire** ci-dessus en secours — corrige **`status`** sur l’onglet templates."
+                    "L’envoi utilise le **texte du formulaire** — enregistrez-le pour le scheduler et l’historique."
                 )
-            subject_rt = (str(_tpl_live_mail.get("subject") or "").strip() if _tpl_live_mail else "") or subject
-            body_rt = (str(_tpl_live_mail.get("body") or "").strip() if _tpl_live_mail else "") or body
+            elif _live_body and (body or "").strip():
+                _form_norm = normalize_email_template_text(body)
+                _live_norm = normalize_email_template_text(_live_body)
+                if _form_norm != _live_norm or normalize_email_template_text(subject) != normalize_email_template_text(
+                    _live_subj
+                ):
+                    _ver = str(_tpl_live_mail.get("version") or "?").strip()
+                    st.warning(
+                        f"Le formulaire diffère du template **Actif** en Sheets (version {_ver}). "
+                        "Cet envoi reprend le **formulaire** (aperçu). Cliquez **Enregistrer le template** "
+                        "pour aligner le scheduler."
+                    )
 
             # recipients
             users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)

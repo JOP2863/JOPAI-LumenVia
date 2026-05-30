@@ -64,8 +64,17 @@ def render_admin_emailing() -> None:
         ),
     )
 
+    from core.sheets_db import _resolve_table_name
+
+    try:
+        sh_etpl_hint = gs.open_by_key(cfg.gsheet_id)
+        etpl_tab = _resolve_table_name(sh=sh_etpl_hint, table="email_templates")
+    except Exception:
+        etpl_tab = "ETPL"
+
     template_key = "weekly_friday_lumenvia"
     st.caption(
+        f"**Onglet Sheets :** `{etpl_tab}` (alias logique `email_templates` → acronyme via **AliasTables**). "
         "**Templates e-mail :** seule la colonne **`status`** (**Actif** / **Inactif**) détermine quelle ligne est la version "
         "courante (aperçu, enregistrement, envoi manuel, **et** choix du modèle côté campagne / scheduler). "
         "La colonne **`active`** sur cette table n’est **pas** utilisée par l’app pour ce choix (elle peut rester pour du "

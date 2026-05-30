@@ -371,6 +371,9 @@ def main(argv: list[str]) -> int:
     try:
         ensure_database(gspread_client=gc, spreadsheet_id=gsheet_id, tables=default_tables())
         migrate_alias_tables_and_rename(gc=gc, gsheet_id=gsheet_id)
+        sh = gc.open_by_key(gsheet_id)
+        for msg in sheets_db_mod.prune_stale_fullname_table_duplicates(sh=sh):
+            print(msg)
         n_voix = _seed_voix_audio_defaults(gc=gc, gsheet_id=gsheet_id)
         n_aud = _seed_parametres_ia_audio_styles(gc=gc, gsheet_id=gsheet_id)
         if n_voix:

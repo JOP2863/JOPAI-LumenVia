@@ -20,11 +20,34 @@ class TableSpec:
     columns: list[str]
 
 
+def _alias_table_map(sh: gspread.Spreadsheet) -> dict[str, str]:
+    """
+    Lit AliasTables : nom logique (ou acronyme) → onglet physique canonique.
+    Ex. ``email_templates`` → ``ETPL`` (même si un ancien onglet ``email_templates`` existe encore).
+    """
+    out: dict[str, str] = {}
+    try:
+        ws_alias = sh.worksheet("AliasTables")
+        rows = ws_alias.get_all_records(numericise_ignore=["all"])
+        for r in rows:
+            full = str(r.get("Nom Complet Table") or "").strip()
+            acr = str(r.get("Acronyme Table") or "").strip()
+            if not full or not acr:
+                continue
+            out[full] = acr
+            out[acr] = acr
+    except Exception:
+        pass
+    return out
+
+
 def _resolve_table_name(*, sh: gspread.Spreadsheet, table: str) -> str:
     """
-    Résout un nom logique (ex: 'users') vers le nom physique d'onglet.
+    Résout un nom logique (ex: 'users', 'email_templates') vers le nom physique d'onglet.
     Supporte la convention AliasTables (acronymes 3–4 lettres).
-    Fallback: retourne `table` si aucun mapping trouvé.
+
+    **Priorité AliasTables** : si ``email_templates`` et ``ETPL`` coexistent (onglet fantôme créé
+    avant migration), on utilise toujours l'acronyme mappé (``ETPL``), pas le nom complet.
     """
     t = str(table or "").strip()
     if not t:
@@ -33,25 +56,55 @@ def _resolve_table_name(*, sh: gspread.Spreadsheet, table: str) -> str:
         titles = {ws.title for ws in sh.worksheets()}
     except Exception:
         titles = set()
+
+    alias_map = _alias_table_map(sh)
+    if t in alias_map:
+        return alias_map[t]
+
     if t in titles:
         return t
-    # Si on reçoit déjà un acronyme (3-4 majuscules), on l'utilise tel quel
+    # Acronyme demandé explicitement (ex. ETPL) sans entrée AliasTables
     if len(t) in (3, 4) and t.isupper():
         return t
-    # AliasTables : "Nom Complet Table" -> "Acronyme Table"
-    try:
-        ws_alias = sh.worksheet("AliasTables")
-        rows = ws_alias.get_all_records(numericise_ignore=["all"])
-        for r in rows:
-            full = str(r.get("Nom Complet Table") or "").strip()
-            acr = str(r.get("Acronyme Table") or "").strip()
-            if not acr:
-                continue
-            if full == t or acr == t:
-                return acr
-    except Exception:
-        pass
     return t
+
+
+def prune_stale_fullname_table_duplicates(*, sh: gspread.Spreadsheet) -> list[str]:
+    """
+    Supprime les onglets « nom complet » vides lorsque l'acronyme canonique existe déjà
+    (ex. ``email_templates`` vide + ``ETPL`` peuplé). Retourne les messages d'action.
+    """
+    messages: list[str] = []
+    try:
+        existing = {ws.title: ws for ws in sh.worksheets()}
+    except Exception:
+        return messages
+
+    for full, acr in _alias_table_map(sh).items():
+        if full == acr or full not in existing or acr not in existing:
+            continue
+        ws_full = existing[full]
+        ws_acr = existing[acr]
+        try:
+            n_full = max(0, len(ws_full.get_all_values()) - 1)
+            n_acr = max(0, len(ws_acr.get_all_values()) - 1)
+        except Exception:
+            continue
+        if n_full <= 0:
+            try:
+                sh.del_worksheet(ws_full)
+                messages.append(
+                    f"Onglet doublon vide supprimé : {full!r} (canonique : {acr!r}, {n_acr} ligne(s))."
+                )
+                existing.pop(full, None)
+            except Exception as ex:
+                messages.append(f"Impossible de supprimer {full!r} : {ex}")
+        elif n_acr > 0:
+            messages.append(
+                f"Attention : {full!r} ({n_full} ligne(s)) et {acr!r} ({n_acr} ligne(s)) coexistent. "
+                f"L'application utilise {acr!r} — vérifiez puis supprimez {full!r} si obsolète."
+            )
+    return messages
 
 
 BASE_COLUMNS = [

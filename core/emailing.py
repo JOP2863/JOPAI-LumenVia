@@ -124,6 +124,14 @@ def supported_tags() -> tuple[str, ...]:
     )
 
 
+def normalize_email_template_text(text: str) -> str:
+    """Normalise objet/corps pour comparer formulaire UI vs ligne Sheets (espaces, fins de ligne)."""
+    s = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    s = re.sub(r"[ \t]+\n", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
 def french_day_month_year(d: date) -> str:
     mois = (
         "janvier",
