@@ -2,7 +2,7 @@ Objet : 🕯️ Votre pause LumenVia : Préparez la célébration du dimanche {{
 Corps du message :
 Bonjour {{prenom}} {{nom}},
 La fin de semaine approche et, avec elle, l’invitation à déposer le bruit du monde pour se tourner vers l'essentiel.
-Comme chaque vendredi, LumenVia, votre compagnon spirituel par JOPAI, vous accompagne pour franchir le seuil de la célébration avec un cœur ouvert. Nous avons préparé pour vous les clés de lecture de ce dimanche {{nom_du_dimanche}} ({{date_dimanche}}).
+Comme chaque vendredi, LumenVia, votre compagnon spirituel par JOPAI, vous accompagne pour franchir le seuil de la célébration avec un cœur ouvert. Nous avons préparé pour vous les clés de lecture de la célébration de ce dimanche {{date_dimanche}}.
 Voici de quoi nourrir votre méditation sur votre chemin vers l'église :
 La Synthèse Illustrée (PDF) : Retrouvez le "fil rouge" qui relie les textes de cette semaine. Une mise en perspective claire pour éclairer votre intelligence avant d'entendre la Parole. 👉 Télécharger le PDF
 L'Essentiel en Audio (Synthèse) : Une perspective inspirée pour éclairer votre chemin. Laissez l'esprit de la fête infuser en vous durant vos transports ou vos moments de calme. 👉 Écouter la synthèse audio

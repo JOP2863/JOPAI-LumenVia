@@ -80,7 +80,7 @@ par identifiant de campagne.
         gspread_client=gs,
         spreadsheet_id=cfg.gsheet_id,
         table=TableSpec(
-            name="CMPG",
+            name="scheduler_campaigns",
             columns=with_concat(
                 [
                     *BASE_COLUMNS,
@@ -108,7 +108,7 @@ par identifiant de campagne.
         gspread_client=gs,
         spreadsheet_id=cfg.gsheet_id,
         table=TableSpec(
-            name="RUNS",
+            name="scheduler_runs",
             columns=with_concat(
                 [
                     *BASE_COLUMNS,
@@ -128,7 +128,7 @@ par identifiant de campagne.
         gspread_client=gs,
         spreadsheet_id=cfg.gsheet_id,
         table=TableSpec(
-            name="AUDC",
+            name="audiences",
             columns=with_concat(
                 [
                     *BASE_COLUMNS,
@@ -145,7 +145,7 @@ par identifiant de campagne.
 
     # Seed audiences si table vide
     try:
-        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="AUDC", limit=2000)
+        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audiences", limit=2000)
     except Exception:
         aud_rows = []
     if not aud_rows:
@@ -186,12 +186,12 @@ par identifiant de campagne.
                 "spec_aide": "Ex:\nnom@domaine.fr\nprenom@domaine.fr",
             },
         ]
-        append_immutable_rows_bulk(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="AUDC", values_by_col_list=seed)
-        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="AUDC", limit=2000)
+        append_immutable_rows_bulk(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audiences", values_by_col_list=seed)
+        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audiences", limit=2000)
 
     st.subheader("Campagnes")
     try:
-        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="CMPG", limit=2000)
+        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="scheduler_campaigns", limit=2000)
     except Exception:
         rows = []
 
@@ -257,7 +257,7 @@ par identifiant de campagne.
             append_immutable_row(
                 gspread_client=gs,
                 spreadsheet_id=cfg.gsheet_id,
-                table="CMPG",
+                table="scheduler_campaigns",
                 values_by_col={
                     "entity_id": sha256(f"cmpg|{k0}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
                     "campaign_key": k0,
@@ -339,7 +339,7 @@ par identifiant de campagne.
                     append_immutable_row(
                         gspread_client=gs,
                         spreadsheet_id=cfg.gsheet_id,
-                        table="CMPG",
+                        table="scheduler_campaigns",
                         values_by_col={
                             "entity_id": sha256(f"cmpg|{new_key}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
                             "campaign_key": new_key,
@@ -572,7 +572,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
             append_immutable_row(
                 gspread_client=gs,
                 spreadsheet_id=cfg.gsheet_id,
-                table="CMPG",
+                table="scheduler_campaigns",
                 values_by_col={
                     "entity_id": sha256(f"cmpg|{camp_sel}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
                     "campaign_key": camp_sel,
@@ -873,7 +873,12 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     from_phone_e164=_secret_get("TWILIO_FROM", "TWILIO_FROM_NUMBER"),
                 )
     
-                from core.emailing import EmailTemplate, render_template, french_day_month_year, resolve_email_nom_du_dimanche
+                from core.emailing import (
+                    EmailTemplate,
+                    render_weekly_email_template,
+                    french_day_month_year,
+                    resolve_email_nom_du_dimanche,
+                )
 
                 import app as ap
 
@@ -907,7 +912,9 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     vals["prenom"] = str(urec.get("first_name") or "—").strip() or "—"
                     vals["nom"] = str(urec.get("last_name") or "—").strip() or "—"
                     vals["email"] = em
-                    rendered = render_template(EmailTemplate(subject=subj, body=body), values={k: str(v) for k, v in vals.items()})
+                    rendered = render_weekly_email_template(
+                        EmailTemplate(subject=subj, body=body), values={k: str(v) for k, v in vals.items()}
+                    )
     
                     # Envoi email (HTML gabarit)
                     if do_email and em and smtp_cfg.host and smtp_cfg.from_email:
@@ -932,7 +939,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 append_immutable_row(
                     gspread_client=gs,
                     spreadsheet_id=cfg.gsheet_id,
-                    table="RUNS",
+                    table="scheduler_runs",
                     values_by_col={
                         "entity_id": run_id,
                         "campaign_key": camp_key,

@@ -18,8 +18,10 @@ from gspread.exceptions import WorksheetNotFound
 
 from core.sheets_db import (
     _resolve_table_name,
+    audit_alias_tables,
     build_gspread_client,
     fetch_records,
+    format_alias_audit_report,
     sheet_row_status_is_live,
 )
 from core.tts_pronunciation import tts_pronunciation_breakdown
@@ -186,6 +188,27 @@ def _render_admin_infra_diagnostic(*, cfg: object) -> None:
                 st.warning(
                     f"Onglet prompts IA introuvable (attendu `{ia_tab}` ou `Paramètres_IA` selon AliasTables). "
                     "Lance `python tools/init_sheets_db.py`."
+                )
+
+            st.markdown("**AliasTables — tables métier**")
+            alias_issues = audit_alias_tables(sh=sh)
+            if not alias_issues:
+                st.success("AliasTables OK — 23 tables logiques résolues vers leurs acronymes.")
+            else:
+                err_n = sum(1 for i in alias_issues if i.severity == "error")
+                warn_n = len(alias_issues) - err_n
+                if err_n:
+                    st.error(
+                        f"AliasTables : **{err_n} erreur(s)** et {warn_n} avertissement(s). "
+                        "Corrigez le classeur ou lancez `python tools/audit_alias_tables.py`."
+                    )
+                else:
+                    st.warning(f"AliasTables : {warn_n} avertissement(s) — vérifiez les doublons ou entrées manquantes.")
+                st.code(format_alias_audit_report(alias_issues), language="text")
+                st.caption(
+                    "Le code applicatif utilise **uniquement les noms logiques** (`readings_cache`, `email_templates`, …) ; "
+                    "AliasTables résout vers l’onglet acronyme (ex. RDC, ETPL). "
+                    "**readings_cache** = cache lectures pour l’app ; **liturgy_fetches** (LITF) = journal des appels API AELF."
                 )
         except Exception as e:
             st.error(f"Sheets KO — {e}")

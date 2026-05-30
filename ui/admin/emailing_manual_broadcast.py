@@ -33,7 +33,7 @@ from core.emailing import (
     french_day_month_year,
     normalize_email_template_text,
     pick_latest_live_email_template,
-    render_template,
+    render_weekly_email_template,
     resolve_email_nom_du_dimanche,
 )
 from core.emailing_newsletter_html import (
@@ -695,7 +695,9 @@ def render_emailing_manual_broadcast(
                 if values2.get("origin") and to_email:
                     enc = quote_plus(to_email) if quote_plus else to_email
                     values2["optout_url"] = values2["origin"].rstrip("/") + "/?route=join&email=" + enc
-                rendered2 = render_template(EmailTemplate(subject=subject_rt, body=body_rt), values=values2)
+                rendered2 = render_weekly_email_template(
+                    EmailTemplate(subject=subject_rt, body=body_rt), values=values2
+                )
                 # Placeholder "docx" (non-tag) : illustration
                 rendered2 = EmailTemplate(
                     subject=rendered2.subject,

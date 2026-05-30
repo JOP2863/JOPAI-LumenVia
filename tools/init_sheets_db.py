@@ -408,6 +408,23 @@ def main(argv: list[str]) -> int:
         return 4
 
     print("OK: base Google Sheets initialisée + AliasTables/alias appliqués.")
+
+    try:
+        sh_audit = gc.open_by_key(gsheet_id)
+        audit_issues = sheets_db_mod.audit_alias_tables(sh=sh_audit)
+        if audit_issues:
+            print("\n--- Audit AliasTables ---", file=sys.stderr)
+            print(sheets_db_mod.format_alias_audit_report(audit_issues), file=sys.stderr)
+            if any(i.severity == "error" for i in audit_issues):
+                print(
+                    "\nCorrigez AliasTables / onglets fantômes puis relancez "
+                    "python tools/audit_alias_tables.py",
+                    file=sys.stderr,
+                )
+                return 2
+    except Exception as ex:
+        print(f"Audit AliasTables ignoré : {ex}", file=sys.stderr)
+
     return 0
 
 

@@ -17,7 +17,9 @@ Pour chaque table:
 
 ### Sheets — AliasTables et noms d’onglets (**obligatoire** pour chaque nouvelle table)
 - Toute **nouvelle table** doit avoir une entrée dans **`AliasTables`**: nom logique lisible (« Nom complet table ») ↔ **acronyme** sur **exactement 3 ou 4 caractères** (pas plus — jamais d’onglet au nom long type mot entier dans le fichier).
-- Le dépôt doit rester synchronisé: mapping dans `tools/init_sheets_db.py` (`_suggest_aliases`) et `TableSpec` / code qui utilisent le **nom logique** ; `core/sheets_db.py` résout vers l’onglet physique via `AliasTables`.
+- Le dépôt doit rester synchronisé: mapping dans `tools/init_sheets_db.py` (`_suggest_aliases`), `core/sheets_db.py` (`_DEFAULT_TABLE_ACRONYMS` / `KNOWN_LOGICAL_TABLES`) et `TableSpec` / code qui utilisent le **nom logique** uniquement — **jamais** `table="ETPL"` ou `name="CMPG"` en dur dans l’UI.
+- Résolution : `fetch_records(..., table="readings_cache")` → `_resolve_table_name` → onglet **RDC** via AliasTables.
+- Audit : `python tools/audit_alias_tables.py` ou section **Test ressources → Google Sheet → AliasTables**.
 
 ### Sheets — cache et quota (obligatoire sur toute page Streamlit)
 - Règle détaillée : `.cursor/rules/streamlit-sheets-cache.mdc` (standard JOPAI, partagé avec Memoria).

@@ -108,12 +108,69 @@ def render_template(tpl: EmailTemplate, *, values: dict[str, str]) -> EmailTempl
     return EmailTemplate(subject=_sub(tpl.subject), body=_sub(tpl.body))
 
 
+_CLES_LECTURE_LEGACY_TEMPLATE_PHRASES: tuple[str, ...] = (
+    "les clés de lecture de ce dimanche {{nom_du_dimanche}} ({{date_dimanche}})",
+    "les clés de lecture de ce dimanche {{nom_du_dimanche}}",
+    "les clés de lecture de ce {{nom_du_dimanche}}",
+)
+
+_CLES_LECTURE_CANONICAL_TEMPLATE_PHRASE = (
+    "les clés de lecture de la célébration de ce dimanche {{date_dimanche}}"
+)
+
+_CLES_LECTURE_RENDERED_RE = re.compile(
+    r"les clés de lecture de ce(?:\s+dimanche)?(?:\s*\([^)]+\))?(?:\s+[^.\n]+)?",
+    re.IGNORECASE,
+)
+
+
+def email_cles_lecture_celebration_phrase(*, date_label: str) -> str:
+    """Phrase canonique après « Nous avons préparé pour vous … » (date = ``{{date_dimanche}}`` résolu)."""
+    d = str(date_label or "").strip()
+    if not d:
+        return "les clés de lecture de la célébration de ce dimanche"
+    return f"les clés de lecture de la célébration de ce dimanche {d}"
+
+
+def normalize_email_body_liturgy_clause(body: str) -> str:
+    """Réécrit les anciennes formulations ``… de ce {{nom_du_dimanche}}`` avant rendu."""
+    out = body or ""
+    for old in _CLES_LECTURE_LEGACY_TEMPLATE_PHRASES:
+        out = out.replace(old, _CLES_LECTURE_CANONICAL_TEMPLATE_PHRASE)
+    return out
+
+
+def fix_rendered_email_cles_lecture_phrase(body: str, *, date_label: str) -> str:
+    """Corrige les corps déjà rendus (ex. « de ce Sainte Trinité ») — templates ETPL hérités."""
+    if not body or not str(date_label or "").strip():
+        return body
+    canonical = email_cles_lecture_celebration_phrase(date_label=date_label)
+    return _CLES_LECTURE_RENDERED_RE.sub(canonical, body, count=1)
+
+
+def render_weekly_email_template(tpl: EmailTemplate, *, values: dict[str, str]) -> EmailTemplate:
+    """
+    Rendu e-mail hebdo : normalise la phrase « clés de lecture » et injecte ``cles_lecture_celebration``.
+    """
+    date_label = str(values.get("date_dimanche") or "").strip()
+    vals = dict(values)
+    vals.setdefault(
+        "cles_lecture_celebration",
+        email_cles_lecture_celebration_phrase(date_label=date_label),
+    )
+    body_norm = normalize_email_body_liturgy_clause(tpl.body or "")
+    rendered = render_template(EmailTemplate(subject=tpl.subject, body=body_norm), values=vals)
+    fixed_body = fix_rendered_email_cles_lecture_phrase(rendered.body or "", date_label=date_label)
+    return EmailTemplate(subject=rendered.subject, body=fixed_body)
+
+
 def supported_tags() -> tuple[str, ...]:
     return (
         "prenom",
         "nom",
         "date_dimanche",
         "nom_du_dimanche",
+        "cles_lecture_celebration",
         "url_pdf",
         "url_audio",
         "url_audio_readings",

@@ -38,6 +38,18 @@ _DEFAULT_TABLE_ACRONYMS: dict[str, str] = {
     "liturgy_illustrations": "ILUS",
 }
 
+# Noms logiques autorisés dans le code applicatif (jamais d’acronyme seul en dur).
+KNOWN_LOGICAL_TABLES: frozenset[str] = frozenset(_DEFAULT_TABLE_ACRONYMS.keys())
+
+_ACRONYM_TO_LOGICAL: dict[str, str] = {acr: logical for logical, acr in _DEFAULT_TABLE_ACRONYMS.items()}
+
+
+@dataclass(frozen=True)
+class AliasAuditIssue:
+    severity: str  # "error" | "warning"
+    logical_table: str
+    message: str
+
 
 def describe_gspread_api_error(
     ex: BaseException,
@@ -232,11 +244,138 @@ def _alias_table_map(sh: gspread.Spreadsheet) -> dict[str, str]:
             ).upper()
             if not full or not acr:
                 continue
+            if len(acr) not in (3, 4):
+                continue
             out[full] = acr
             out[acr] = acr
     except Exception:
         pass
     return out
+
+
+def audit_alias_tables(*, sh: gspread.Spreadsheet) -> list[AliasAuditIssue]:
+    """
+    Contrôle AliasTables ↔ onglets physiques ↔ registre dépôt (``KNOWN_LOGICAL_TABLES``).
+    À lancer après ``init_sheets_db`` ou depuis l’admin (Test ressources).
+    """
+    issues: list[AliasAuditIssue] = []
+    try:
+        worksheets = sh.worksheets()
+        titles = {ws.title for ws in worksheets}
+    except Exception as ex:
+        return [
+            AliasAuditIssue(
+                severity="error",
+                logical_table="AliasTables",
+                message=f"Impossible de lister les onglets : {ex}",
+            )
+        ]
+
+    if "AliasTables" not in titles:
+        issues.append(
+            AliasAuditIssue(
+                severity="error",
+                logical_table="AliasTables",
+                message="Onglet maître **AliasTables** absent — lancez `python tools/init_sheets_db.py`.",
+            )
+        )
+
+    alias_map = _alias_table_map(sh)
+    alias_logical: dict[str, str] = {}
+    for logical in KNOWN_LOGICAL_TABLES:
+        mapped = alias_map.get(logical)
+        if mapped:
+            alias_logical[logical] = mapped.upper()
+
+    if "AliasTables" in titles and not alias_logical:
+        issues.append(
+            AliasAuditIssue(
+                severity="error",
+                logical_table="AliasTables",
+                message="AliasTables illisible ou sans ligne **Actif** — les alias ne peuvent pas être appliqués.",
+            )
+        )
+
+    for logical in sorted(KNOWN_LOGICAL_TABLES):
+        expected_acr = _DEFAULT_TABLE_ACRONYMS[logical]
+        mapped = alias_logical.get(logical)
+        physical = mapped or expected_acr
+
+        if not mapped:
+            issues.append(
+                AliasAuditIssue(
+                    severity="warning",
+                    logical_table=logical,
+                    message=f"Absent de AliasTables — repli dépôt : onglet `{expected_acr}`.",
+                )
+            )
+        elif mapped != expected_acr:
+            issues.append(
+                AliasAuditIssue(
+                    severity="error",
+                    logical_table=logical,
+                    message=f"Acronyme AliasTables `{mapped}` ≠ registre dépôt `{expected_acr}`.",
+                )
+            )
+
+        ghost = logical in titles and logical != physical
+        physical_ok = physical in titles
+        if not physical_ok:
+            if ghost:
+                issues.append(
+                    AliasAuditIssue(
+                        severity="error",
+                        logical_table=logical,
+                        message=(
+                            f"Onglet canonique `{physical}` absent ; seul `{logical}` existe "
+                            f"(fantôme pré-migration) — l’app écrirait au mauvais endroit sans AliasTables."
+                        ),
+                    )
+                )
+            else:
+                issues.append(
+                    AliasAuditIssue(
+                        severity="error",
+                        logical_table=logical,
+                        message=f"Onglet `{physical}` introuvable (alias logique `{logical}`).",
+                    )
+                )
+        elif ghost:
+            issues.append(
+                AliasAuditIssue(
+                    severity="warning",
+                    logical_table=logical,
+                    message=(
+                        f"Doublon `{logical}` + `{physical}` — l’app cible `{physical}` ; "
+                        f"supprimez `{logical}` s’il est vide ou obsolète."
+                    ),
+                )
+            )
+
+    known_acrs = set(_DEFAULT_TABLE_ACRONYMS.values())
+    for title in sorted(titles):
+        if title == "AliasTables":
+            continue
+        if len(title) in (3, 4) and title.isupper() and title not in known_acrs:
+            issues.append(
+                AliasAuditIssue(
+                    severity="warning",
+                    logical_table=title,
+                    message=f"Onglet acronyme `{title}` sans entrée dans le registre dépôt.",
+                )
+            )
+
+    return issues
+
+
+def format_alias_audit_report(issues: list[AliasAuditIssue]) -> str:
+    if not issues:
+        return "AliasTables OK — toutes les tables connues sont résolues."
+    lines: list[str] = []
+    for it in issues:
+        tag = "ERREUR" if it.severity == "error" else "AVERT"
+        lines.append(f"[{tag}] {it.logical_table}: {it.message}")
+    return "\n".join(lines)
 
 
 def _resolve_table_name(*, sh: gspread.Spreadsheet, table: str) -> str:
@@ -246,10 +385,15 @@ def _resolve_table_name(*, sh: gspread.Spreadsheet, table: str) -> str:
 
     **Priorité AliasTables** : si ``email_templates`` et ``ETPL`` coexistent (onglet fantôme créé
     avant migration), on utilise toujours l'acronyme mappé (``ETPL``), pas le nom complet.
+
+    Un acronyme passé seul (ex. ``CMPG``) est normalisé vers le nom logique du registre dépôt
+    avant résolution — le code applicatif doit préférer le nom logique.
     """
     t = str(table or "").strip()
     if not t:
         return t
+    if len(t) in (3, 4) and t.isupper() and t in _ACRONYM_TO_LOGICAL:
+        t = _ACRONYM_TO_LOGICAL[t]
     try:
         titles = {ws.title for ws in sh.worksheets()}
     except Exception:
@@ -265,9 +409,6 @@ def _resolve_table_name(*, sh: gspread.Spreadsheet, table: str) -> str:
         return default_acr
 
     if t in titles:
-        return t
-    # Acronyme demandé explicitement (ex. ETPL) sans entrée AliasTables
-    if len(t) in (3, 4) and t.isupper():
         return t
     # Dernier recours : acronyme attendu même si l’onglet n’existe pas encore (ensure_table le créera).
     if default_acr := _DEFAULT_TABLE_ACRONYMS.get(t):
@@ -415,7 +556,7 @@ def default_tables() -> list[TableSpec]:
             ],
         ),
         TableSpec(
-            name="AUDC",
+            name="audiences",
             columns=with_concat(
                 [
                     *BASE_COLUMNS,
@@ -483,9 +624,9 @@ def default_tables() -> list[TableSpec]:
                 ]
             ),
         ),
-        # Scheduler (acronymes physiques)
+        # Scheduler (noms logiques → CMPG / RUNS via AliasTables)
         TableSpec(
-            name="CMPG",
+            name="scheduler_campaigns",
             columns=with_concat(
                 [
                     *BASE_COLUMNS,
@@ -509,7 +650,7 @@ def default_tables() -> list[TableSpec]:
             ),
         ),
         TableSpec(
-            name="RUNS",
+            name="scheduler_runs",
             columns=with_concat(
                 [
                     *BASE_COLUMNS,

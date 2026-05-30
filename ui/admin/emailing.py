@@ -13,14 +13,15 @@ from core.config import load_config
 from core.sheets_db import (
     SHEETS_ROW_STATUS_ACTIVE,
     SHEETS_ROW_STATUS_INACTIVE,
-    _DEFAULT_TABLE_ACRONYMS,
     append_immutable_row,
     build_gspread_client,
     compute_concat,
     fetch_records,
     invalidate_fetch_records_cache,
+    open_spreadsheet,
     sheet_row_status_is_live,
     utc_now_iso,
+    _resolve_table_name,
 )
 from core.weekly_email_urls import weekly_email_signed_urls
 from ui.admin.emailing_manual_broadcast import render_emailing_manual_broadcast
@@ -52,7 +53,11 @@ def render_admin_emailing() -> None:
         st.error(str(ex))
         return
 
-    etpl_tab = _DEFAULT_TABLE_ACRONYMS.get("email_templates", "ETPL")
+    try:
+        sh_hint = open_spreadsheet(gs, cfg.gsheet_id, service_account_email=sa_email or None)
+        etpl_tab = _resolve_table_name(sh=sh_hint, table="email_templates")
+    except Exception:
+        etpl_tab = "ETPL"
 
     template_key = "weekly_friday_lumenvia"
     st.caption(
@@ -68,7 +73,7 @@ def render_admin_emailing() -> None:
 
     from core.emailing import (
         EmailTemplate,
-        render_template,
+        render_weekly_email_template,
         supported_tags,
         french_day_month_year,
         pick_latest_live_email_template,
@@ -187,7 +192,7 @@ def render_admin_emailing() -> None:
             "url_app": url_app,
             "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
         }
-        rendered = render_template(EmailTemplate(subject=subject, body=body), values=values)
+        rendered = render_weekly_email_template(EmailTemplate(subject=subject, body=body), values=values)
         st.markdown(f"**Objet :** {rendered.subject}")
         st.code((rendered.body or "")[:4000] or "—")
 
@@ -225,8 +230,6 @@ def render_admin_emailing() -> None:
             else:
                 # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
                 # (comme MARPA pour Paramètres_IA : append seul laisse l’historique encore « Actif »).
-                from core.sheets_db import _resolve_table_name, open_spreadsheet
-
                 sh_etpl = open_spreadsheet(
                     gs, cfg.gsheet_id, service_account_email=sa_email or None
                 )

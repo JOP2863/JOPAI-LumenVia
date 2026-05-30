@@ -54,10 +54,13 @@ def _default_descriptions() -> dict[str, str]:
 
 
 def _ensure_sheet(sh) -> object:
+    from core.sheets_db import _resolve_table_name
+
+    ws_name = _resolve_table_name(sh=sh, table=PARAMS_SHEET)
     try:
-        ws = sh.worksheet(PARAMS_SHEET)
+        ws = sh.worksheet(ws_name)
     except Exception:
-        ws = sh.add_worksheet(title=PARAMS_SHEET, rows=4000, cols=len(HEADER) + 2)
+        ws = sh.add_worksheet(title=ws_name, rows=4000, cols=len(HEADER) + 2)
     hdr = ws.row_values(1)
     if [x.strip() for x in hdr if x.strip()] != HEADER:
         ws.update([HEADER], "A1")
