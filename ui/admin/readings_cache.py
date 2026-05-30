@@ -8,7 +8,7 @@ from hashlib import sha256
 
 import streamlit as st
 
-from core.aelf import fetch_aelf_day
+from core.aelf import fetch_aelf_day, is_aelf_not_found_error
 from core.config import load_config
 from core.sheets_db import (
     BASE_COLUMNS,
@@ -42,6 +42,18 @@ def _readings_row_is_usable(r: dict, *, zone: str, year: int) -> bool:
     if not ds.startswith(str(year)):
         return False
     return any(str(r.get(k) or "").strip() for k in ("premiere_lecture", "psaume", "evangile"))
+
+
+def _readings_row_is_aelf_unavailable(r: dict, *, zone: str, year: int) -> bool:
+    """Date déjà tentée : l'API AELF renvoie 404 (calendrier pas encore publié)."""
+    if str(r.get("zone") or "").strip() != zone:
+        return False
+    if not sheet_row_status_is_live(r.get("status")):
+        return False
+    ds = str(r.get("date") or "").strip()
+    if not ds.startswith(str(year)):
+        return False
+    return is_aelf_not_found_error(Exception(str(r.get("error") or "")))
 
 
 def _readings_cache_row_from_aelf(*, ds: str, zone: str, identity, texts) -> dict[str, str]:
@@ -139,10 +151,28 @@ def render_admin_readings_cache() -> None:
                 for r in existing
                 if _readings_row_is_usable(r, zone=zone, year=int(year))
             }
+            unavailable_dates = {
+                str(r.get("date") or "").strip()
+                for r in existing
+                if _readings_row_is_aelf_unavailable(r, zone=zone, year=int(year))
+            }
 
-            to_fetch = [d for d in targets if d.isoformat() not in existing_dates]
-            skipped = len(targets) - len(to_fetch)
-            st.write(f"Déjà en base (lectures OK) : **{skipped}** · À récupérer : **{len(to_fetch)}** dimanche(s).")
+            to_fetch = [
+                d
+                for d in targets
+                if d.isoformat() not in existing_dates and d.isoformat() not in unavailable_dates
+            ]
+            target_iso = {d.isoformat() for d in targets}
+            st.write(
+                f"Déjà en base (lectures OK) : **{len(existing_dates & target_iso)}** · "
+                f"Indisponibles AELF (404) : **{len(unavailable_dates & target_iso)}** · "
+                f"À récupérer : **{len(to_fetch)}** dimanche(s)."
+            )
+            if unavailable_dates & {d.isoformat() for d in targets}:
+                st.caption(
+                    "Les dates en 404 ne sont pas re-tentées tant que l'API AELF ne les publie pas "
+                    "(ex. fin d'année liturgique pas encore en ligne)."
+                )
             if not to_fetch:
                 st.success("Rien à faire : tout est déjà en base pour cette sélection.")
                 return
@@ -150,6 +180,7 @@ def render_admin_readings_cache() -> None:
             rows: list[dict[str, str]] = []
             ok_count = 0
             err_count = 0
+            unavailable_count = 0
             errors_preview: list[str] = []
 
             for d in to_fetch:
@@ -159,9 +190,16 @@ def render_admin_readings_cache() -> None:
                     rows.append(_readings_cache_row_from_aelf(ds=ds, zone=zone, identity=identity, texts=texts))
                     ok_count += 1
                 except Exception as ex:
+                    if is_aelf_not_found_error(ex):
+                        unavailable_count += 1
+                        if len(errors_preview) < 8:
+                            errors_preview.append(
+                                f"{ds} : non publié par l'API AELF (404) — réessayez plus tard"
+                            )
+                        continue
                     err_count += 1
                     msg = str(ex)[:900]
-                    if len(errors_preview) < 5:
+                    if len(errors_preview) < 8:
                         errors_preview.append(f"{ds} : {msg[:200]}")
                     rows.append(
                         {
@@ -173,25 +211,26 @@ def render_admin_readings_cache() -> None:
                         }
                     )
 
-            added = append_immutable_rows_bulk(
-                gspread_client=gs,
-                spreadsheet_id=cfg.gsheet_id,
-                table="readings_cache",
-                values_by_col_list=rows,
-                chunk_size=120,
-            )
+            added = 0
+            if rows:
+                added = append_immutable_rows_bulk(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="readings_cache",
+                    values_by_col_list=rows,
+                    chunk_size=120,
+                )
             st.success(
                 f"Préchargement terminé : **{added}** ligne(s) ajoutée(s) "
-                f"({ok_count} succès, {err_count} échec(s))."
+                f"({ok_count} succès, {unavailable_count} indisponible(s) AELF, {err_count} échec(s))."
             )
             if errors_preview:
-                st.warning("Aperçu des erreurs :")
+                st.warning("Dates non récupérées :")
                 for line in errors_preview:
                     st.caption(line)
             if err_count:
                 st.info(
-                    "Les dimanches en échec (lignes avec `error` rempli ou sans lectures) "
-                    "seront re-tentés au prochain préchargement."
+                    "Les autres échecs (hors 404) seront re-tentés au prochain préchargement."
                 )
         finally:
             ov.empty()

@@ -84,6 +84,14 @@ def fetch_aelf_day(date_str: str, zone: str = "france") -> tuple[AelfDayIdentity
     return client.informations(date_str, zone=zone), client.messes(date_str, zone=zone)
 
 
+def is_aelf_not_found_error(exc: BaseException) -> bool:
+    """True si l'API AELF ne publie pas encore cette date (HTTP 404)."""
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return exc.response.status_code == 404
+    msg = str(exc)
+    return "404" in msg and "Not Found" in msg
+
+
 def _get_str(d: dict[str, Any], k: str) -> str | None:
     v = d.get(k)
     if v is None:
