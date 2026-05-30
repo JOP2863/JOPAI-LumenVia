@@ -78,6 +78,12 @@ class AelfClient:
         )
 
 
+def fetch_aelf_day(date_str: str, zone: str = "france") -> tuple[AelfDayIdentity, AelfTexts]:
+    """Appel AELF direct (sans cache Streamlit) — préféré pour les boucles bulk."""
+    client = AelfClient()
+    return client.informations(date_str, zone=zone), client.messes(date_str, zone=zone)
+
+
 def _get_str(d: dict[str, Any], k: str) -> str | None:
     v = d.get(k)
     if v is None:

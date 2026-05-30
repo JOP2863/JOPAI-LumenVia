@@ -6,7 +6,9 @@ import json
 
 import streamlit as st
 
-from core.aelf import AelfClient
+from dataclasses import asdict
+
+from core.aelf import AelfDayIdentity, AelfTexts, fetch_aelf_day
 from core.config import load_config
 from core.parametres_ia import pick_effective_templates
 from core.prompt_template_keys import PROMPT_TEMPLATE_KEYS
@@ -104,9 +106,12 @@ def load_voix_rules_cached(*, gsheet_id: str, service_account_fingerprint: str) 
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def cached_aelf(date_str: str, zone: str = "france", *, _identity_schema: int = 4):
-    """_identity_schema invalide le cache quand le dataclass AelfDayIdentity évolue."""
-    c = AelfClient()
-    identity = c.informations(date_str, zone=zone)
-    texts = c.messes(date_str, zone=zone)
-    return identity, texts
+def _cached_aelf_raw(date_str: str, zone: str = "france", *, _identity_schema: int = 4) -> tuple[dict, dict]:
+    """Retour dict (pickle-safe) ; _identity_schema invalide le cache si le schéma AELF évolue."""
+    identity, texts = fetch_aelf_day(date_str, zone=zone)
+    return asdict(identity), asdict(texts)
+
+
+def cached_aelf(date_str: str, zone: str = "france", *, _identity_schema: int = 4) -> tuple[AelfDayIdentity, AelfTexts]:
+    id_d, txt_d = _cached_aelf_raw(date_str, zone=zone, _identity_schema=_identity_schema)
+    return AelfDayIdentity(**id_d), AelfTexts(**txt_d)
