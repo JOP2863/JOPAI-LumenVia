@@ -34,6 +34,7 @@ from core.emailing import (
     normalize_email_template_text,
     pick_latest_live_email_template,
     render_template,
+    resolve_email_nom_du_dimanche,
 )
 from core.emailing_newsletter_html import (
     build_lv_newsletter_email_html,
@@ -599,12 +600,12 @@ def render_emailing_manual_broadcast(
                 "nom": "Dupont",
                 "origin": origin,
                 "date_dimanche": french_day_month_year(d_pick),
-                "nom_du_dimanche": ap._liturgy_display_label(
-                    (getattr(ident0, "fete", None) or "").strip()
-                    or (ap._jour_liturgique(ident0) if ident0 else "")
-                    or ""
-                )
-                or "—",
+                "nom_du_dimanche": resolve_email_nom_du_dimanche(
+                    identity=ident0,
+                    date_str=date_str,
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                ),
                 "url_pdf": _urls_send["url_pdf"],
                 "url_audio": _urls_send["url_audio"],
                 "url_audio_readings": _urls_send["url_audio_readings"],

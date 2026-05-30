@@ -110,6 +110,7 @@ def render_admin_emailing() -> None:
         french_day_month_year,
         pick_latest_live_email_template,
         email_template_row_is_live,
+        resolve_email_nom_du_dimanche,
     )
 
     try:
@@ -199,12 +200,12 @@ def render_admin_emailing() -> None:
             "nom": "Dupont",
             "origin": origin,
             "date_dimanche": french_day_month_year(d_pick),
-            "nom_du_dimanche": ap._liturgy_display_label(
-                (getattr(ident0, "fete", None) or "").strip()
-                or (ap._jour_liturgique(ident0) if ident0 else "")  # type: ignore[arg-type]
-                or ""
-            )
-            or "—",
+            "nom_du_dimanche": resolve_email_nom_du_dimanche(
+                identity=ident0,
+                date_str=date_str,
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+            ),
             "url_pdf": url_pdf,
             "url_audio": url_audio,
             "url_audio_readings": url_audio_readings,

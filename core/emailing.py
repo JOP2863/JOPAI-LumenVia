@@ -149,3 +149,60 @@ def french_day_month_year(d: date) -> str:
     )
     return f"{d.day} {mois[d.month - 1]} {d.year}"
 
+
+def resolve_email_nom_du_dimanche(
+    *,
+    identity: object | None,
+    date_str: str,
+    gspread_client: object | None = None,
+    spreadsheet_id: str | None = None,
+) -> str:
+    """
+    Valeur de ``{{nom_du_dimanche}}`` pour un envoi e-mail.
+
+    1. Identité AELF du dimanche ciblé (fête + semaine du Psautier).
+    2. Secours : dernière ligne ``readings_cache`` (RDC) pour cette date.
+    """
+    from core.liturgy_display_helpers import email_sunday_liturgy_label
+    from core.sheets_db import fetch_records, sheet_row_status_is_live
+
+    label = email_sunday_liturgy_label(identity)
+    if label != "—":
+        return label
+
+    sid = str(spreadsheet_id or "").strip()
+    ds = str(date_str or "")[:10]
+    if not gspread_client or not sid or not ds:
+        return "—"
+
+    try:
+        rows = fetch_records(
+            gspread_client=gspread_client,
+            spreadsheet_id=sid,
+            table="readings_cache",
+            limit=0,
+        )
+    except Exception:
+        return "—"
+
+    candidates = [
+        r
+        for r in rows
+        if str(r.get("date") or "")[:10] == ds
+        and sheet_row_status_is_live(r.get("status"))
+        and not str(r.get("error") or "").strip()
+    ]
+    if not candidates:
+        return "—"
+
+    candidates.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    r0 = candidates[0]
+
+    class _LiturgyRow:
+        fete = r0.get("fete")
+        semaine = r0.get("semaine")
+        jour_liturgique_nom = r0.get("jour_liturgique_nom")
+        periode = r0.get("periode")
+
+    return email_sunday_liturgy_label(_LiturgyRow())
+

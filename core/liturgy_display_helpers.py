@@ -117,6 +117,30 @@ def jour_liturgique_nom(identity: object) -> str | None:
     return (str(v).strip() if v else None) or None
 
 
+def email_sunday_liturgy_label(identity: object | None) -> str:
+    """
+    Libellé liturgique pour la balise e-mail ``{{nom_du_dimanche}}``.
+
+    Aligné sur le titre PDF : fête ou jour liturgique AELF, repli titre de couverture,
+    puis semaine du Psautier entre parenthèses si disponible.
+    """
+    if identity is None:
+        return "—"
+    semaine_psautier = (getattr(identity, "semaine", None) or "").strip()
+    raw_line1 = (
+        (getattr(identity, "fete", None) or "").strip()
+        or (jour_liturgique_nom(identity) or "")
+    )
+    line1 = liturgy_display_label(raw_line1) if raw_line1 else liturgy_cover_pdf_title(identity)
+    if not line1 or line1 == "—":
+        return "—"
+    if semaine_psautier and "psautier" in semaine_psautier.lower():
+        lbl = liturgy_display_label(semaine_psautier).strip()
+        if lbl and lbl != "—":
+            return f"{line1} ({lbl})"
+    return line1
+
+
 def jopai_mark_html() -> str:
     """Marque immuable : JOP (gras) + AI (italique) + © (exposant)."""
     return (

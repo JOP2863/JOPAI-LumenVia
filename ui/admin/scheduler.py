@@ -873,11 +873,24 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     from_phone_e164=_secret_get("TWILIO_FROM", "TWILIO_FROM_NUMBER"),
                 )
     
-                from core.emailing import EmailTemplate, render_template, french_day_month_year
-    
+                from core.emailing import EmailTemplate, render_template, french_day_month_year, resolve_email_nom_du_dimanche
+
+                import app as ap
+
+                try:
+                    ident_sched, _ = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
+                except Exception:
+                    ident_sched = None
+
                 vals_base = {
                     "origin": origin,
                     "date_dimanche": french_day_month_year(sunday),
+                    "nom_du_dimanche": resolve_email_nom_du_dimanche(
+                        identity=ident_sched,
+                        date_str=date_str,
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                    ),
                     "url_pdf": url_pdf,
                     "url_audio": url_audio,
                     "url_audio_readings": url_audio_readings,

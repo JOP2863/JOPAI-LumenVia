@@ -31,6 +31,7 @@ from core.liturgy_display_helpers import (
     jopai_mark_html as _jopai_mark_html,
     liturgy_cover_pdf_title as _liturgy_cover_pdf_title,
     liturgy_display_label as _liturgy_display_label,
+    email_sunday_liturgy_label as _email_sunday_liturgy_label,
 )
 from core.public_listen_url import public_app_listen_url as _public_app_listen_url_core
 from core.sunday_existing_outputs import (
