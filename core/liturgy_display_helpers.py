@@ -117,22 +117,58 @@ def jour_liturgique_nom(identity: object) -> str | None:
     return (str(v).strip() if v else None) or None
 
 
+_WEAK_LITURGY_TITLE_KEYS = frozenset(
+    {
+        "solennite",
+        "fete",
+        "memoire",
+        "memoire_obligatoire",
+        "memoire_facultative",
+        "dimanche",
+        "celebration",
+        "jour_ferie",
+        "semaine",
+    }
+)
+
+
+def is_weak_liturgy_title(s: str | None) -> bool:
+    """
+    True si le libellé n’est qu’un rang liturgique générique (ex. « Solennité » seul),
+    pas un nom de célébration utilisable dans un e-mail.
+    """
+    if not s or not str(s).strip():
+        return True
+    k = norm_key(str(s).strip())
+    if not k:
+        return True
+    return k in _WEAK_LITURGY_TITLE_KEYS
+
+
+def _resolve_primary_liturgy_line1(identity: object) -> str:
+    """Nom de célébration AELF : ignore ``fete`` si ce n’est qu’un rang (Solennité, Fête…)."""
+    fete = (getattr(identity, "fete", None) or "").strip()
+    jour = (jour_liturgique_nom(identity) or "").strip()
+    if fete and not is_weak_liturgy_title(fete):
+        return fete
+    if jour and not is_weak_liturgy_title(jour):
+        return jour
+    return ""
+
+
 def email_sunday_liturgy_label(identity: object | None) -> str:
     """
     Libellé liturgique pour la balise e-mail ``{{nom_du_dimanche}}``.
 
-    Aligné sur le titre PDF : fête ou jour liturgique AELF, repli titre de couverture,
-    puis semaine du Psautier entre parenthèses si disponible.
+    Aligné sur le titre PDF : fête ou jour liturgique AELF (sans rang seul type « Solennité »),
+    repli titre de couverture, puis semaine du Psautier entre parenthèses si disponible.
     """
     if identity is None:
         return "—"
     semaine_psautier = (getattr(identity, "semaine", None) or "").strip()
-    raw_line1 = (
-        (getattr(identity, "fete", None) or "").strip()
-        or (jour_liturgique_nom(identity) or "")
-    )
+    raw_line1 = _resolve_primary_liturgy_line1(identity)
     line1 = liturgy_display_label(raw_line1) if raw_line1 else liturgy_cover_pdf_title(identity)
-    if not line1 or line1 == "—":
+    if not line1 or line1 == "—" or is_weak_liturgy_title(line1):
         return "—"
     if semaine_psautier and "psautier" in semaine_psautier.lower():
         lbl = liturgy_display_label(semaine_psautier).strip()

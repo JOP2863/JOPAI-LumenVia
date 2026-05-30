@@ -1,0 +1,98 @@
+---
+description: Cache Google Sheets et écritures différées — standard JOPAI (Streamlit + gspread)
+globs: ui/**/*.py,core/**/*.py,app.py
+alwaysApply: true
+---
+
+# Bonne pratique — Cache Google Sheets sur les pages Streamlit (standard JOPAI)
+
+## Principe (texte « dans le marbre »)
+
+Une page Streamlit qui **affiche ou modifie** des données Google Sheets ne doit **jamais relire le classeur à chaque rerun** (coche, frappe, expander, navigation interne).
+
+**Pattern obligatoire :**
+
+1. Charger les onglets nécessaires **une fois** (session ou cache TTL court), via le module de cache **centralisé du dépôt** — jamais un cache ad hoc par page.
+2. Construire en mémoire les **index utiles** (`nom → #ID`, `date → entity_id`, template Actif, etc.) à partir de cette copie.
+3. Les interactions fréquentes (widgets, cases, champs) **ne déclenchent pas d’appel API** : on marque l’état « modifié » en session ; l’utilisateur **enregistre explicitement** (ou une action batch unique persiste).
+4. **Invalider le cache uniquement après une écriture réussie** (save, append, inactivation, sync) — pas avant, pas à chaque rerun.
+5. **Réutiliser** les données déjà lues entre sous-composants d’une même page (parent → enfant) au lieu de relire le même onglet.
+
+## Pourquoi (quota HTTP 429)
+
+L’augmentation des quotas **journaliers** dans GCP ne suffit pas. Google Sheets limite surtout les **requêtes par minute par compte de service** (~300 lectures + ~300 écritures / min).
+
+Chaque `get_all_records` sur un gros onglet = **1 requête API lourde**. Un rerun Streamlit peut en enchaîner une dizaine (ouverture fichier, `ensure_table`, plusieurs onglets, même onglet lu 2–3×) → **HTTP 429** en quelques secondes.
+
+## Trois niveaux de cache (complémentaires)
+
+| Niveau | Quand | Rôle |
+|--------|--------|------|
+| **Session** (`st.session_state`) | Durée de la session utilisateur | Copie « source de vérité UI » jusqu’à invalidation explicite |
+| **Streamlit** (`@st.cache_data`, TTL 60–90 s) | Reruns widgets | Évite de relire Sheets à chaque interaction dans la même minute |
+| **Core / process** (TTL court in-process) | Appels core depuis UI + retry 429 | Mutualise `open_spreadsheet` et `fetch_records` ; backoff sur quota |
+
+Les trois coexistent : la UI passe par le cache Streamlit ; le core peut activer `use_cache=True` ; la session garde l’état éditable.
+
+## Lectures — règles
+
+- **Interdit en UI** : `fetch_records`, `open_spreadsheet`, `ensure_table`, `worksheet.get_all_records` **directement** dans le corps d’une page sans passer par le cache central.
+- **Autorisé sans cache** : scripts CLI (`tools/`), scheduler one-shot, **une seule** lecture fraîche juste avant une écriture critique (`use_cache=False`).
+- **Ne pas appeler `ensure_table` à chaque chargement de page** — réservé à `tools/init_sheets_db.py` ou création d’onglet vraiment absente.
+- **Ne pas ouvrir deux fois** le même spreadsheet sur une page.
+- **Passer les lignes déjà lues** aux sous-composants (ex. `render_emailing_manual_broadcast(..., tpl_rows=rows, sa_json=sa_json)`).
+- **Agréger les lectures métier** : `weekly_email_signed_urls` utilise le cache module + `fetch_records(..., use_cache=True)` — ne pas relire ILUS/GEN/AUD à chaque widget.
+- **`limit=0`** (onglet entier) : acceptable **en cache** ; éviter plusieurs full-scan du même onglet dans un même rerun.
+
+## Écritures — règles
+
+- **Pas d’écriture dans `on_change`** ; bouton **Enregistrer** / **Lancer l’envoi** / action batch explicite.
+- **Regrouper** : préférer `append_rows` / `batch_update` à N× `update_cell` (ex. inactivation template ETPL).
+- **Retry avec backoff** : `_append_rows_with_retry` dans `core/sheets_db.py`.
+- **Après écriture réussie** :
+  - `invalidate_adm_sheets_fetch_cache()` (`ui/streamlit_caches.py`)
+  - `invalidate_fetch_records_cache(spreadsheet_id=..., table=...)` (`core/sheets_db.py`)
+  - invalidation cache métier si applicable (`invalidate_weekly_email_urls_cache`)
+- `append_immutable_row` / `append_immutable_rows_bulk` invalident déjà le cache core de la table.
+
+## API LumenVia (référence rapide)
+
+```python
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    service_account_json_fingerprint,
+)
+from core.sheets_db import fetch_records, invalidate_fetch_records_cache
+
+sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+rows = adm_sheets_fetch_cached(cfg.gsheet_id, "email_templates", 0, sa_json)
+
+# Écriture manuelle (hors append_immutable_row) :
+invalidate_adm_sheets_fetch_cache()
+invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="email_templates")
+```
+
+- **UI admin** : toujours `adm_sheets_fetch_cached` (TTL ~90 s, `show_spinner=False`).
+- **Core** : `fetch_records(..., use_cache=True)` ; `open_spreadsheet(..., use_cache=True)`.
+- **Ne pas dupliquer** un `@st.cache_data` par page — étendre `ui/streamlit_caches.py`.
+
+## Anti-patterns (cas Emailing corrigé)
+
+- Relire `users` à l’ouverture, dans l’expander opt-in **et** au clic Envoyer.
+- `ensure_table` + `open_spreadsheet` + `fetch_records(ETPL)` au même rerun.
+- `weekly_email_signed_urls` sans cache → 3 onglets entiers par rerun.
+- Oublier d’invalider après inactivation manuelle de lignes (`update_cell`).
+
+## Checklist — nouvelle page admin LumenVia
+
+- [ ] Lectures via `adm_sheets_fetch_cached` ou cache module core.
+- [ ] `sa_json = service_account_json_fingerprint(...)` — ne jamais passer le dict SA brut à `@st.cache_data`.
+- [ ] Données parent → enfants (pas de triple lecture).
+- [ ] Pas de `ensure_table` au runtime sauf init.
+- [ ] Invalidation après toute mutation réussie.
+- [ ] Écritures groupées ; retry 429.
+
+## Équivalent Memoria
+
+Même principe ; implémentation dans `memoria_core/sheet_cache.py` (`load_active_data_cached`, `invalidate_sheet_cache`). Voir la règle homologue dans le dépôt JOPAI-Memoria.
