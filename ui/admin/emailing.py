@@ -219,7 +219,10 @@ def render_admin_emailing() -> None:
 
     st.caption(
         "Astuce : pour rendre les CTA cliquables, mets directement des URLs dans le corps, par ex. "
-        "`{{url_pdf}}`, `{{url_audio}}`, `{{url_audio_readings}}`, `{{url_illustration}}`, `{{illustration_description}}`, `{{url_app}}`."
+        "`{{url_pdf}}`, `{{url_audio}}`, `{{url_audio_readings}}`, `{{url_illustration}}`, `{{url_app}}`. "
+        "Pour l’illustration dominicale : gardez `{{affichage de l’illustration de la semaine}}` et "
+        "`{{illustration_description}}` **en fin de template** (marqueurs) — le gabarit HTML les place "
+        "automatiquement **sous le bouton « Donner mon avis »**, avant le bandeau légal."
     )
 
     st.divider()

@@ -68,6 +68,30 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
 
     # Le template newsletter est rédigé "Bonjour {{prenom}}," : on force donc le prénom seul.
     who = (prenom or "—").strip()
+
+    def _norm_line(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").strip())
+
+    def _is_illustration_description_line(ln: str) -> bool:
+        """True si la ligne est (ou porte) la légende IA — rendue sous l’image, pas dans le corps."""
+        s = (ln or "").strip()
+        if not s:
+            return False
+        if re.search(r"(?is)\{\{\s*illustration_description\s*\}\}", s):
+            return True
+        if not illu_desc0:
+            return False
+        nl = _norm_line(s)
+        nd = _norm_line(illu_desc0)
+        if not nl or not nd:
+            return False
+        if nl == nd:
+            return True
+        # Même texte tronqué (aperçu client mail) ou variante apostrophe.
+        if len(nl) >= 40 and (nd.startswith(nl) or nl.startswith(nd)):
+            return True
+        return False
+
     # On retire les lignes techniques / URLs signées du corps (l’illustration est rendue en image seule sous le texte).
     raw_lines = [ln.strip() for ln in (intro_text or "").replace("\r\n", "\n").split("\n")]
     raw_lines = [ln for ln in raw_lines if ln]
@@ -81,6 +105,8 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
         if "X-Goog-Algorithm=" in ln or "X-Goog-Credential=" in ln or "X-Goog-Signature=" in ln:
             continue
         if re.search(r"(?is)\{\{\s*affichage.*illustration", ln):
+            continue
+        if _is_illustration_description_line(ln):
             continue
         filtered.append(ln)
     if not filtered:
@@ -123,8 +149,11 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
         lead = raw.lstrip("-•").lstrip()
         if re.match(
             r"(?i)^(la synth[eè]se|l['’]essentiel|l['’]exp[eé]rience\s+sonore|la\s+parole"
-            r"|l['’]audio\s+des\s+lectures|l['’]illustration)\b",
+            r"|l['’]audio\s+des\s+lectures)\b",
             lead,
+        ) or (
+            re.match(r"(?i)^l['’]illustration\b", lead)
+            and "👉" in raw
         ) or raw.startswith(("-", "•")):
             segments.append(("li", lead))
             continue
@@ -269,6 +298,41 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     _li_used = 0
     _cta_used = 0
 
+    # Bloc illustration (image + légende) — injecté sous le CTA questionnaire, avant le bandeau légal.
+    _illu_cards_html = ""
+    if url_illu0:
+        _illu_href = html_escape(url_app0 or url_illu0)
+        _illu_src = html_escape(url_illu0)
+        _alt = (
+            html_escape((illu_desc0[:180] + "…") if len(illu_desc0) > 180 else illu_desc0)
+            if illu_desc0
+            else ""
+        )
+        _illu_parts: list[str] = [
+            "<div style=\"margin:16px 0;text-align:center;\">"
+            f"<a href=\"{_illu_href}\" target=\"_blank\" rel=\"noopener noreferrer\">"
+            f"<img src=\"{_illu_src}\" alt=\"{_alt}\" "
+            "style=\"border-radius:12px;max-width:260px;width:100%;height:auto;display:inline-block;border:0;\">"
+            "</a></div>"
+        ]
+        if illu_desc0:
+            _illu_parts.append(
+                "<p style=\"margin:8px auto 0 auto;max-width:32rem;text-align:center;"
+                "font-size:13px;line-height:1.5;color:#475569;\">"
+                f"{html_escape(illu_desc0)}</p>"
+            )
+        _illu_cards_html = "".join(_illu_parts)
+
+    _illu_cards_appended = False
+    _inject_illu_after_seg: int | None = None
+
+    def _append_illustration_block() -> None:
+        nonlocal intro_html, _illu_cards_appended
+        if _illu_cards_appended or not _illu_cards_html:
+            return
+        intro_html += _illu_cards_html
+        _illu_cards_appended = True
+
     def _flush_ul() -> None:
         nonlocal intro_html, _ul_items
         if not _ul_items:
@@ -337,14 +401,21 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
                     f'<p style="margin:{_cta_margin};padding:0;">{_bullet_html(chunk)}</p>'
                 )
                 _cta_used += 1
+                if _is_feedback_survey_bullet((chunk or "").strip()):
+                    _inject_illu_after_seg = _seg_i
         else:
             if _li_used < _max_intro_li:
                 _ul_items.append(_bullet_html(chunk))
                 _li_used += 1
         if _wrap_hi is not None and _seg_i == _wrap_hi:
             intro_html += "</div>"
+        if _inject_illu_after_seg is not None and _seg_i == _inject_illu_after_seg:
+            _append_illustration_block()
 
     _flush_ul()
+
+    if not _illu_cards_appended and _illu_cards_html:
+        _append_illustration_block()
 
     prefs_link = (pref_url or optout0 or "").strip()
 
@@ -379,26 +450,6 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             f"<em>{html_escape(quote_txt)}</em></p>"
         )
 
-    # Bloc cartes : uniquement l’image illustrée (les PDF/audio sont déjà couverts par le corps / puces).
-    cards: list[str] = []
-    if url_illu0:
-        _illu_href = html_escape(url_app0 or url_illu0)
-        _illu_src = html_escape(url_illu0)
-        _alt = html_escape((illu_desc0[:180] + "…") if len(illu_desc0) > 180 else illu_desc0) if illu_desc0 else ""
-        cards.append(
-            "<div style=\"margin:16px 0;text-align:center;\">"
-            f"<a href=\"{_illu_href}\" target=\"_blank\" rel=\"noopener noreferrer\">"
-            f"<img src=\"{_illu_src}\" alt=\"{_alt}\" "
-            "style=\"border-radius:12px;max-width:260px;width:100%;height:auto;display:inline-block;border:0;\">"
-            "</a></div>"
-        )
-        if illu_desc0:
-            cards.append(
-                "<p style=\"margin:8px auto 0 auto;max-width:32rem;text-align:center;"
-                "font-size:13px;line-height:1.5;color:#475569;\">"
-                f"{html_escape(illu_desc0)}</p>"
-            )
-
     footer_links = []
     # Liens de footer (cibles fixes)
     if origin0:
@@ -429,7 +480,6 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     parts.append("</style></head><body><div class=\"wrap\">")
     parts.append(f"<p><strong>Bonjour {who},</strong></p>")
     parts.append(intro_html)
-    parts.append("".join(cards))
     if footer_html:
         parts.append("<div class=\"hr\"></div>")
         parts.append(f"<p style=\"color:#475569;font-size:12px;\">{footer_html}</p>")
