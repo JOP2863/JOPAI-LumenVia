@@ -268,4 +268,11 @@ def render_admin_emailing() -> None:
         finally:
             ov.empty()
 
-    render_emailing_manual_broadcast(gs=gs, cfg=cfg, template_key=template_key, lang_fr=lang_fr)
+    render_emailing_manual_broadcast(
+        gs=gs,
+        cfg=cfg,
+        template_key=template_key,
+        lang_fr=lang_fr,
+        subject=subject,
+        body=body,
+    )

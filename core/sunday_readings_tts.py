@@ -99,8 +99,12 @@ def plain_readings_for_tts(texts: object) -> str:
         raw = re.sub(r"<[^>]+>", " ", raw)
         raw = " ".join(raw.split())
         raw = strip_tts_admin_preamble(raw)
-        if raw.strip():
-            parts.append(f"{title}. {raw.strip()}")
+        if not raw.strip():
+            return
+        # Rubriques résiduelles (ex. dimanche sans psaume responsorial).
+        if len(raw.strip()) < 12 and title.lower().startswith("psaume"):
+            return
+        parts.append(f"{title}. {raw.strip()}")
 
     _seg("Première lecture", getattr(texts, "premiere_lecture", None))
     _seg("Psaume", getattr(texts, "psaume", None))

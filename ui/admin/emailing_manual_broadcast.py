@@ -55,6 +55,8 @@ def render_emailing_manual_broadcast(
     cfg: object,
     template_key: str,
     lang_fr: tuple[str, ...],
+    subject: str,
+    body: str,
 ) -> None:
     """Suite de `render_admin_emailing` : destinataires, confirmation, envoi."""
     import app as ap
