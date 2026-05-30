@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.audio_utils import join_wav_bytes, normalize_audio_bytes
@@ -10,18 +11,52 @@ from core.sunday_readings_tts import spoken_text_for_tts
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
 
 
-def chunk_text_for_tts(text: str, *, max_chars: int = 1400) -> list[str]:
-    """
-    Découpe en morceaux pour éviter les limites TTS (et éviter l'audio tronqué).
-    Stratégie simple: découpe sur paragraphes puis sur phrases si besoin.
-    """
+def _split_by_size(text: str, *, max_chars: int) -> list[str]:
     t = " ".join((text or "").split())
     if not t:
         return []
     if len(t) <= max_chars:
         return [t]
+    return [t[i : i + max_chars] for i in range(0, len(t), max_chars)]
 
-    paras = [p.strip() for p in (text or "").split("\n\n") if p.strip()]
+
+def _chunk_liturgy_readings_by_section(text: str, *, max_chars: int) -> list[str]:
+    """
+    Une (ou plusieurs) requêtes TTS par section AELF (``\\n\\n``).
+
+    Évite de fusionner « Première lecture » + « Deuxième lecture » dans un seul appel
+    Gemini : cela provoquait parfois un long blanc audio avant l'Évangile (morceau suivant).
+    """
+    chunks: list[str] = []
+    for para in (text or "").split("\n\n"):
+        p = " ".join(para.split())
+        if not p:
+            continue
+        if len(p) <= max_chars:
+            chunks.append(p)
+        else:
+            chunks.extend(_split_by_size(p, max_chars=max_chars))
+    return chunks
+
+
+def chunk_text_for_tts(text: str, *, max_chars: int = 1400) -> list[str]:
+    """
+    Découpe en morceaux pour éviter les limites TTS (et éviter l'audio tronqué).
+
+    Lectures du lectionnaire : une section liturgique par morceau (puis découpe taille si besoin).
+    Autres textes : fusion de paragraphes jusqu'à ``max_chars``.
+    """
+    t = (text or "").strip()
+    if not t:
+        return []
+    if re.match(r"(?i)^(?:Première|Premiere) lecture\b", t):
+        return _chunk_liturgy_readings_by_section(t, max_chars=max_chars)
+
+    flat = " ".join(t.split())
+    if len(flat) <= max_chars:
+        return [flat]
+
+    paras = [p.strip() for p in t.split("\n\n") if p.strip()]
     chunks: list[str] = []
     cur = ""
     for p in paras:
@@ -41,8 +76,7 @@ def chunk_text_for_tts(text: str, *, max_chars: int = 1400) -> list[str]:
         if len(c) <= max_chars:
             final.append(c)
         else:
-            for i in range(0, len(c), max_chars):
-                final.append(c[i : i + max_chars])
+            final.extend(_split_by_size(c, max_chars=max_chars))
     return final
 
 
