@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import date
 from hashlib import sha256
@@ -21,6 +22,7 @@ from core.sheets_db import (
     fetch_records,
     sheet_row_status_is_live,
 )
+from core.tts_pronunciation import tts_pronunciation_breakdown
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE, resolve_voice
 from ui.components import loading_overlay
 
@@ -30,6 +32,7 @@ _ADMIN_RES_EXPANDER_KEYS: tuple[str, ...] = (
     "adm_res_exp_diag",
     "adm_res_exp_smoke",
     "adm_res_exp_voix",
+    "adm_res_exp_tts_pron",
     "adm_res_exp_audio",
     "adm_res_exp_texte",
 )
@@ -51,6 +54,7 @@ _PROMPT_TEMPLATE_LABELS: dict[str, str] = {
     "audio_style_paques": "TTS — surcouche temps pascal (synthèse)",
     "audio_style_careme": "TTS — surcouche Carême (synthèse)",
     "audio_style_lectures": "TTS — style lectures du lectionnaire",
+    "tts_pronunciation": "TTS — dictionnaire de prononciation (JSON, voix seulement)",
 }
 
 _AUDIO_PROMPT_KEYS: tuple[str, ...] = (
@@ -58,6 +62,7 @@ _AUDIO_PROMPT_KEYS: tuple[str, ...] = (
     "audio_style_paques",
     "audio_style_careme",
     "audio_style_lectures",
+    "tts_pronunciation",
 )
 
 
@@ -265,6 +270,132 @@ def _render_admin_ia_smoke_tests(*, cfg: object) -> None:
                 st.code((res.text or "").strip()[:400] or "—")
             except Exception as e:
                 st.error(f"VertexAI KO — {e}")
+            finally:
+                ov.empty()
+
+
+def _render_admin_tts_pronunciation_viewer(*, cfg: object) -> None:
+    """Liste fusionnée du dictionnaire TTS (fichier dépôt + surcharges Sheets)."""
+    import app as ap
+
+    st.caption(
+        "Appliqué automatiquement à **tout** TTS (lectures AELF + synthèse) via `spoken_text_for_tts`. "
+        "N'affecte ni le PDF ni le texte affiché à l'écran."
+    )
+    try:
+        ap._load_prompt_templates_cached(
+            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+            service_account_fingerprint=ap._service_account_fingerprint(
+                getattr(cfg, "gcp_service_account", {}) or {}
+            ),
+        )
+    except Exception:
+        pass
+
+    bd = tts_pronunciation_breakdown()
+    file_rules = dict(bd.get("file") or {})
+    sheet_rules = dict(bd.get("sheet") or {})
+    merged = dict(bd.get("merged") or {})
+    json_path = str(bd.get("json_path") or "data/tts_pronunciation_fr.json")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Entrées (fichier dépôt)", len(file_rules))
+    c2.metric("Surcharges Sheets", len(sheet_rules))
+    c3.metric("Effectif au TTS", len(merged))
+
+    if not sheet_rules:
+        st.info(
+            "Aucune ligne **Actif** pour la clé `tts_pronunciation` dans `Paramètres_IA` — "
+            "seul le fichier dépôt est utilisé pour l'instant. "
+            "Pour éditer sans redéployer : section **Audio — consignes de style** → "
+            "activer **Créer un nouveau prompt** → clé `tts_pronunciation`, "
+            "ou lancer `python .\\tools\\init_sheets_db.py` pour créer la ligne initiale.",
+            icon="ℹ️",
+        )
+
+    if merged:
+        lines = [f"{k}\t{v}" for k, v in sorted(merged.items(), key=lambda kv: kv[0].lower())]
+        st.markdown("**Dictionnaire effectif** (mot affiché → forme lue par la voix)")
+        st.code("\n".join(lines), language=None)
+    else:
+        st.warning("Dictionnaire vide — ajoutez des entrées dans le fichier dépôt ou dans Sheets.")
+
+    with st.expander("Détail des sources", expanded=False):
+        st.markdown(f"**Fichier dépôt** : `{json_path}`")
+        st.code(json.dumps(file_rules, ensure_ascii=False, indent=2) or "{}", language="json")
+        st.markdown("**Surcharges `Paramètres_IA` → clé `tts_pronunciation`** (prioritaires sur le fichier)")
+        st.code(json.dumps(sheet_rules, ensure_ascii=False, indent=2) or "{}", language="json")
+
+    if str(getattr(cfg, "gsheet_id", "") or "").strip() and getattr(cfg, "gcp_service_account", None):
+        st.caption(
+            "Régénération depuis `readings_cache` (colonnes fête + 4 lectures) : "
+            "met à jour le fichier dépôt et peut publier une nouvelle version Sheets."
+        )
+        pub = st.checkbox(
+            "Publier aussi dans `Paramètres_IA` (nouvelle ligne Actif)",
+            value=True,
+            key="adm_tts_pron_publish",
+        )
+        force = st.checkbox(
+            "Forcer une nouvelle version même si une ligne Actif existe",
+            value=False,
+            key="adm_tts_pron_force",
+        )
+        if st.button("Régénérer le dictionnaire depuis readings_cache", key="adm_tts_pron_rebuild"):
+            import app as ap
+
+            ov = loading_overlay("Analyse readings_cache et construction du dictionnaire…")
+            try:
+                from core.sheets_db import build_gspread_client, fetch_records, sheet_row_status_is_live
+                from core.tts_pronunciation import clear_tts_pronunciation_file_cache
+                from core.tts_pronunciation_lexicon import (
+                    build_pronunciation_dict_from_readings_rows,
+                    pronunciation_dict_to_json_text,
+                )
+                from pathlib import Path as _Path
+
+                gs_loc = build_gspread_client(cfg.gcp_service_account)
+                rc = fetch_records(
+                    gspread_client=gs_loc,
+                    spreadsheet_id=str(cfg.gsheet_id).strip(),
+                    table="readings_cache",
+                    limit=0,
+                )
+                live = [
+                    r
+                    for r in rc
+                    if sheet_row_status_is_live(r.get("status"))
+                    and not str(r.get("error") or "").strip()
+                ]
+                rules = build_pronunciation_dict_from_readings_rows(live, include_manual_always=True)
+                body = pronunciation_dict_to_json_text(rules)
+                out_path = _Path("data/tts_pronunciation_fr.json")
+                out_path.write_text(body, encoding="utf-8")
+                clear_tts_pronunciation_file_cache()
+                msg = f"{len(rules)} entrée(s) — fichier dépôt mis à jour ({len(live)} lignes RDC analysées)."
+                if pub:
+                    from tools.seed_tts_pronunciation_from_readings_cache import (
+                        _append_parametres_ia_tts_pronunciation,
+                        _parametres_ia_has_active_tts_pronunciation,
+                    )
+
+                    if _parametres_ia_has_active_tts_pronunciation(
+                        gc=gs_loc, gsheet_id=str(cfg.gsheet_id).strip()
+                    ) and not force:
+                        st.warning(
+                            msg + " Sheets inchangé (ligne Actif déjà présente — cochez « Forcer »)."
+                        )
+                    else:
+                        _append_parametres_ia_tts_pronunciation(
+                            gc=gs_loc, gsheet_id=str(cfg.gsheet_id).strip(), body=body
+                        )
+                        ap._load_prompt_templates_cached.clear()
+                        st.success(msg + " Nouvelle ligne `tts_pronunciation` publiée dans Sheets.")
+                else:
+                    st.success(msg)
+                st.rerun()
+            except Exception as ex:
+                st.error(f"Échec régénération : {ex}")
             finally:
                 ov.empty()
 
@@ -514,6 +645,8 @@ def _render_admin_prompts_editor_section(
     existing_keys = sorted(
         [k for k, v in latest.items() if (v.content_md or "").strip() and _wanted(k)]
     )
+    if audio_only and "tts_pronunciation" not in existing_keys:
+        existing_keys = sorted(existing_keys + ["tts_pronunciation"])
 
     def _norm0(v: object) -> str:
         return str(v or "").strip()
@@ -593,6 +726,12 @@ def _render_admin_prompts_editor_section(
                 format_func=_fmt_key,
             )
             current = (latest.get(picked).content_md if picked in latest else "").strip()
+            if not current and picked == "tts_pronunciation":
+                try:
+                    file_rules = dict(tts_pronunciation_breakdown().get("file") or {})
+                    current = json.dumps(file_rules, ensure_ascii=False, indent=2)
+                except Exception:
+                    current = ""
             current_desc = (desc_by_key.get(picked) or _PROMPT_TEMPLATE_LABELS.get(picked) or "").strip()
 
     edited_desc = st.text_input(
@@ -768,6 +907,13 @@ def render_admin_test_resources() -> None:
         st.warning(f"Lecture `Paramètres_IA` impossible : {e}")
 
     with st.expander(
+        "Dictionnaire TTS (prononciation)",
+        expanded=True,
+        key="adm_res_exp_tts_pron",
+    ):
+        _render_admin_tts_pronunciation_viewer(cfg=cfg)
+
+    with st.expander(
         "Audio — voix TTS (table `Voix_Audio`)",
         expanded=False,
         key="adm_res_exp_voix",
@@ -780,9 +926,11 @@ def render_admin_test_resources() -> None:
         key="adm_res_exp_audio",
     ):
         st.caption(
-            "Ces textes ne sont **pas** envoyés au TTS (Vertex / Gemini) : ils documentent le style attendu "
-            "et complètent la table `Voix_Audio`. Seul le corps liturgique ou la synthèse est lu à voix haute. "
-            "Append-only : chaque enregistrement crée une nouvelle version."
+            "Consignes `audio_style_*` : documentation du style (non lues au TTS). "
+            "Pour **modifier le dictionnaire de prononciation**, utilisez la section "
+            "**Dictionnaire TTS (prononciation)** ci-dessus (lecture) ou créez la clé "
+            "`tts_pronunciation` ici (édition Sheets). Append-only : chaque enregistrement "
+            "crée une nouvelle version."
         )
         _render_admin_prompts_editor_section(
             cfg=cfg, gs=gs, rows=rows, audio_only=True, section_key_suffix="audio"

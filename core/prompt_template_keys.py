@@ -13,5 +13,6 @@ PROMPT_TEMPLATE_KEYS = frozenset(
         "audio_style_paques",
         "audio_style_careme",
         "audio_style_lectures",
+        "tts_pronunciation",
     }
 )

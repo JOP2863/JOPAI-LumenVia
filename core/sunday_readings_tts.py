@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from core.aelf_text_cleanup import clean_aelf_text_for_display
+from core.tts_pronunciation import apply_tts_pronunciation
 
 # Clés ``Paramètres_IA`` (Levier B) : documentation admin / choix de voix — jamais lues à voix haute.
 AUDIO_STYLE_TEMPLATE_KEYS = frozenset(
@@ -81,8 +82,12 @@ def spoken_text_for_tts(body: str) -> str:
     Les modèles ne distinguent pas « consigne » et « contenu » : tout le champ ``text``
     est prononcé. Le style oral est porté par ``Voix_Audio`` (nom de voix), pas par les
     clés ``audio_style_*`` dans Sheets.
+
+    Le dictionnaire ``data/tts_pronunciation_fr.json`` (+ clé ``tts_pronunciation`` dans
+    ``Paramètres_IA``) est appliqué ici pour corriger certaines prononciations (ex. Moïse).
     """
-    return strip_tts_admin_preamble((body or "").strip())
+    cleaned = strip_tts_admin_preamble((body or "").strip())
+    return apply_tts_pronunciation(cleaned)
 
 
 def plain_readings_for_tts(texts: object) -> str:

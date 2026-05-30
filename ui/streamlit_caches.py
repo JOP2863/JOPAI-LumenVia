@@ -48,7 +48,14 @@ def load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint:
     gs = build_gspread_client(cfg.gcp_service_account)
     rows = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="Paramètres_IA", limit=5000)
     latest = pick_effective_templates(rows, allowed_keys=set(PROMPT_TEMPLATE_KEYS))
-    return {k: v.content_md for k, v in latest.items() if k in PROMPT_TEMPLATE_KEYS and v.content_md}
+    out = {k: v.content_md for k, v in latest.items() if k in PROMPT_TEMPLATE_KEYS and v.content_md}
+    try:
+        from core.tts_pronunciation import refresh_tts_pronunciation_overrides_from_templates
+
+        refresh_tts_pronunciation_overrides_from_templates(out)
+    except Exception:
+        pass
+    return out
 
 
 @st.cache_data(ttl=300, show_spinner=False)

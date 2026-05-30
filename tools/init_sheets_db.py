@@ -251,6 +251,15 @@ _AUDIO_PROMPT_SPECS: list[tuple[str, str, str]] = [
             "d'une lecture à l'autre par une courte pause ; pour l'Évangile, une légère élévation respectueuse."
         ),
     ),
+    (
+        "tts_pronunciation",
+        "TTS — dictionnaire de prononciation (JSON ou lignes mot|forme, voix seulement)",
+        (
+            '{\n  "Moïse": "Mo-ïse",\n  "Ésaïe": "Ésa-ïe",\n  "Caïn": "Ca-ïn"\n}\n\n'
+            "Fusionné avec `data/tts_pronunciation_fr.json` du dépôt. "
+            "N'est pas lu à voix haute : remplace des mots entiers dans le texte TTS uniquement."
+        ),
+    ),
 ]
 
 
@@ -275,6 +284,23 @@ def _prompt_has_active(records: list[dict], key: str) -> bool:
     return False
 
 
+def _tts_pronunciation_seed_body(*, gc: object, gsheet_id: str) -> str:
+    """Corpus RDC → JSON dictionnaire TTS."""
+    from core.tts_pronunciation_lexicon import (
+        build_pronunciation_dict_from_readings_rows,
+        pronunciation_dict_to_json_text,
+    )
+
+    rows = fetch_records(gspread_client=gc, spreadsheet_id=gsheet_id, table="readings_cache", limit=0)
+    live = [
+        r
+        for r in rows
+        if sheet_row_status_is_live(r.get("status")) and not str(r.get("error") or "").strip()
+    ]
+    rules = build_pronunciation_dict_from_readings_rows(live, include_manual_always=True)
+    return pronunciation_dict_to_json_text(rules)
+
+
 def _seed_parametres_ia_audio_styles(*, gc, gsheet_id: str) -> int:
     """Ajoute les clés TTS (Levier B) si aucune ligne Actif n'existe pour ces Clé_Prompt."""
     sh = gc.open_by_key(gsheet_id)
@@ -294,6 +320,11 @@ def _seed_parametres_ia_audio_styles(*, gc, gsheet_id: str) -> int:
     for key, description, body in _AUDIO_PROMPT_SPECS:
         if _prompt_has_active(records, key):
             continue
+        if key == "tts_pronunciation":
+            try:
+                body = _tts_pronunciation_seed_body(gc=gc, gsheet_id=gsheet_id)
+            except Exception:
+                pass
         ver = str(_max_prompt_version_for_key(records, key) + 1)
         rid = sha256(f"ia|{key}|{ver}|{body}".encode("utf-8")).hexdigest()[:18]
         statut = "Actif"
