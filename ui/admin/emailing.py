@@ -41,33 +41,52 @@ def render_admin_emailing() -> None:
         st.warning("Configuration Google Sheets manquante (`gcp_service_account`, `gsheet_id`).")
         return
 
-    gs = build_gspread_client(cfg.gcp_service_account)
-    from core.sheets_db import TableSpec, ensure_table
-
-    ensure_table(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table=TableSpec(
-            name="email_templates",
-            columns=with_concat(
-                [
-                    *BASE_COLUMNS,
-                    "template_key",
-                    "channel",
-                    "language",
-                    "subject",
-                    "body",
-                    "active",  # colonne facultative sur la feuille ; pas utilisée pour filtrer le template (seul `status` compte).
-                    "status_note",
-                ]
-            ),
-        ),
-    )
-
-    from core.sheets_db import _resolve_table_name
+    try:
+        gs = build_gspread_client(cfg.gcp_service_account)
+        sa_email = str(cfg.gcp_service_account.get("client_email") or "").strip()
+    except ValueError as ex:
+        st.error(str(ex))
+        return
 
     try:
-        sh_etpl_hint = gs.open_by_key(cfg.gsheet_id)
+        ensure_table(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table=TableSpec(
+                name="email_templates",
+                columns=with_concat(
+                    [
+                        *BASE_COLUMNS,
+                        "template_key",
+                        "channel",
+                        "language",
+                        "subject",
+                        "body",
+                        "active",  # colonne facultative sur la feuille ; pas utilisée pour filtrer le template (seul `status` compte).
+                        "status_note",
+                    ]
+                ),
+            ),
+        )
+    except Exception as ex:
+        from core.sheets_db import describe_gspread_api_error
+
+        msg = str(ex)
+        if not msg or "HTTP" not in msg:
+            msg = describe_gspread_api_error(
+                ex,
+                spreadsheet_id=cfg.gsheet_id,
+                service_account_email=sa_email or None,
+            )
+        st.error(msg)
+        if sa_email:
+            st.caption(f"Compte de service à ajouter comme **Éditeur** sur le Google Sheet : `{sa_email}`")
+        return
+
+    from core.sheets_db import _resolve_table_name, open_spreadsheet
+
+    try:
+        sh_etpl_hint = open_spreadsheet(gs, cfg.gsheet_id, service_account_email=sa_email or None)
         etpl_tab = _resolve_table_name(sh=sh_etpl_hint, table="email_templates")
     except Exception:
         etpl_tab = "ETPL"
@@ -100,6 +119,27 @@ def render_admin_emailing() -> None:
 
     lang_fr = ("fr", "fr-fr", "france", "")
     current = pick_latest_live_email_template(rows, template_key=template_key, channel="email", language_in=lang_fr) or {}
+
+    if current:
+        _ver = str(current.get("version") or "?").strip()
+        _subj = str(current.get("subject") or "").strip()
+        st.success(
+            f"Connexion Sheets OK — onglet **`{etpl_tab}`**, template **Actif** v{_ver} "
+            f"(`{template_key}`). Objet : {_subj[:72]}{'…' if len(_subj) > 72 else ''}"
+        )
+        st.caption(
+            "La colonne **`concat`** est un historique figé à l’enregistrement : seules **`subject`** et **`body`** "
+            "font foi pour l’aperçu et l’envoi."
+        )
+    elif rows:
+        st.warning(
+            f"Connexion Sheets OK — onglet **`{etpl_tab}`** ({len(rows)} ligne(s)), "
+            f"mais aucune ligne **`status` = Actif** pour `{template_key}` (e-mail, FR)."
+        )
+    else:
+        st.warning(
+            f"Onglet **`{etpl_tab}`** accessible mais vide — enregistrez un premier template ci-dessous."
+        )
 
     default_subject = "🕯️ Votre pause LumenVia : Préparez la célébration du dimanche {{date_dimanche}}"
     default_body = ""
@@ -202,9 +242,11 @@ def render_admin_emailing() -> None:
             else:
                 # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
                 # (comme MARPA pour Paramètres_IA : append seul laisse l’historique encore « Actif »).
-                from core.sheets_db import _resolve_table_name
+                from core.sheets_db import _resolve_table_name, open_spreadsheet
 
-                sh_etpl = gs.open_by_key(cfg.gsheet_id)
+                sh_etpl = open_spreadsheet(
+                    gs, cfg.gsheet_id, service_account_email=sa_email or None
+                )
                 ws_etpl = sh_etpl.worksheet(_resolve_table_name(sh=sh_etpl, table="email_templates"))
                 header_etpl = ws_etpl.row_values(1)
                 if not header_etpl:

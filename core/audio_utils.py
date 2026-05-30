@@ -81,3 +81,31 @@ def join_wav_bytes(parts: list[bytes]) -> bytes:
 
     return pcm16le_to_wav_bytes(b"".join(frames), sample_rate=fr, channels=nch)
 
+
+def join_wav_with_silence(parts: list[bytes], *, pause_ms: int = 750) -> bytes:
+    """
+    Concatène des WAV en insérant un silence entre chaque segment (ex. sections liturgiques).
+    """
+    if not parts:
+        return b""
+    if len(parts) == 1:
+        return parts[0]
+
+    with wave.open(BytesIO(parts[0]), "rb") as wf0:
+        nch = wf0.getnchannels()
+        sw = wf0.getsampwidth()
+        fr = wf0.getframerate()
+        frames: list[bytes] = [wf0.readframes(wf0.getnframes())]
+
+    pause_ms = max(0, int(pause_ms))
+    silence = b"\x00" * int(fr * pause_ms / 1000) * nch * sw
+
+    for p in parts[1:]:
+        with wave.open(BytesIO(p), "rb") as wf:
+            if wf.getnchannels() != nch or wf.getsampwidth() != sw or wf.getframerate() != fr:
+                raise ValueError("Formats WAV incompatibles pour concaténation.")
+            frames.append(silence)
+            frames.append(wf.readframes(wf.getnframes()))
+
+    return pcm16le_to_wav_bytes(b"".join(frames), sample_rate=fr, channels=nch)
+

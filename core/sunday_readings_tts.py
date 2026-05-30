@@ -37,6 +37,54 @@ _READINGS_TTS_SECTION_MARKERS: tuple[str, ...] = (
     "Evangile",
 )
 
+_LITURGY_SECTION_LINE_RE = re.compile(
+    r"^(Première lecture|Premiere lecture|Psaume|Deuxième lecture|Deuxieme lecture|Évangile|Evangile)\.\s*(.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def normalize_liturgy_section_title(title: str) -> str:
+    """Libellé oral canonique pour annoncer une section du lectionnaire."""
+    low = (title or "").strip().lower()
+    if low.startswith("première") or low.startswith("premiere"):
+        return "Première lecture"
+    if low.startswith("deuxième") or low.startswith("deuxieme"):
+        return "Deuxième lecture"
+    if low.startswith("psaume"):
+        return "Psaume"
+    if low.startswith("évangile") or low.startswith("evangile"):
+        return "Évangile"
+    return (title or "").strip()
+
+
+def is_liturgy_readings_tts_text(text: str) -> bool:
+    """True si le texte provient de ``plain_readings_for_tts`` (lectionnaire dominical)."""
+    return bool(re.match(r"(?i)^(?:Première|Premiere) lecture\b", (text or "").strip()))
+
+
+def parse_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
+    """
+    Découpe le texte ``plain_readings_for_tts`` en sections ``(titre, corps)``.
+
+    Chaque paragraphe commence par « Première lecture. », « Psaume. », etc.
+    """
+    out: list[tuple[str, str]] = []
+    for para in (text or "").split("\n\n"):
+        p = " ".join(para.split())
+        if not p:
+            continue
+        m = _LITURGY_SECTION_LINE_RE.match(p)
+        if m:
+            out.append(
+                (
+                    normalize_liturgy_section_title(m.group(1)),
+                    (m.group(2) or "").strip(),
+                )
+            )
+        else:
+            out.append(("", p))
+    return out
+
 
 def strip_tts_admin_preamble(text: str) -> str:
     """

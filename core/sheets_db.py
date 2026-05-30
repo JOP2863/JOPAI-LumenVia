@@ -7,7 +7,103 @@ from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
 import gspread
+from gspread.exceptions import APIError as GspreadAPIError
 from google.oauth2 import service_account
+
+
+# Acronymes par défaut (alignés sur ``tools/init_sheets_db.py``) si AliasTables est illisible.
+_DEFAULT_TABLE_ACRONYMS: dict[str, str] = {
+    "users": "USR",
+    "subscriptions": "SUB",
+    "password_resets": "PWRT",
+    "email_templates": "ETPL",
+    "outbound_messages": "OUTM",
+    "generations": "GEN",
+    "audio": "AUD",
+    "pdf_exports": "PDFX",
+    "memos": "MEM",
+    "admin_changelog": "ADLG",
+    "readings_cache": "RDC",
+    "liturgy_fetches": "LITF",
+    "vision_text_audit": "VTA",
+    "vision_text_corrections": "VTC",
+    "vision_text_whitelist": "VTW",
+    "Paramètres_IA": "AIP",
+    "scheduler_campaigns": "CMPG",
+    "scheduler_runs": "RUNS",
+    "audiences": "AUDC",
+    "experience_feedback": "RSTN",
+    "feedback_insights": "FBIN",
+    "Voix_Audio": "VOIX",
+    "liturgy_illustrations": "ILUS",
+}
+
+
+def describe_gspread_api_error(
+    ex: BaseException,
+    *,
+    spreadsheet_id: str = "",
+    service_account_email: str | None = None,
+) -> str:
+    """Message lisible pour admin (Streamlit Cloud masque souvent le détail brut de gspread)."""
+    code: int | None = None
+    resp = getattr(ex, "response", None)
+    if resp is not None:
+        try:
+            code = int(getattr(resp, "status_code", None))
+        except (TypeError, ValueError):
+            code = None
+
+    sid = str(spreadsheet_id or "").strip()
+    sa = str(service_account_email or "").strip()
+    sa_hint = f" `{sa}`" if sa else " (compte de service des secrets)"
+
+    if code == 403:
+        return (
+            f"Accès refusé au Google Sheet (HTTP 403). "
+            f"Partagez le fichier `{sid}` en **Éditeur** avec{sa_hint}, "
+            "puis vérifiez que les API Google Sheets et Drive sont activées sur le projet GCP."
+        )
+    if code == 404:
+        return (
+            f"Google Sheet introuvable (HTTP 404) pour `gsheet_id={sid}`. "
+            "Vérifiez l’identifiant dans les secrets Streamlit Cloud (URL : `/d/<ID>/edit`)."
+        )
+    if code == 429:
+        return (
+            "Quota Google Sheets dépassé (HTTP 429). Attendez une minute et réessayez "
+            "(trop d’écritures / lectures en peu de temps)."
+        )
+    if code:
+        return (
+            f"Erreur Google Sheets (HTTP {code}). Vérifiez `gsheet_id`, le partage du fichier "
+            f"et les credentials GCP.{f' Détail : {ex}' if str(ex) else ''}"
+        )
+    return (
+        f"Impossible d’ouvrir le Google Sheet `{sid}`. Vérifiez `gsheet_id`, le partage "
+        f"avec{sa_hint} et les secrets Streamlit Cloud."
+    )
+
+
+def open_spreadsheet(
+    gspread_client: gspread.Client,
+    spreadsheet_id: str,
+    *,
+    service_account_email: str | None = None,
+) -> gspread.Spreadsheet:
+    sid = str(spreadsheet_id or "").strip()
+    if not sid:
+        raise ValueError("gsheet_id vide — renseignez `gsheet_id` dans les secrets Streamlit.")
+    try:
+        return gspread_client.open_by_key(sid)
+    except GspreadAPIError as ex:
+        raise RuntimeError(
+            describe_gspread_api_error(
+                ex,
+                spreadsheet_id=sid,
+                service_account_email=service_account_email,
+            )
+        ) from ex
 
 
 def utc_now_iso() -> str:
@@ -20,6 +116,20 @@ class TableSpec:
     columns: list[str]
 
 
+def _row_cell(row: Mapping[str, Any], *keys: str) -> str:
+    """Lit une cellule d’enregistrement Sheets en essayant plusieurs noms de colonne."""
+    for k in keys:
+        v = row.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    lower_map = {str(h).strip().lower(): v for h, v in row.items()}
+    for k in keys:
+        v = lower_map.get(k.strip().lower())
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
 def _alias_table_map(sh: gspread.Spreadsheet) -> dict[str, str]:
     """
     Lit AliasTables : nom logique (ou acronyme) → onglet physique canonique.
@@ -30,8 +140,21 @@ def _alias_table_map(sh: gspread.Spreadsheet) -> dict[str, str]:
         ws_alias = sh.worksheet("AliasTables")
         rows = ws_alias.get_all_records(numericise_ignore=["all"])
         for r in rows:
-            full = str(r.get("Nom Complet Table") or "").strip()
-            acr = str(r.get("Acronyme Table") or "").strip()
+            stat = _row_cell(r, "Statut", "status", "Status").lower()
+            if stat and (stat.startswith("inactif") or stat.startswith("inactive")):
+                continue
+            full = _row_cell(
+                r,
+                "Nom Complet Table",
+                "nom_complet_table",
+                "Nom complet table",
+            )
+            acr = _row_cell(
+                r,
+                "Acronyme Table",
+                "acronyme_table",
+                "Acronyme table",
+            ).upper()
             if not full or not acr:
                 continue
             out[full] = acr
@@ -61,11 +184,19 @@ def _resolve_table_name(*, sh: gspread.Spreadsheet, table: str) -> str:
     if t in alias_map:
         return alias_map[t]
 
+    # AliasTables absent ou incomplet : préférer l’acronyme s’il existe (ex. ETPL, pas email_templates).
+    default_acr = _DEFAULT_TABLE_ACRONYMS.get(t)
+    if default_acr and default_acr in titles:
+        return default_acr
+
     if t in titles:
         return t
     # Acronyme demandé explicitement (ex. ETPL) sans entrée AliasTables
     if len(t) in (3, 4) and t.isupper():
         return t
+    # Dernier recours : acronyme attendu même si l’onglet n’existe pas encore (ensure_table le créera).
+    if default_acr := _DEFAULT_TABLE_ACRONYMS.get(t):
+        return default_acr
     return t
 
 
@@ -558,8 +689,17 @@ def get_table_spec(name: str) -> TableSpec:
 
 
 def build_gspread_client(service_account_info: Mapping[str, Any]) -> gspread.Client:
+    info = dict(service_account_info or {})
+    email = str(info.get("client_email") or "").strip()
+    pk = str(info.get("private_key") or "").strip()
+    if not email or not pk:
+        raise ValueError(
+            "Secrets `gcp_service_account` incomplets (`client_email` ou `private_key` manquant). "
+            "Sur Streamlit Cloud, vérifiez la section `[gcp_service_account]` dans les secrets "
+            "(clé privée multiligne entre triples guillemets)."
+        )
     creds = service_account.Credentials.from_service_account_info(
-        dict(service_account_info),
+        info,
         scopes=[
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
@@ -574,7 +714,7 @@ def ensure_database(
     spreadsheet_id: str,
     tables: Iterable[TableSpec],
 ) -> None:
-    sh = gspread_client.open_by_key(spreadsheet_id)
+    sh = open_spreadsheet(gspread_client, spreadsheet_id)
     existing = {ws.title: ws for ws in sh.worksheets()}
 
     for t in tables:
@@ -590,7 +730,7 @@ def ensure_table(
     table: TableSpec,
 ) -> None:
     """Crée l'onglet si absent et pose le header. Utile en runtime (admin) sans relancer init_sheets_db."""
-    sh = gspread_client.open_by_key(spreadsheet_id)
+    sh = open_spreadsheet(gspread_client, spreadsheet_id)
     name = _resolve_table_name(sh=sh, table=table.name)
     try:
         ws = sh.worksheet(name)
@@ -602,10 +742,10 @@ def ensure_table(
 def _ensure_header(ws: gspread.Worksheet, header: list[str]) -> None:
     first_row = ws.row_values(1)
     if first_row and [c.strip() for c in first_row if c.strip()]:
-        # Si déjà initialisé, on ne casse pas: on vérifie juste que les colonnes attendues existent.
+        # Si déjà initialisé : ajoute les colonnes manquantes sans écraser l’en-tête existant.
         missing = [c for c in header if c not in first_row]
         if missing:
-            ws.update([header], "A1")
+            ws.update([first_row + missing], "A1")
         return
     ws.update([header], "A1")
 
@@ -656,7 +796,7 @@ def append_immutable_row(
     status: str = SHEETS_ROW_STATUS_ACTIVE,
     version: int = 1,
 ) -> dict[str, Any]:
-    sh = gspread_client.open_by_key(spreadsheet_id)
+    sh = open_spreadsheet(gspread_client, spreadsheet_id)
     ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
     header = ws.row_values(1)
     if not header:
@@ -710,7 +850,7 @@ def append_immutable_rows_bulk(
     """Append-only en lots : 1 requête / chunk (évite les quotas). Retourne le nombre de lignes ajoutées."""
     if not values_by_col_list:
         return 0
-    sh = gspread_client.open_by_key(spreadsheet_id)
+    sh = open_spreadsheet(gspread_client, spreadsheet_id)
     ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
     header = ws.row_values(1)
     if not header:
@@ -739,7 +879,7 @@ def fetch_records(
     table: str,
     limit: int = 500,
 ) -> list[dict[str, Any]]:
-    sh = gspread_client.open_by_key(spreadsheet_id)
+    sh = open_spreadsheet(gspread_client, spreadsheet_id)
     ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
     # Important: preserve phone numbers like "+336..." and other identifiers as strings.
     # gspread may "numericise" values (cast to int/float) which would drop leading "+" / zeros.
