@@ -25,6 +25,7 @@ from core.liturgy_theme import liturgical_accent_hex
 from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
 from core.gcs_signed_urls import gcs_signed_url
+from core.config import resolve_gemini_api_key
 from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
 from core.readings_cache_loader import load_aelf_from_readings_cache
 from core.sunday_gemini_tts import (
@@ -157,12 +158,12 @@ def _run_incremental_sunday_outputs(
     if also_readings_if_missing:
         if has_readings_audio:
             skipped.append("audio des lectures déjà publié")
-        elif not getattr(cfg, "gemini_api_key", None) and vertex_tts_allowlist_blocked():
+        elif not resolve_gemini_api_key() and vertex_tts_allowlist_blocked():
             issues.append(
                 "Vertex TTS refuse l’audio (projet non allowlisté). "
                 "Ajoute `GEMINI_API_KEY` dans `.streamlit/secrets.toml` puis redémarre l’app."
             )
-        elif not getattr(cfg, "gemini_api_key", None) and not getattr(cfg, "gcp_service_account", None):
+        elif not resolve_gemini_api_key() and not getattr(cfg, "gcp_service_account", None):
             issues.append(
                 "Configure GEMINI_API_KEY ou le compte de service GCP — impossible de générer l’audio des lectures."
             )
@@ -212,6 +213,7 @@ def _run_incremental_sunday_outputs(
                             text=readings_tts,
                             voice_name=voice_read,
                             vertex_client=vx_read,
+                            gemini_api_key=resolve_gemini_api_key(),
                         )
                     day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
                     readings_path = f"AudioLectures/{day_for_path_inc}/{gen_eid}.{r_ext}"
@@ -650,10 +652,11 @@ def _run_generate_sunday_flow(
             transient = ("429" in msg) or ("quota" in msg) or ("rate" in msg) or ("tempor" in msg) or ("503" in msg)
             if allowlist:
                 mark_vertex_tts_allowlist_blocked(e)
-            if (allowlist or transient) and cfg.gemini_api_key:
+            gemini_key = resolve_gemini_api_key() or getattr(cfg, "gemini_api_key", None)
+            if (allowlist or transient) and gemini_key:
                 audio_route = "gemini_api_chunked"
                 ft0 = time.perf_counter()
-                tts_api = GeminiTtsApiClient(api_key=cfg.gemini_api_key)
+                tts_api = GeminiTtsApiClient(api_key=str(gemini_key))
                 chunks = ap._chunk_text_for_tts(tts_payload, max_chars=1400)
                 perf["tts_chunks"] = len(chunks)
                 wav_parts_by_i: dict[int, bytes] = {}
@@ -704,7 +707,7 @@ def _run_generate_sunday_flow(
                 audio.model = "gemini-api-tts:chunked"
             else:
                 # Pas de clé Gemini : on remonte l'erreur.
-                if allowlist and not cfg.gemini_api_key:
+                if allowlist and not gemini_key:
                     st.error(
                         "Audio indisponible via Vertex AI (compte non allowlist AUDIO). "
                         "Ajoute/valide GEMINI_API_KEY pour activer le fallback TTS."
@@ -788,6 +791,7 @@ def _run_generate_sunday_flow(
                         text=readings_tts,
                         voice_name=voice_read,
                         vertex_client=vx,
+                        gemini_api_key=resolve_gemini_api_key(),
                     )
                 day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
                 readings_path = f"AudioLectures/{day_for_path}/{gen_entity_id}.{r_ext}"

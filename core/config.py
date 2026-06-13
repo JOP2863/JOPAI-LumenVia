@@ -59,6 +59,84 @@ except Exception:  # pragma: no cover
     tomli = None  # type: ignore[assignment]
 
 
+def resolve_gemini_api_key(*, secrets_mapping: Mapping[str, Any] | None = None) -> str | None:
+    """
+    Clé API Gemini pour le TTS (repli Vertex).
+    Ordre : variable d'environnement, clé racine secrets, section [gemini].
+    """
+    env = str(os.environ.get("GEMINI_API_KEY") or "").strip()
+    if env:
+        return env
+
+    data: Mapping[str, Any] | None = secrets_mapping
+    if data is None:
+        try:
+            import streamlit as st  # type: ignore
+
+            data = st.secrets
+        except Exception:
+            return None
+    if data is None:
+        return None
+
+    for key in ("GEMINI_API_KEY", "gemini_api_key"):
+        raw = data.get(key)
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+
+    block = data.get("gemini")
+    if isinstance(block, Mapping):
+        for key in ("api_key", "GEMINI_API_KEY", "key"):
+            raw = block.get(key)
+            if raw is not None and str(raw).strip():
+                return str(raw).strip()
+    return None
+
+
+def gemini_api_key_status(*, secrets_mapping: Mapping[str, Any] | None = None) -> dict[str, str | bool]:
+    """Diagnostic admin : clé détectée sans exposer la valeur."""
+    env = str(os.environ.get("GEMINI_API_KEY") or "").strip()
+    if env:
+        return {
+            "detected": True,
+            "source": "variable d'environnement GEMINI_API_KEY",
+            "suffix": env[-4:] if len(env) >= 4 else "****",
+        }
+
+    data: Mapping[str, Any] | None = secrets_mapping
+    if data is None:
+        try:
+            import streamlit as st  # type: ignore
+
+            data = st.secrets
+        except Exception:
+            return {"detected": False, "source": "secrets indisponibles", "suffix": ""}
+
+    for key in ("GEMINI_API_KEY", "gemini_api_key"):
+        raw = data.get(key) if data is not None else None
+        if raw is not None and str(raw).strip():
+            val = str(raw).strip()
+            return {
+                "detected": True,
+                "source": f"secrets.{key}",
+                "suffix": val[-4:] if len(val) >= 4 else "****",
+            }
+
+    block = data.get("gemini") if data is not None else None
+    if isinstance(block, Mapping):
+        for key in ("api_key", "GEMINI_API_KEY", "key"):
+            raw = block.get(key)
+            if raw is not None and str(raw).strip():
+                val = str(raw).strip()
+                return {
+                    "detected": True,
+                    "source": f"secrets.gemini.{key}",
+                    "suffix": val[-4:] if len(val) >= 4 else "****",
+                }
+
+    return {"detected": False, "source": "aucune clé trouvée", "suffix": ""}
+
+
 @dataclass(frozen=True)
 class AppConfig:
     gsheet_id: str
@@ -83,7 +161,7 @@ def load_config() -> AppConfig:
     return AppConfig(
         gsheet_id=str(s.get("gsheet_id", "")).strip(),
         gcs_bucket_name=str(s.get("gcs_bucket_name", "")).strip(),
-        gemini_api_key=(str(s.get("GEMINI_API_KEY")).strip() if s.get("GEMINI_API_KEY") else None),
+        gemini_api_key=resolve_gemini_api_key(secrets_mapping=s),
         openai_api_key=(str(s.get("OPENAI_API_KEY")).strip() if s.get("OPENAI_API_KEY") else None),
         gcp_service_account=dict(s.get("gcp_service_account", {})),
         aelf_base_url=resolve_aelf_base_url(),
@@ -102,7 +180,7 @@ def load_config_from_secrets_toml(secrets_toml_path: str | Path) -> AppConfig:
     return AppConfig(
         gsheet_id=str(data.get("gsheet_id", "")).strip(),
         gcs_bucket_name=str(data.get("gcs_bucket_name", "")).strip(),
-        gemini_api_key=(str(data.get("GEMINI_API_KEY")).strip() if data.get("GEMINI_API_KEY") else None),
+        gemini_api_key=resolve_gemini_api_key(secrets_mapping=data),
         openai_api_key=(str(data.get("OPENAI_API_KEY")).strip() if data.get("OPENAI_API_KEY") else None),
         gcp_service_account=dict(data.get("gcp_service_account", {}) or {}),
         aelf_base_url=resolve_aelf_base_url(toml_data=data),

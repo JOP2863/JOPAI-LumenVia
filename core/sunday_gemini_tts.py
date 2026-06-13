@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.audio_utils import join_wav_bytes, join_wav_with_silence, normalize_audio_bytes
 from core.gemini_tts_api import GeminiTtsApiClient
+from core.config import resolve_gemini_api_key
 from core.sunday_readings_tts import (
     is_liturgy_readings_tts_text,
     parse_liturgy_reading_sections,
@@ -143,6 +144,7 @@ def _tts_chunks_to_wav(
 
 
 _VERTEX_TTS_MODELS = (
+    "gemini-2.5-flash-tts",
     "gemini-2.5-flash-preview-tts",
     "gemini-2.5-pro-preview-tts",
     "gemini-2.5-flash",
@@ -197,7 +199,8 @@ def format_tts_unavailable_error(
         if not gemini_key:
             return RuntimeError(
                 "Audio indisponible via Vertex AI (projet non allowlisté pour l'audio). "
-                "Ajoute `GEMINI_API_KEY` dans `.streamlit/secrets.toml` (section IA) puis redémarre l'app."
+                "Ajoute `GEMINI_API_KEY` dans `.streamlit/secrets.toml` ou les Secrets Streamlit Cloud, "
+                "puis redémarre l'app. Admin → Réglages & diagnostic : section « Clé GEMINI_API_KEY »."
             )
     if vtx_err is not None:
         return RuntimeError(str(vtx_err))
@@ -269,12 +272,23 @@ def _tts_chunked_bytes_from_spoken(
     )
 
 
+def _resolve_tts_gemini_key(*, cfg: object, gemini_api_key: str | None) -> str | None:
+    explicit = str(gemini_api_key or "").strip()
+    if explicit:
+        return explicit
+    from_cfg = str(getattr(cfg, "gemini_api_key", "") or "").strip()
+    if from_cfg:
+        return from_cfg
+    return resolve_gemini_api_key()
+
+
 def tts_readings_audio_bytes(
     *,
     cfg: object,
     text: str,
     voice_name: str | None = None,
     vertex_client: object | None = None,
+    gemini_api_key: str | None = None,
 ) -> tuple[bytes, str, str]:
     """
     Audio des lectures intégrales : Vertex TTS fragmenté en priorité,
@@ -285,11 +299,12 @@ def tts_readings_audio_bytes(
     spoken = spoken_text_for_tts(text)
     if not spoken:
         raise ValueError("Texte des lectures vide")
-    gemini_key = str(getattr(cfg, "gemini_api_key", "") or "").strip() or None
+    gemini_key = _resolve_tts_gemini_key(cfg=cfg, gemini_api_key=gemini_api_key)
     joined: bytes | None = None
     vtx_err: Exception | None = None
     gem_err: Exception | None = None
-    try_vertex = vertex_client is not None and not vertex_tts_allowlist_blocked()
+    allowlist_blocked = vertex_tts_allowlist_blocked()
+    try_vertex = vertex_client is not None and not allowlist_blocked
     if try_vertex:
         try:
             joined = _tts_chunked_bytes_from_spoken(
@@ -303,6 +318,8 @@ def tts_readings_audio_bytes(
             mark_vertex_tts_allowlist_blocked(ex)
             if not (gemini_key and vertex_tts_fallback_eligible(ex)):
                 raise format_tts_unavailable_error(vtx_err=vtx_err, gemini_key=gemini_key) from ex
+    elif allowlist_blocked and gemini_key:
+        pass
     if joined is None and gemini_key:
         try:
             joined = _tts_chunked_bytes_from_spoken(

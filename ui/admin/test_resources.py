@@ -10,7 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from core.config import load_config
+from core.config import gemini_api_key_status, load_config, resolve_gemini_api_key
 from core.gcp_clients import build_gcs_client
 from core.gemini_tts_catalog import gemini_tts_voice_names_ordered, load_gemini_tts_voice_catalog
 from core.parametres_ia import pick_effective_templates
@@ -262,45 +262,74 @@ def _render_admin_infra_diagnostic(*, cfg: object) -> None:
         st.warning(f"openpyxl non importable dans CE runtime Streamlit : {e}")
 
 
+def _render_gemini_api_key_diagnostics(*, cfg: object) -> None:
+    """Vérifie que ce runtime Streamlit voit bien GEMINI_API_KEY (sans afficher la clé)."""
+    st.subheader("Clé GEMINI_API_KEY (TTS repli)")
+    status = gemini_api_key_status()
+    cfg_key = str(getattr(cfg, "gemini_api_key", "") or "").strip()
+    resolved = resolve_gemini_api_key()
+    if status.get("detected"):
+        st.success(
+            f"Clé détectée — source : **{status.get('source')}**, "
+            f"suffixe `…{status.get('suffix')}`."
+        )
+    else:
+        st.error(
+            "Clé **non détectée** par ce runtime Streamlit. "
+            "Si elle est dans `.streamlit/secrets.toml` en local, vérifie aussi les **Secrets** "
+            "de Streamlit Cloud (déploiement) puis **redémarre** l'app."
+        )
+    if cfg_key and resolved and cfg_key == resolved:
+        st.caption("La clé est bien chargée dans `load_config()` (utilisée par la génération dominicale).")
+    elif resolved and not cfg_key:
+        st.warning(
+            "Clé résolue via `resolve_gemini_api_key()` mais absente de `cfg.gemini_api_key` — "
+            "recharge la page après redémarrage."
+        )
+
+
 def _render_admin_ia_smoke_tests(*, cfg: object) -> None:
     """Smoke tests : Gemini TTS court + Vertex texte court (avec sélecteur de voix)."""
+    _render_gemini_api_key_diagnostics(cfg=cfg)
+    st.divider()
     st.caption(
         "VertexAI est la voie principale (via compte de service). "
         "La Gemini API (clé `GEMINI_API_KEY`) sert de **fallback** pour la TTS si Vertex refuse l'AUDIO (allowlist) "
         "ou en cas de quota/erreur transitoire."
     )
+    gemini_key = resolve_gemini_api_key() or getattr(cfg, "gemini_api_key", None)
+    _tnames = gemini_tts_voice_names_ordered()
+    _tmap, _ = load_gemini_tts_voice_catalog()
+    try:
+        _tix = _tnames.index("Achird")
+    except ValueError:
+        _tix = 0
+    test_voice_pick = st.selectbox(
+        "Voix pour les tests TTS",
+        options=_tnames + ["__custom__"],
+        index=_tix,
+        format_func=lambda x: (_tmap.get(x) if x != "__custom__" else "Autre — saisie libre"),
+        key="adm_smoke_tts_voice",
+    )
+    test_voice_custom = ""
+    if test_voice_pick == "__custom__":
+        test_voice_custom = st.text_input("Nom de voix Gemini", key="adm_smoke_tts_voice_custom").strip()
+    test_voice_use = (
+        test_voice_custom if test_voice_pick == "__custom__" else str(test_voice_pick or "").strip()
+    ) or DEFAULT_GEMINI_TTS_VOICE
+
     col_a, col_b = st.columns(2)
     with col_a:
-        if not cfg.gemini_api_key:
-            st.info("Gemini API : non configurée (`GEMINI_API_KEY` manquante).")
+        if not gemini_key:
+            st.info("Gemini API : non configurée dans **ce runtime** (`GEMINI_API_KEY` introuvable).")
         else:
-            _tnames = gemini_tts_voice_names_ordered()
-            _tmap, _ = load_gemini_tts_voice_catalog()
-            try:
-                _tix = _tnames.index("Achird")
-            except ValueError:
-                _tix = 0
-            test_voice_pick = st.selectbox(
-                "Voix pour le test TTS",
-                options=_tnames + ["__custom__"],
-                index=_tix,
-                format_func=lambda x: (_tmap.get(x) if x != "__custom__" else "Autre — saisie libre"),
-                key="adm_smoke_tts_voice",
-            )
-            test_voice_custom = ""
-            if test_voice_pick == "__custom__":
-                test_voice_custom = st.text_input("Nom de voix Gemini", key="adm_smoke_tts_voice_custom").strip()
-            test_voice_use = (
-                test_voice_custom if test_voice_pick == "__custom__" else str(test_voice_pick or "").strip()
-            ) or DEFAULT_GEMINI_TTS_VOICE
-
             if st.button("Tester Gemini TTS (court)", key="adm_test_gemini_tts"):
                 ov = loading_overlay("Test Gemini TTS…")
                 try:
                     from core.gemini_tts_api import GeminiTtsApiClient
 
                     t0 = time.perf_counter()
-                    cli = GeminiTtsApiClient(api_key=cfg.gemini_api_key)
+                    cli = GeminiTtsApiClient(api_key=str(gemini_key))
                     res = cli.generate_audio(
                         model="gemini-2.5-flash-preview-tts",
                         text="Test audio LumenVia. Un, deux, trois.",
@@ -313,7 +342,100 @@ def _render_admin_ia_smoke_tests(*, cfg: object) -> None:
                     st.error(f"Gemini TTS KO — {e}")
                 finally:
                     ov.empty()
+
+            if st.button(
+                "Tester TTS lectures (repli Gemini, extrait liturgique)",
+                key="adm_test_gemini_readings_tts",
+            ):
+                ov = loading_overlay("Test TTS lectures (Gemini)…")
+                try:
+                    from core.sunday_gemini_tts import tts_readings_audio_bytes
+
+                    sample = (
+                        "Première lecture.\n\n"
+                        "Lecture du livre des Nombres.\n\n"
+                        "Deuxième lecture.\n\n"
+                        "Lecture de la lettre aux Romains.\n\n"
+                        "Évangile selon saint Matthieu."
+                    )
+                    t0 = time.perf_counter()
+                    audio_b, mime, _ext = tts_readings_audio_bytes(
+                        cfg=cfg,
+                        text=sample,
+                        voice_name=test_voice_use,
+                        vertex_client=None,
+                        gemini_api_key=str(gemini_key),
+                    )
+                    dt = time.perf_counter() - t0
+                    st.success(
+                        f"TTS lectures (Gemini) OK — {len(audio_b)} octets en {dt:.2f}s ({mime}). "
+                        "Même chemin que le repli après refus Vertex allowlist."
+                    )
+                    st.audio(audio_b, format=mime or "audio/wav")
+                except Exception as e:
+                    st.error(f"TTS lectures (Gemini) KO — {e}")
+                finally:
+                    ov.empty()
     with col_b:
+        if st.button("Tester Vertex TTS (allowlist)", key="adm_test_vertex_tts"):
+            ov = loading_overlay("Test Vertex TTS…")
+            try:
+                from core.vertex_gemini import VertexGeminiClient
+
+                t0 = time.perf_counter()
+                vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
+                res = vx.generate_audio_auto(
+                    preferred_models=[
+                        "gemini-2.5-flash-tts",
+                        "gemini-2.5-flash-preview-tts",
+                    ],
+                    text="Test Vertex TTS LumenVia.",
+                    voice_name=test_voice_use,
+                )
+                dt = time.perf_counter() - t0
+                st.success(f"Vertex TTS OK — {len(res.audio_bytes)} octets en {dt:.2f}s")
+                st.audio(res.audio_bytes, format=res.mime_type or "audio/wav")
+            except Exception as e:
+                msg = str(e).lower()
+                if "allowlisted" in msg or "audio output" in msg:
+                    st.warning(
+                        "Vertex TTS refusé (allowlist) — comportement attendu sur certains projets GCP. "
+                        "Utilise le test **Gemini TTS** ou **TTS lectures** à gauche si la clé est détectée."
+                    )
+                st.error(f"Vertex TTS KO — {e}")
+            finally:
+                ov.empty()
+
+        if gemini_key and st.button(
+            "Tester repli production (Vertex → Gemini, extrait)",
+            key="adm_test_readings_tts_fallback",
+        ):
+            ov = loading_overlay("Test repli TTS lectures…")
+            try:
+                from core.sunday_gemini_tts import tts_readings_audio_bytes
+                from core.vertex_gemini import VertexGeminiClient
+
+                sample = "Première lecture.\n\nLecture du livre du Deutéronome.\n\nÉvangile selon saint Luc."
+                vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
+                t0 = time.perf_counter()
+                audio_b, mime, _ext = tts_readings_audio_bytes(
+                    cfg=cfg,
+                    text=sample,
+                    voice_name=test_voice_use,
+                    vertex_client=vx,
+                    gemini_api_key=str(gemini_key),
+                )
+                dt = time.perf_counter() - t0
+                st.success(
+                    f"Repli production OK — {len(audio_b)} octets en {dt:.2f}s ({mime}). "
+                    "Chemin identique à « Compléter les manquants »."
+                )
+                st.audio(audio_b, format=mime or "audio/wav")
+            except Exception as e:
+                st.error(f"Repli production KO — {e}")
+            finally:
+                ov.empty()
+
         if st.button("Tester VertexAI (texte court)", key="adm_test_vertex_text"):
             ov = loading_overlay("Test VertexAI (texte)…")
             try:
