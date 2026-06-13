@@ -142,31 +142,126 @@ def _tts_chunks_to_wav(
     return join_wav_bytes(wav_parts)
 
 
-def tts_gemini_chunked_bytes(*, cfg: object, text: str, voice_name: str | None = None) -> tuple[bytes, str, str]:
-    """Synthèse vocale longue via Gemini API (fragments), même stratégie que le fallback synthèse."""
-    if voice_name is None or not str(voice_name).strip():
-        voice_name = DEFAULT_GEMINI_TTS_VOICE
-    text = spoken_text_for_tts(text)
-    if not text:
+_VERTEX_TTS_MODELS = (
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+)
+
+
+def _tts_vertex_chunks_to_wav(*, vertex_client: object, voice_name: str, chunks: list[str]) -> bytes:
+    if not chunks:
         raise ValueError("Texte vide")
-    if not getattr(cfg, "gemini_api_key", None):
-        raise RuntimeError("GEMINI_API_KEY requise pour l’audio des lectures (TTS fragmenté).")
+    wav_parts: list[bytes] = []
+    for ch in chunks:
+        audio = vertex_client.generate_audio_auto(
+            preferred_models=list(_VERTEX_TTS_MODELS),
+            text=ch,
+            voice_name=voice_name,
+        )
+        b, mt, _ = normalize_audio_bytes(
+            audio_bytes=getattr(audio, "audio_bytes", b""),
+            mime_type=getattr(audio, "mime_type", None),
+        )
+        if mt != "audio/wav":
+            b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
+        wav_parts.append(b)
+    return join_wav_bytes(wav_parts)
 
-    tts_api = GeminiTtsApiClient(api_key=str(cfg.gemini_api_key))
 
-    if is_liturgy_readings_tts_text(text):
-        section_groups = _liturgy_readings_tts_section_chunks(text, max_chars=1400)
+def _tts_chunked_bytes_from_spoken(
+    *,
+    spoken: str,
+    voice_name: str,
+    gemini_api_key: str | None,
+    vertex_client: object | None,
+) -> bytes:
+    if is_liturgy_readings_tts_text(spoken):
+        section_groups = _liturgy_readings_tts_section_chunks(spoken, max_chars=1400)
         if not section_groups:
             raise ValueError("Texte liturgique vide")
         section_wavs: list[bytes] = []
         for section in section_groups:
-            section_wavs.append(
-                _tts_chunks_to_wav(tts_api=tts_api, voice_name=str(voice_name), chunks=section)
-            )
-        joined = join_wav_with_silence(section_wavs, pause_ms=_LITURGY_SECTION_PAUSE_MS)
-    else:
-        chunks = chunk_text_for_tts(text, max_chars=1400)
-        joined = _tts_chunks_to_wav(tts_api=tts_api, voice_name=str(voice_name), chunks=chunks)
+            if gemini_api_key:
+                tts_api = GeminiTtsApiClient(api_key=str(gemini_api_key))
+                section_wavs.append(
+                    _tts_chunks_to_wav(tts_api=tts_api, voice_name=voice_name, chunks=section)
+                )
+            elif vertex_client is not None:
+                section_wavs.append(
+                    _tts_vertex_chunks_to_wav(
+                        vertex_client=vertex_client, voice_name=voice_name, chunks=section
+                    )
+                )
+            else:
+                raise RuntimeError(
+                    "Audio des lectures impossible : ajoute GEMINI_API_KEY dans les secrets "
+                    "ou vérifie que Vertex TTS (AUDIO) est autorisé sur le projet GCP."
+                )
+        return join_wav_with_silence(section_wavs, pause_ms=_LITURGY_SECTION_PAUSE_MS)
 
+    chunks = chunk_text_for_tts(spoken, max_chars=1400)
+    if gemini_api_key:
+        tts_api = GeminiTtsApiClient(api_key=str(gemini_api_key))
+        return _tts_chunks_to_wav(tts_api=tts_api, voice_name=voice_name, chunks=chunks)
+    if vertex_client is not None:
+        return _tts_vertex_chunks_to_wav(vertex_client=vertex_client, voice_name=voice_name, chunks=chunks)
+    raise RuntimeError(
+        "Audio des lectures impossible : ajoute GEMINI_API_KEY dans les secrets "
+        "ou vérifie que Vertex TTS (AUDIO) est autorisé sur le projet GCP."
+    )
+
+
+def tts_readings_audio_bytes(
+    *,
+    cfg: object,
+    text: str,
+    voice_name: str | None = None,
+    vertex_client: object | None = None,
+) -> tuple[bytes, str, str]:
+    """
+    Audio des lectures intégrales : Gemini API fragmenté si clé dispo,
+    sinon Vertex TTS fragmenté (même logique que la synthèse dominicale).
+    """
+    if voice_name is None or not str(voice_name).strip():
+        voice_name = DEFAULT_GEMINI_TTS_VOICE
+    spoken = spoken_text_for_tts(text)
+    if not spoken:
+        raise ValueError("Texte des lectures vide")
+    gemini_key = str(getattr(cfg, "gemini_api_key", "") or "").strip() or None
+    joined: bytes | None = None
+    gem_err: Exception | None = None
+    if gemini_key:
+        try:
+            joined = _tts_chunked_bytes_from_spoken(
+                spoken=spoken,
+                voice_name=str(voice_name),
+                gemini_api_key=gemini_key,
+                vertex_client=None,
+            )
+        except Exception as ex:
+            gem_err = ex
+    if joined is None:
+        if vertex_client is None:
+            if gem_err is not None:
+                raise gem_err
+            raise RuntimeError(
+                "Audio des lectures impossible : ajoute GEMINI_API_KEY dans les secrets "
+                "ou vérifie que Vertex TTS (AUDIO) est autorisé sur le projet GCP."
+            )
+        joined = _tts_chunked_bytes_from_spoken(
+            spoken=spoken,
+            voice_name=str(voice_name),
+            gemini_api_key=None,
+            vertex_client=vertex_client,
+        )
     b_out, mime_out, ext_out = normalize_audio_bytes(audio_bytes=joined, mime_type="audio/wav")
     return b_out, mime_out, ext_out
+
+
+def tts_gemini_chunked_bytes(*, cfg: object, text: str, voice_name: str | None = None) -> tuple[bytes, str, str]:
+    """Synthèse vocale longue via Gemini API (fragments), même stratégie que le fallback synthèse."""
+    if not getattr(cfg, "gemini_api_key", None):
+        raise RuntimeError("GEMINI_API_KEY requise pour le TTS fragmenté Gemini API.")
+    return tts_readings_audio_bytes(cfg=cfg, text=text, voice_name=voice_name, vertex_client=None)

@@ -26,7 +26,9 @@ from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
 from core.gcs_signed_urls import gcs_signed_url
 from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
-from core.sunday_gemini_tts import tts_gemini_chunked_bytes
+from core.readings_cache_loader import load_aelf_from_readings_cache
+from core.sunday_gemini_tts import tts_readings_audio_bytes
+from core.vertex_gemini import VertexGeminiClient
 from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.pages.about import _ABOUT_MARKDOWN
@@ -52,6 +54,44 @@ def _incremental_flash_payload(*, done: list[str], issues: list[str], skipped: l
             "ou vérifie que la synthèse du dimanche est bien enregistrée."
         ),
     }
+
+
+def _resolve_texts_for_readings_tts(
+    *,
+    texts: object,
+    identity: object,
+    gs: object,
+    cfg: object,
+    zone: str,
+) -> object:
+    """Recharge RDC si le objet ``texts`` courant n'a pas de corps lisible pour le TTS."""
+    readings_plain = plain_readings_for_tts(texts)
+    if readings_plain.strip():
+        return texts
+    sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    if not sid:
+        return texts
+    loaded = load_aelf_from_readings_cache(
+        gs=gs,
+        spreadsheet_id=sid,
+        date_str=str(getattr(identity, "date", "") or ""),
+        zone=zone,
+    )
+    if loaded:
+        _id, cache_texts = loaded
+        if plain_readings_for_tts(cache_texts).strip():
+            return cache_texts
+    return texts
+
+
+def _readings_tts_vertex_client(cfg: object) -> VertexGeminiClient | None:
+    sa = getattr(cfg, "gcp_service_account", None)
+    if not sa:
+        return None
+    try:
+        return VertexGeminiClient(service_account_info=sa)
+    except Exception:
+        return None
 
 
 def _run_incremental_sunday_outputs(
@@ -113,11 +153,14 @@ def _run_incremental_sunday_outputs(
     if also_readings_if_missing:
         if has_readings_audio:
             skipped.append("audio des lectures déjà publié")
-        elif not getattr(cfg, "gemini_api_key", None):
+        elif not getattr(cfg, "gemini_api_key", None) and not getattr(cfg, "gcp_service_account", None):
             issues.append(
-                "Clé GEMINI_API_KEY absente des secrets — impossible de générer l’audio des lectures."
+                "Configure GEMINI_API_KEY ou le compte de service GCP — impossible de générer l’audio des lectures."
             )
         else:
+            texts = _resolve_texts_for_readings_tts(
+                texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone
+            )
             readings_plain = plain_readings_for_tts(texts)
             if not readings_plain.strip():
                 issues.append(
@@ -154,8 +197,12 @@ def _run_incremental_sunday_outputs(
                         readings_tts = compose_readings_tts_text(
                             body=readings_plain, templates=templates_ia
                         )
-                        r_bytes, r_mime, r_ext = tts_gemini_chunked_bytes(
-                            cfg=cfg, text=readings_tts, voice_name=voice_read
+                        vx_read = _readings_tts_vertex_client(cfg)
+                        r_bytes, r_mime, r_ext = tts_readings_audio_bytes(
+                            cfg=cfg,
+                            text=readings_tts,
+                            voice_name=voice_read,
+                            vertex_client=vx_read,
                         )
                     day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
                     readings_path = f"AudioLectures/{day_for_path_inc}/{gen_eid}.{r_ext}"
@@ -697,6 +744,9 @@ def _run_generate_sunday_flow(
 
     readings_cover_signed: str | None = None
     if generate_readings_audio:
+        texts = _resolve_texts_for_readings_tts(
+            texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone
+        )
         readings_plain = plain_readings_for_tts(texts)
         if readings_plain.strip():
             try:
@@ -722,8 +772,11 @@ def _run_generate_sunday_flow(
                                 f"(règle `#ID {perf['voice_lectures_rule_id']}`)."
                             )
                     readings_tts = compose_readings_tts_text(body=readings_plain, templates=templates)
-                    r_bytes, r_mime, r_ext = tts_gemini_chunked_bytes(
-                        cfg=cfg, text=readings_tts, voice_name=voice_read
+                    r_bytes, r_mime, r_ext = tts_readings_audio_bytes(
+                        cfg=cfg,
+                        text=readings_tts,
+                        voice_name=voice_read,
+                        vertex_client=vx,
                     )
                 day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
                 readings_path = f"AudioLectures/{day_for_path}/{gen_entity_id}.{r_ext}"
@@ -764,7 +817,7 @@ def _run_generate_sunday_flow(
         else:
             st.warning(
                 "Audio des lectures ignoré : le texte agrégé des quatre lectures (AELF) est vide — "
-                "vérifie les lectures pour cette date (cache / API)."
+                "vérifie les lectures pour cette date (cache RDC / API AELF)."
             )
 
     # Optimisation : les downloads de vérification (Cloud → UI) sont coûteux.

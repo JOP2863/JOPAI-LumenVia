@@ -799,7 +799,9 @@ def render_sunday() -> None:
             st.caption(
                 "« Compléter les manquants » ajoute seulement ce qui manque encore sur Cloud, selon les cases "
                 "**Audio des lectures** et **fascicule PDF** — sans refaire la synthèse IA. "
-                "« Tout régénérer (long) » relance Vertex + audios ; prévoir plusieurs minutes."
+                "« Tout régénérer (long) » relance Vertex + audios ; prévoir plusieurs minutes. "
+                "L’audio des lectures utilise Gemini API si `GEMINI_API_KEY` est définie, sinon Vertex TTS "
+                "(comme la synthèse)."
             )
             if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
                 st.warning("Configuration incomplète (service account / gsheet_id / bucket). Synthèse indisponible.")

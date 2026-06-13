@@ -110,8 +110,13 @@ def has_readings_audio_for_gen(
                 continue
             if gcs is not None and bucket:
                 try:
-                    if blob_exists(gcs=gcs, bucket_name=bucket, path=path):
-                        return True
+                    if not blob_exists(gcs=gcs, bucket_name=bucket, path=path):
+                        continue
+                    blob = gcs.bucket(bucket).blob(path)
+                    blob.reload()
+                    if int(blob.size or 0) < 512:
+                        continue
+                    return True
                 except Exception:
                     continue
             else:
