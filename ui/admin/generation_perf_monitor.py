@@ -23,8 +23,78 @@ _SECONDS_SERIES: dict[str, str] = {
     "duration_pdf_s": "PDF (s)",
 }
 _WORDS_SERIES: dict[str, str] = {
-    "text_words": "Mots synthèse",
+    "text_words": "Mots synthèse (axe droit)",
 }
+
+# Tuiles KPI — fonds pastels (charte LumenVia).
+_KPI_TILES: tuple[tuple[str, str, str], ...] = (
+    ("Synthèses suivies", "#eef6fb", "#0b2745"),
+    ("Vertex — 1re passe (moy.)", "#e6f2ef", "#0b2745"),
+    ("Mots moyens", "#fdf3e7", "#92400e"),
+    ("TTS lectures (moy.)", "#ede9fe", "#5b21b6"),
+    ("TTS synthèse (moy.)", "#ecfdf5", "#047857"),
+    ("Relance Vertex (moy.)", "#fef9c3", "#854d0e"),
+    ("PDF (moy.)", "#f1f5f9", "#334155"),
+)
+
+
+def _escape_html(s: str) -> str:
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _render_perf_kpi_tiles(items: list[tuple[str, str]]) -> None:
+    """Indicateurs en tuiles pastel (label + valeur)."""
+    if not items:
+        return
+    cols_per_row = 4
+    for start in range(0, len(items), cols_per_row):
+        row_items = items[start : start + cols_per_row]
+        cols = st.columns(cols_per_row)
+        for j, (label, value) in enumerate(row_items):
+            idx = start + j
+            _, bg, fg = _KPI_TILES[idx] if idx < len(_KPI_TILES) else ("", "#f8fafc", "#0b2745")
+            with cols[j]:
+                cols[j].markdown(
+                    f"""
+<div style="
+  background:{bg};
+  border:1px solid rgba(11,39,69,0.09);
+  border-radius:12px;
+  padding:0.75rem 0.95rem;
+  min-height:4.6rem;
+  box-shadow:0 1px 2px rgba(11,39,69,0.04);
+">
+  <div style="font-size:0.78rem;line-height:1.25;color:#5c5348;margin-bottom:0.35rem;">
+    {_escape_html(label)}
+  </div>
+  <div style="font-size:1.35rem;font-weight:600;line-height:1.2;color:{fg};font-family:Lora,Georgia,serif;">
+    {_escape_html(value)}
+  </div>
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+
+
+def _altair_legend_config() -> dict[str, object]:
+    return {
+        "orient": "bottom",
+        "direction": "horizontal",
+        "labelLimit": 420,
+        "titleLimit": 420,
+        "symbolLimit": 420,
+        "columns": 2,
+        "labelFont": "Lora",
+        "titleFont": "Lora",
+        "padding": 8,
+        "offset": 12,
+    }
 
 
 def _render_evolution_dual_axis_chart(df: object) -> None:
@@ -106,10 +176,16 @@ def _render_evolution_dual_axis_chart(df: object) -> None:
         chart = (
             alt.layer(*layers)
             .resolve_scale(y="independent")
-            .properties(height=360)
+            .properties(height=400, padding={"bottom": 88})
             .configure_axis(labelFont="Lora", titleFont="Lora")
+            .configure_legend(**_altair_legend_config())
         )
         st.altair_chart(chart, use_container_width=True)
+        if has_words:
+            st.caption(
+                "Trait **orange pointillé** = mots de la synthèse (ordonnée de **droite**). "
+                "Lignes pleines = durées en **secondes** (ordonnée de **gauche**)."
+            )
     except Exception:
         sec_present = [k for k in _SECONDS_SERIES if k in plot_df.columns and plot_df[k].notna().any()]
         if sec_present:
@@ -136,9 +212,35 @@ def _render_bar_seconds_only(df: object) -> None:
         avg = mean_metric(df.to_dict("records"), col)
         if avg is not None and (col != "duration_text_retry_s" or avg > 0):
             bar_rows.append({"Artefact": label, "Secondes": avg})
-    if bar_rows:
-        bar_df = pd.DataFrame(bar_rows).set_index("Artefact")
-        st.bar_chart(bar_df, height=260)
+    if not bar_rows:
+        return
+    bar_df = pd.DataFrame(bar_rows)
+    try:
+        import altair as alt
+
+        chart_h = max(240, 52 * len(bar_rows))
+        chart = (
+            alt.Chart(bar_df)
+            .mark_bar(color="#0d9488", cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
+            .encode(
+                y=alt.Y(
+                    "Artefact:N",
+                    sort="-x",
+                    title=None,
+                    axis=alt.Axis(labelLimit=480, labelFont="Lora"),
+                ),
+                x=alt.X("Secondes:Q", title="Secondes (moyenne sur la période)"),
+                tooltip=[
+                    alt.Tooltip("Artefact:N", title="Étape"),
+                    alt.Tooltip("Secondes:Q", title="Secondes", format=".1f"),
+                ],
+            )
+            .properties(height=chart_h)
+            .configure_axis(labelFont="Lora", titleFont="Lora")
+        )
+        st.altair_chart(chart, use_container_width=True)
+    except Exception:
+        st.bar_chart(bar_df.set_index("Artefact"), height=260)
 
 
 def _load_perf_tables(*, gsheet_id: str, sa_fp: str) -> tuple[list[dict], list[dict], list[dict]]:
@@ -202,7 +304,6 @@ def render_admin_generation_perf_monitor() -> None:
     n_aud = len(aud_rows)
     n_pdf = len(pdf_rows)
 
-    c1, c2, c3, c4 = st.columns(4)
     m_text = mean_metric(gen_rows, "duration_text_s")
     m_words = mean_metric(gen_rows, "text_words")
     m_syn = mean_metric(
@@ -213,17 +314,20 @@ def render_admin_generation_perf_monitor() -> None:
         [a for a in aud_rows if a.get("kind") == "lectures"],
         "duration_tts_s",
     )
-    c1.metric("Synthèses suivies", n_gen)
-    c2.metric("Vertex 1re passe (moy.)", f"{m_text:.0f} s" if m_text is not None else "—")
-    c3.metric("Mots moyens", f"{int(round(m_words))}" if m_words is not None else "—")
-    c4.metric("TTS lectures moy.", f"{m_lect:.0f} s" if m_lect is not None else "—")
-
-    c5, c6, c7 = st.columns(3)
     m_retry = mean_metric(gen_rows, "duration_text_retry_s")
     m_pdf = mean_metric(pdf_rows, "duration_build_s")
-    c5.metric("TTS synthèse moy.", f"{m_syn:.0f} s" if m_syn is not None else "—")
-    c6.metric("Relance texte moy.", f"{m_retry:.0f} s" if m_retry and m_retry > 0 else "—")
-    c7.metric("PDF moy.", f"{m_pdf:.0f} s" if m_pdf is not None else "—")
+
+    _render_perf_kpi_tiles(
+        [
+            ("Synthèses suivies", str(n_gen)),
+            ("Vertex — 1re passe (moy.)", f"{m_text:.0f} s" if m_text is not None else "—"),
+            ("Mots moyens", f"{int(round(m_words))}" if m_words is not None else "—"),
+            ("TTS lectures (moy.)", f"{m_lect:.0f} s" if m_lect is not None else "—"),
+            ("TTS synthèse (moy.)", f"{m_syn:.0f} s" if m_syn is not None else "—"),
+            ("Relance Vertex (moy.)", f"{m_retry:.0f} s" if m_retry and m_retry > 0 else "—"),
+            ("PDF (moy.)", f"{m_pdf:.0f} s" if m_pdf is not None else "—"),
+        ]
+    )
 
     if not joined:
         st.warning("Données partielles — pas assez de lignes GEN datées pour construire l’historique.")
@@ -243,9 +347,6 @@ def render_admin_generation_perf_monitor() -> None:
 
     st.markdown("#### Moyennes par artefact — durées (secondes)")
     _render_bar_seconds_only(df)
-    m_words_avg = mean_metric(df.to_dict("records"), "text_words")
-    if m_words_avg is not None:
-        st.metric("Mots synthèse (moyenne sur la période)", f"{int(round(m_words_avg))} mots")
 
     st.markdown("#### Dérives récentes (derniers 8 dimanches vs moyenne globale)")
     recent = df.tail(8)
