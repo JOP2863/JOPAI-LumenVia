@@ -65,7 +65,7 @@ def adm_feedback_sheet_fetch_cached(
 @st.cache_data(ttl=300, show_spinner=False)
 def load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint: str) -> dict[str, str]:
     """
-    Charge les prompts IA depuis Google Sheets (onglet `Paramètres_IA`, standard MARPA).
+    Charge les prompts IA depuis Google Sheets (onglet `Paramètres_IA`, append-only).
     Cache court pour éviter de relire Sheets à chaque run Streamlit.
     """
     if not gsheet_id:

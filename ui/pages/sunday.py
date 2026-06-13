@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import date, timedelta
 from hashlib import sha256
 from html import escape as html_escape
@@ -27,7 +28,11 @@ from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import loading_overlay
 from ui.liturgy_render import render_liturgy_block
 from ui.pages.about import _ABOUT_MARKDOWN
-from ui.sunday_admin_flows import _run_generate_sunday_flow, _run_incremental_sunday_outputs
+from ui.sunday_admin_flows import (
+    _append_pdf_export_row,
+    _run_generate_sunday_flow,
+    _run_incremental_sunday_outputs,
+)
 
 _SUNDAY_FLASH_KEY = "_lumenvia_sunday_flash"
 
@@ -643,6 +648,7 @@ def render_sunday() -> None:
                         except Exception:
                             highlight_idx = None
 
+                        tpdf0 = time.perf_counter()
                         pdf_b = build_liturgy_sunday_pdf_bytes(
                             image_bytes=img_b,
                             week_title=week_title_pdf,
@@ -676,6 +682,19 @@ def render_sunday() -> None:
                                 data=pdf_b,
                                 content_type="application/pdf",
                             )
+                            if gs_top and str(cfg.gsheet_id or "").strip():
+                                try:
+                                    _append_pdf_export_row(
+                                        gs=gs_top,
+                                        cfg=cfg,
+                                        date_str=date_str,
+                                        zone=zone,
+                                        gen_entity_id=_gen_eid,
+                                        gcs_path=fasc_path,
+                                        duration_build_s=round(time.perf_counter() - tpdf0, 3),
+                                    )
+                                except Exception:
+                                    pass
                             st.success("PDF enregistré.")
                         except Exception as ex:
                             st.warning(f"Impossible d’enregistrer le PDF sur Cloud (Fascicules/) : {ex}")

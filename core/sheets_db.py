@@ -524,7 +524,7 @@ def with_concat(columns: list[str]) -> list[str]:
 
 
 def liturgy_illustrations_table_spec() -> TableSpec:
-    """Métadonnées et légendes des visuels dominicaux (MARPA, alias logique ``liturgy_illustrations`` / ILUS)."""
+    """Métadonnées et légendes des visuels dominicaux (alias logique ``liturgy_illustrations`` / ILUS)."""
     return TableSpec(
         name="liturgy_illustrations",
         columns=with_concat(

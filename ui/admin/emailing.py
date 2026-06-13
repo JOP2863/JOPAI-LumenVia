@@ -229,7 +229,7 @@ def render_admin_emailing() -> None:
                 st.info("Aucune modification détectée (objet + corps inchangés) — pas de nouvelle ligne.")
             else:
                 # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
-                # (comme MARPA pour Paramètres_IA : append seul laisse l’historique encore « Actif »).
+                # (append seul laisse l’historique encore « Actif » — inactiver d’abord les lignes courantes).
                 sh_etpl = open_spreadsheet(
                     gs, cfg.gsheet_id, service_account_email=sa_email or None
                 )

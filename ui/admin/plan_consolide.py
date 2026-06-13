@@ -138,7 +138,7 @@ def render_admin_plan_consolide() -> None:
       <td>Pilotage éditorial continu ; pas de sources hors AELF.</td>
     </tr>
     <tr>
-      <td>Paramètres IA (Sheets — standard MARPA) + secret sauce</td>
+      <td>Paramètres IA (Google Sheets, append-only) + secret sauce</td>
       <td><span class="lv-st-ok">Livré</span></td>
       <td>
         Admin : édition socle/surcouches dans <code>Paramètres_IA</code> (avec <code>Description</code> lisible) ; secret sauce jamais affichée en clair.
@@ -185,7 +185,7 @@ def render_admin_plan_consolide() -> None:
       <td><span class="lv-st-todo">À cadrer</span></td>
       <td>
         Nouvelle tuile admin <strong>Recette continue</strong> : cheminement de self-diagnostic du pod, sans tests lourds au chargement.
-        Périmètre : secrets, connectivité Google Sheets / GCS, quotas IA, intégrité MARPA et résolution des prompts vitaux AIP via
+        Périmètre : secrets, connectivité Google Sheets / GCS, quotas IA, intégrité des tables Sheets et résolution des prompts vitaux AIP via
         <code>pick_effective_templates</code>. Première persistance prévue dans <code>admin_changelog</code> / <strong>ADLG</strong> ;
         table <strong>TST</strong> seulement si l’historique de scores devient nécessaire.
         Suivi : <code>data/continuous_reception_progress.json</code>.

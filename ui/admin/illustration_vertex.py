@@ -845,7 +845,7 @@ def render_admin_illustration_gen_panel(*, data: dict, manifest_path: Path) -> N
     st.subheader("Descriptions ILUS (Vertex)")
     st.caption(
         "Pour les **fichiers déjà sur Cloud** (sans régénérer les pixels) : envoi de l’image à Gemini (multimodal), "
-        "puis **append** dans la table **`liturgy_illustrations` / ILUS** (MARPA). "
+        "puis **append** dans la table **`liturgy_illustrations` / ILUS** (append-only). "
         "Même **zone** et **modèles texte + vision** que ceux au-dessus de la grille (y compris pour la légende juste après upload)."
     )
     if not str(cfg.gsheet_id or "").strip():

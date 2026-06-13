@@ -13,7 +13,7 @@
 **Constat actuel (honnête)** : plusieurs pages appellent encore `fetch_records` pour des flux interactifs (liste mémo, jointures compte / abonnements, cache lectures optionnel sur Dimanche). Exemples repérés :
 
 - `ui/pages/memo.py` — lectures `memos` / `generations` pour l’historique et les formulaires.
-- `ui/pages/join_account.py` — lectures `users`, `subscriptions`, `password_resets` pour inscription, compte et réinitialisation ; les **écritures** passent par `append_immutable_row` avec logique MARPA.
+- `ui/pages/join_account.py` — lectures `users`, `subscriptions`, `password_resets` pour inscription, compte et réinitialisation ; les **écritures** passent par `append_immutable_row` avec logique append-only.
 - `ui/pages/sunday.py` — lecture optionnelle de `readings_cache` pour affichage / perf.
 
 **Ce qui est bien délégué au `core/` pour la liturgie dominicale** : récupération et normalisation AELF (via `cached_aelf` / caches Streamlit), préparation TTS, PDF, fetch GCS / agrégats Sheets pour médias déjà produits — désormais dans `core/sunday_existing_outputs.py`, `core/sunday_readings_tts.py`, `core/synthesis_vertex_prompt.py`, etc., avec `app.py` comme façade `import app as ap` pour compatibilité.
@@ -22,13 +22,13 @@
 
 ---
 
-## 6.2 Vérification MARPA ($N+1$)
+## 6.2 Vérification immuabilité Sheets ($N+1$)
 
 **Feedback** (`ui/pages/feedback.py`) : les envois d’expérience utilisateur passent par `append_immutable_row` vers la table prévue (pas de mise à jour destructive sur une ligne existante pour créer une nouvelle réponse).
 
 **Profil / compte** (`ui/pages/join_account.py`) : les mises à jour de profil suivent le modèle append-only documenté — avant une nouvelle ligne « vivante », les lignes `users` précédentes encore marquées actives sont **marquées inactives** via mise à jour de cellule `status` sur la ligne historique, puis **nouvelle ligne** avec `append_immutable_row` et `concat` / colonnes obligatoires ; réutilisation de `sheet_row_status_is_live`, `SHEETS_ROW_STATUS_INACTIVE`, `compute_concat` (voir commentaires et blocs autour des inscriptions et « Mon compte »).
 
-**Exclusivité du statut « Actif »** : la logique « une seule ligne active » pour l’utilisateur repose sur le filtrage `sheet_row_status_is_live` à la lecture et sur l’inactivation explicite des anciennes lignes avant append de la nouvelle version (pattern MARPA du projet).
+**Exclusivité du statut « Actif »** : la logique « une seule ligne active » pour l’utilisateur repose sur le filtrage `sheet_row_status_is_live` à la lecture et sur l’inactivation explicite des anciennes lignes avant append de la nouvelle version (pattern append-only du projet).
 
 ---
 

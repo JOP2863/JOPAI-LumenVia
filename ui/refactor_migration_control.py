@@ -92,7 +92,7 @@ REFACTOR_PHASES: tuple[tuple[str, tuple[RefactorStep, ...]], ...] = (
                 "Vigilance de granularité (Index gaussien) : core/system_audit.py (scan LOC + stats) + ui/admin/granularity_audit.py (histogramme Gauss, alerting hors-nuage) + entrée nav admin — Constitution JOPAI V16.10",
                 "0",
             ),
-            RefactorStep("core_split", "Scinder ou regrouper core/* par domaine métier (sans casser MARPA)", ""),
+            RefactorStep("core_split", "Scinder ou regrouper core/* par domaine métier (sans casser l'immuabilité Sheets)", ""),
             RefactorStep("final_shell", "app.py réduit au shell (routage + imports) ; validation finale", ""),
         ),
     ),
@@ -101,7 +101,7 @@ REFACTOR_PHASES: tuple[tuple[str, tuple[RefactorStep, ...]], ...] = (
         (
             RefactorStep(
                 "closure_audit_self_review",
-                "Réponses écrites aux critères d’audit final (Thin Page, MARPA, Zéro-trace, FinOps Dimanche, navigation cognitive) — voir stratégie §6",
+                "Réponses écrites aux critères d’audit final (Thin Page, immuabilité Sheets, Zéro-trace, FinOps Dimanche, navigation cognitive) — voir stratégie §6",
                 "0",
             ),
         ),

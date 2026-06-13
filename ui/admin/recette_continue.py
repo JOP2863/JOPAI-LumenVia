@@ -32,7 +32,7 @@ RECETTE_PHASES: tuple[tuple[str, tuple[RecetteStep, ...]], ...] = (
         (
             RecetteStep(
                 "protocol_scope",
-                "Définir le périmètre de santé du pod : secrets, Sheets, GCS, IA, MARPA et AIP",
+                "Définir le périmètre de santé du pod : secrets, Sheets, GCS, IA, intégrité Sheets et AIP",
             ),
             RecetteStep(
                 "manual_first",
@@ -51,10 +51,10 @@ RECETTE_PHASES: tuple[tuple[str, tuple[RecetteStep, ...]], ...] = (
         ),
     ),
     (
-        "Phase B — Intégrité MARPA / AIP",
+        "Phase B — Intégrité Sheets / AIP",
         (
             RecetteStep(
-                "marpa_active_duplicates",
+                "sheets_active_duplicates",
                 "Détecter les doublons Actif par clé métier",
                 "priorité Paramètres_IA / AIP",
             ),
@@ -119,7 +119,7 @@ Le chantier ne remplace pas la page `Test ressources`, qui reste l'atelier de d�
 #### Protocole cible
 
 - **Autonomie de recette locale** : vérifier les secrets critiques, la connectivité Google Sheets, la connectivité GCS et un quota IA minimal sans lancer de génération lourde.
-- **Intégrité MARPA** : détecter les doublons `Actif`, en priorité sur `Paramètres_IA` / `AIP`, pour préserver la règle d'exclusivité.
+- **Intégrité Sheets** : détecter les doublons `Actif`, en priorité sur `Paramètres_IA` / `AIP`, pour préserver la règle d'exclusivité.
 - **Résolution IA** : confirmer que `pick_effective_templates` produit une ligne gagnante pour chaque clé vitale de prompt.
 - **Moteur lightweight** : encapsuler les contrôles dans `utils/diagnostic_test.py`, déclenchable à la demande puis par heartbeat.
 - **Persistance** : commencer par une trace synthétique dans `admin_changelog` / `ADLG`, puis créer une table `TST` seulement si l'historique de scores devient un vrai besoin produit.
@@ -295,7 +295,7 @@ def render_admin_recette_continue() -> None:
 |---|---|---|
 | Secrets / GCP | Diagnostic manuel dans `Test ressources` | Résultat structuré réutilisable |
 | GSheet / GCS | Contrôles UI existants | Smoke test léger, déclenché à la demande |
-| MARPA / AIP | Règles dispersées dans Sheets + prompts | Détection des doublons `Actif` et clés vitales manquantes |
+| Sheets / AIP | Règles dispersées dans Sheets + prompts | Détection des doublons `Actif` et clés vitales manquantes |
 | Persistance | `ADLG` disponible | Trace courte, puis `TST` si besoin d'historique |
 | Heartbeat | Non présent | Déclencheur futur sans ralentir l'app |
         """.strip()
@@ -306,7 +306,7 @@ def render_admin_recette_continue() -> None:
         """
 - **Diagnostics infra** : reprendre les primitives déjà utilisées par `ui/admin/test_resources.py` pour les secrets, GSheet et GCS.
 - **Smoke IA** : conserver des appels courts et explicites, sans exécution automatique au chargement.
-- **MARPA** : contrôler les statuts via `sheet_row_status_is_live` pour respecter les formes historiques d'`Actif` / `Inactif`.
+- **Sheets (append-only)** : contrôler les statuts via `sheet_row_status_is_live` pour respecter les formes historiques d'`Actif` / `Inactif`.
 - **AIP** : comparer `PROMPT_TEMPLATE_KEYS` avec le résultat de `pick_effective_templates` afin de détecter une clé vitale sans gagnant.
 - **Persistance** : utiliser `admin_changelog` / `ADLG` pour la trace synthétique ; réserver `TST` à une phase ultérieure si les scores doivent être historisés.
         """.strip()

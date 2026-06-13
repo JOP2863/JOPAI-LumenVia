@@ -1095,7 +1095,7 @@ def _render_admin_prompts_editor_section(
     audio_only: bool,
     section_key_suffix: str,
 ) -> None:
-    """Éditeur de prompts MARPA (Sheets `Paramètres_IA`).
+    """Éditeur de prompts IA (Sheets `Paramètres_IA`, append-only).
 
     `audio_only=True` : restreint aux clés `audio_style_*` (Levier B).
     `audio_only=False` : restreint aux clés *non* audio (socle + surcouches texte).

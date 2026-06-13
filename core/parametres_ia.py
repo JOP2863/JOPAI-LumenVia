@@ -50,7 +50,7 @@ def pick_effective_templates(
     allowed_keys: set[str] | None = None,
 ) -> dict[str, ParamIaRow]:
     """
-    Pivot de vérité MARPA.
+    Pivot de vérité Sheets (append-only).
     Sélectionne la meilleure ligne par Clé_Prompt selon:
     - Statut Actif
     - Date_Effet <= aujourd'hui (si fournie)

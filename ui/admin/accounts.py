@@ -1,4 +1,4 @@
-"""Admin — Comptes et abonnés (Sheets `users` / `subscriptions`, MARPA append-only)."""
+"""Admin — Comptes et abonnés (Sheets `users` / `subscriptions`, append-only)."""
 
 from __future__ import annotations
 

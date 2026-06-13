@@ -120,7 +120,7 @@ _PROMPT_TEMPLATE_LABELS: dict[str, str] = {
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint: str) -> dict[str, str]:
     """
-    Charge les prompts IA depuis Google Sheets (onglet `Paramètres_IA`, standard MARPA).
+    Charge les prompts IA depuis Google Sheets (onglet `Paramètres_IA`, append-only).
     Cache court pour éviter de relire Sheets à chaque run Streamlit.
     """
     if not gsheet_id:
@@ -6639,7 +6639,7 @@ def render_admin_plan_consolide() -> None:
       <td>Pilotage éditorial continu ; pas de sources hors AELF.</td>
     </tr>
     <tr>
-      <td>Paramètres IA (Sheets — standard MARPA) + secret sauce</td>
+      <td>Paramètres IA (Google Sheets, append-only) + secret sauce</td>
       <td><span class="lv-st-ok">Livré</span></td>
       <td>
         Admin : édition socle/surcouches dans <code>Paramètres_IA</code> (avec <code>Description</code> lisible) ; secret sauce jamais affichée en clair.
@@ -7333,7 +7333,7 @@ def _render_admin_prompts_editor_section(
     audio_only: bool,
     section_key_suffix: str,
 ) -> None:
-    """Éditeur de prompts MARPA (Sheets `Paramètres_IA`).
+    """Éditeur de prompts IA (Sheets `Paramètres_IA`, append-only).
 
     `audio_only=True` : restreint aux clés `audio_style_*` (Levier B).
     `audio_only=False` : restreint aux clés *non* audio (socle + surcouches texte).
@@ -8491,7 +8491,7 @@ def render_admin_emailing() -> None:
                 st.info("Aucune modification détectée (objet + corps inchangés) — pas de nouvelle ligne.")
             else:
                 # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
-                # (comme MARPA pour Paramètres_IA : append seul laisse l’historique encore « Actif »).
+                # (append seul laisse l’historique encore « Actif » — inactiver d’abord les lignes courantes).
                 from core.sheets_db import _resolve_table_name
 
                 sh_etpl = gs.open_by_key(cfg.gsheet_id)

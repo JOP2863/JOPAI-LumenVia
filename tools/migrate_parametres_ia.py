@@ -119,7 +119,7 @@ def _existing_active_rows(ws) -> dict[str, list[dict[str, object]]]:
 
 
 def main(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(description="Seed MARPA Paramètres_IA depuis les prompts actuels (append-only).")
+    p = argparse.ArgumentParser(description="Seed Paramètres_IA depuis les prompts actuels (append-only).")
     p.add_argument(
         "--secrets",
         default=str(Path(".streamlit") / "secrets.toml"),
@@ -157,7 +157,7 @@ def main(argv: list[str]) -> int:
             continue
         ver = prev + 1
 
-        # MARPA (sans supprimer) : on met à jour EN PLACE les lignes Actif existantes (Statut -> Inactif),
+        # Append-only (sans supprimer) : on met à jour EN PLACE les lignes Actif existantes (Statut -> Inactif),
         # puis on append uniquement la nouvelle version.
         if actives.get(key):
             header = ws.row_values(1)

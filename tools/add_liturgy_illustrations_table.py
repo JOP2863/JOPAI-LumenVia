@@ -2,7 +2,7 @@
 """
 Crée l’onglet **ILUS** pour les illustrations dominicales + entrée dans **AliasTables**.
 
-Colonnes (MARPA + concat) :
+Colonnes (base obligatoire + concat) :
   row_id, entity_id, version, status, created_at,
   date (dimanche ISO), zone, gcs_path,
   description_illustration (légende courte),
