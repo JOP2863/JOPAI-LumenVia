@@ -72,12 +72,13 @@ def load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint:
         return {}
     _ = service_account_fingerprint
 
-    cfg = load_config()
-    if not cfg.gcp_service_account:
+    sa_json = service_account_fingerprint
+    if not sa_json:
+        cfg = load_config()
+        sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+    if not sa_json:
         return {}
-
-    gs = build_gspread_client(cfg.gcp_service_account)
-    rows = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="Paramètres_IA", limit=5000)
+    rows = adm_sheets_fetch_cached(gsheet_id, "Paramètres_IA", 5000, sa_json)
     latest = pick_effective_templates(rows, allowed_keys=set(PROMPT_TEMPLATE_KEYS))
     out = {k: v.content_md for k, v in latest.items() if k in PROMPT_TEMPLATE_KEYS and v.content_md}
     try:
@@ -95,12 +96,14 @@ def load_voix_rules_cached(*, gsheet_id: str, service_account_fingerprint: str) 
     if not gsheet_id:
         return []
     _ = service_account_fingerprint
-    cfg = load_config()
-    if not cfg.gcp_service_account:
+    sa_json = service_account_fingerprint
+    if not sa_json:
+        cfg = load_config()
+        sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+    if not sa_json:
         return []
-    gs = build_gspread_client(cfg.gcp_service_account)
     try:
-        return fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="Voix_Audio", limit=0)
+        return adm_sheets_fetch_cached(gsheet_id, "Voix_Audio", 0, sa_json)
     except Exception:
         return []
 

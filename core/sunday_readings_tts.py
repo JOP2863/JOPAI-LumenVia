@@ -57,6 +57,17 @@ def normalize_liturgy_section_title(title: str) -> str:
     return (title or "").strip()
 
 
+def _trim_to_first_liturgy_section(text: str) -> str:
+    """Coupe tout texte parasite avant « Première lecture. » (consignes / morceaux orphelins)."""
+    t = (text or "").strip()
+    if not t:
+        return t
+    m = re.search(r"(?i)\b(Première lecture|Premiere lecture)\.", t)
+    if m and m.start() > 0:
+        return t[m.start() :].strip()
+    return t
+
+
 def is_liturgy_readings_tts_text(text: str) -> bool:
     """True si le texte provient de ``plain_readings_for_tts`` (lectionnaire dominical)."""
     return bool(re.match(r"(?i)^(?:Première|Premiere) lecture\b", (text or "").strip()))
@@ -135,6 +146,7 @@ def spoken_text_for_tts(body: str) -> str:
     ``Paramètres_IA``) est appliqué ici pour corriger certaines prononciations (ex. Moïse).
     """
     cleaned = strip_tts_admin_preamble((body or "").strip())
+    cleaned = _trim_to_first_liturgy_section(cleaned)
     return apply_tts_pronunciation(cleaned)
 
 

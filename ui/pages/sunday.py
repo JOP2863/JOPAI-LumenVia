@@ -14,17 +14,8 @@ import streamlit as st
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
-from core.sheets_db import (
-    BASE_COLUMNS,
-    TableSpec,
-    append_immutable_row,
-    build_gspread_client,
-    ensure_table,
-    fetch_records,
-    sheet_row_status_is_live,
-    utc_now_iso,
-    with_concat,
-)
+from core.readings_cache_loader import load_aelf_from_readings_cache
+from core.sheets_db import append_immutable_row, build_gspread_client, utc_now_iso
 from core.storage import download_bytes, upload_bytes, upload_text
 from core.local_aelf_cache import load_aelf_snapshot, persist_aelf_snapshot
 from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
@@ -278,72 +269,18 @@ def render_sunday() -> None:
     with st.spinner("Récupération des lectures…"):
         identity = None
         texts = None
-        # 1) Cache Sheets (si disponible)
+        # 1) Cache Sheets RDC (lecture mise en cache — pas d'ensure_table au runtime)
         if cfg.gcp_service_account and cfg.gsheet_id:
             try:
-                from core.sheets_db import TableSpec, ensure_table
-
                 gs = build_gspread_client(cfg.gcp_service_account)
-                ensure_table(
-                    gspread_client=gs,
+                cached_rdc = load_aelf_from_readings_cache(
+                    gs=gs,
                     spreadsheet_id=cfg.gsheet_id,
-                    table=TableSpec(
-                        name="readings_cache",
-                        columns=with_concat(
-                            [
-                                *BASE_COLUMNS,
-                                "date",
-                                "zone",
-                                "periode",
-                                "semaine",
-                                "annee",
-                                "couleur",
-                                "fete",
-                                "jour_liturgique_nom",
-                                "premiere_lecture",
-                                "psaume",
-                                "deuxieme_lecture",
-                                "evangile",
-                                "source",
-                                "error",
-                            ]
-                        ),
-                    ),
+                    date_str=date_str,
+                    zone=zone,
                 )
-                rc = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=6000)
-                hits = [
-                    r
-                    for r in rc
-                    if _readings_cache_date_key(r.get("date")) == date_str[:10]
-                    and str(r.get("zone") or "").strip() == zone
-                    and sheet_row_status_is_live(r.get("status"))
-                    and not str(r.get("error") or "").strip()
-                ]
-                if hits:
-                    best = sorted(hits, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
-                    from core.aelf import AelfDayIdentity, AelfTexts
-
-                    p1 = _normalize_aelf_text_for_cache(str(best.get("premiere_lecture") or "")) or None
-                    ps = _normalize_aelf_text_for_cache(str(best.get("psaume") or "")) or None
-                    p2 = _normalize_aelf_text_for_cache(str(best.get("deuxieme_lecture") or "")) or None
-                    ev = _normalize_aelf_text_for_cache(str(best.get("evangile") or "")) or None
-                    if _readings_have_body(p1, ps, p2, ev):
-                        identity = AelfDayIdentity(
-                            date=str(best.get("date") or date_str[:10]),
-                            zone=str(best.get("zone") or zone),
-                            periode=str(best.get("periode") or "") or None,
-                            semaine=str(best.get("semaine") or "") or None,
-                            annee=str(best.get("annee") or "") or None,
-                            couleur=str(best.get("couleur") or "") or None,
-                            fete=str(best.get("fete") or "") or None,
-                            jour_liturgique_nom=str(best.get("jour_liturgique_nom") or "") or None,
-                        )
-                        texts = AelfTexts(
-                            premiere_lecture=p1,
-                            psaume=ps,
-                            deuxieme_lecture=p2,
-                            evangile=ev,
-                        )
+                if cached_rdc:
+                    identity, texts = cached_rdc
             except Exception:
                 pass
 

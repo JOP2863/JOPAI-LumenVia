@@ -29,7 +29,7 @@ def fetch_existing_readings_audio(
     try:
         day = sheet_day_key(date_str)
         # limit=0 : parcourir tout l’onglet — fetch_records ne fait que tronquer la liste déjà chargée par gspread.
-        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0)
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0, use_cache=True)
         gens_day = [
             g
             for g in gens
@@ -42,7 +42,7 @@ def fetch_existing_readings_audio(
         if not gen_eid:
             return None, None
 
-        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0)
+        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0, use_cache=True)
         aud_rows = [
             a
             for a in audios
@@ -75,7 +75,7 @@ def latest_generation_row_for_sunday(*, gs: object, cfg: object, date_str: str, 
     """Dernière ligne ``generations`` pour un dimanche et une zone."""
     try:
         day = sheet_day_key(date_str)
-        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0)
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0, use_cache=True)
         gens_day = [
             g
             for g in gens
@@ -101,7 +101,7 @@ def has_readings_audio_for_gen(
         return False
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
     try:
-        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0)
+        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0, use_cache=True)
         for a in audios:
             if str(a.get("gen_entity_id") or "").strip() != ge:
                 continue
@@ -131,7 +131,7 @@ def synthesis_audio_gcs_path_for_gen(*, gs: object, cfg: object, gen_entity_id: 
     if not ge:
         return None
     try:
-        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0)
+        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0, use_cache=True)
         rows = [
             a
             for a in audios
@@ -195,7 +195,7 @@ def fetch_existing_sunday_bundle(
     """Dernière génération du jour : (audio bytes, mime) + texte synthèse GCS + path audio."""
     try:
         day = sheet_day_key(date_str)
-        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0)
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0, use_cache=True)
         gens_day = [
             g
             for g in gens
@@ -218,7 +218,7 @@ def fetch_existing_sunday_bundle(
             except Exception:
                 syn_text = None
 
-        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0)
+        audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0, use_cache=True)
         aud_rows = [
             a
             for a in audios

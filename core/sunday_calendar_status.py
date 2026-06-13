@@ -28,8 +28,8 @@ def compute_month_content_status(
     out: dict[str, dict[str, bool]] = {}
     try:
         gs = build_gspread_client(load_config().gcp_service_account)
-        gens = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="generations", limit=6000)
-        aud = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="audio", limit=6000)
+        gens = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="generations", limit=6000, use_cache=True)
+        aud = fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="audio", limit=6000, use_cache=True)
     except Exception:
         gens, aud = [], []
 

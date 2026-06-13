@@ -14,8 +14,17 @@ from core.sunday_readings_tts import (
 )
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
 
+# Modèle TTS Gemini API — GA en priorité (meilleure qualité que preview sur morceaux courts).
+_GEMINI_TTS_MODELS = (
+    "gemini-2.5-flash-tts",
+    "gemini-2.5-flash-preview-tts",
+)
+
 # Pause entre Première lecture / Psaume / Deuxième lecture / Évangile (millisecondes).
 _LITURGY_SECTION_PAUSE_MS = 750
+
+# En dessous de ce seuil, Gemini TTS invente parfois du contenu (ex. « menhirs ») sur un titre seul.
+_MIN_LITURGY_TTS_CHARS = 64
 
 
 def _split_by_size(text: str, *, max_chars: int) -> list[str]:
@@ -27,25 +36,77 @@ def _split_by_size(text: str, *, max_chars: int) -> list[str]:
     return [t[i : i + max_chars] for i in range(0, len(t), max_chars)]
 
 
+def _split_by_size_at_word(text: str, *, max_chars: int) -> list[str]:
+    t = " ".join((text or "").split())
+    if not t:
+        return []
+    if len(t) <= max_chars:
+        return [t]
+    out: list[str] = []
+    rest = t
+    while rest:
+        if len(rest) <= max_chars:
+            out.append(rest)
+            break
+        cut = rest[:max_chars]
+        if " " in cut:
+            cut = cut.rsplit(" ", 1)[0]
+        if not cut:
+            cut = rest[:max_chars]
+        out.append(cut.strip())
+        rest = rest[len(cut) :].strip()
+    return out
+
+
+def _liturgy_section_tts_pieces(title: str, body: str, *, max_chars: int) -> list[str]:
+    """
+    Morceaux TTS d'une section liturgique.
+
+    Le titre (« Première lecture. », etc.) est **toujours** lu avec le début du corps —
+    jamais isolé en morceau de 2 mots (Gemini TTS hallucine alors du contenu inventé).
+    """
+    from core.sunday_readings_tts import normalize_liturgy_section_title
+
+    body = " ".join((body or "").split())
+    if not body:
+        return []
+    title_norm = normalize_liturgy_section_title(title) if title else ""
+    prefix = f"{title_norm}. " if title_norm else ""
+    full = f"{prefix}{body}".strip()
+    if len(full) <= max_chars:
+        return [full]
+    pieces: list[str] = []
+    first_budget = max(max_chars, _MIN_LITURGY_TTS_CHARS) - len(prefix)
+    if first_budget < 32:
+        first_budget = max_chars - len(prefix)
+    first_body = body[:first_budget]
+    if len(body) > first_budget and " " in first_body:
+        first_body = first_body.rsplit(" ", 1)[0]
+    if not first_body:
+        first_body = body[: max_chars - len(prefix)]
+    pieces.append(f"{prefix}{first_body}".strip())
+    rest = body[len(first_body) :].strip()
+    if rest:
+        pieces.extend(_split_by_size_at_word(rest, max_chars=max_chars))
+    return pieces
+
+
 def _liturgy_readings_tts_section_chunks(text: str, *, max_chars: int) -> list[list[str]]:
     """
-    Par section liturgique : un morceau d'annonce seul (« Deuxième lecture. ») puis le corps.
-
-    L'annonce isolée garantit que chaque bloc est nommé à voix haute (Gemini omettait parfois
-    le titre lorsqu'il était collé au début d'un long paragraphe).
+    Par section liturgique : morceaux TTS avec annonce + corps (titre jamais seul).
     """
     grouped: list[list[str]] = []
+    started = False
     for title, body in parse_liturgy_reading_sections(text):
-        section: list[str] = []
-        if title:
-            section.append(f"{title}.")
-        if body:
-            if len(body) <= max_chars:
-                section.append(body)
-            else:
-                section.extend(_split_by_size(body, max_chars=max_chars))
-        if section:
-            grouped.append(section)
+        if not title:
+            if not started:
+                continue
+            pieces = _split_by_size_at_word(body, max_chars=max_chars) if body else []
+        else:
+            started = True
+            pieces = _liturgy_section_tts_pieces(title, body, max_chars=max_chars)
+        if pieces:
+            grouped.append(pieces)
     return grouped
 
 
@@ -113,17 +174,25 @@ def _tts_chunks_to_wav(
     tts_errors: list[str] = []
 
     def _tts_job(i: int, ch: str) -> tuple[int, bytes]:
-        tts_audio = tts_api.generate_audio(
-            model="gemini-2.5-flash-preview-tts",
-            text=ch,
-            voice_name=voice_name,
-        )
-        b, mt, _ = normalize_audio_bytes(audio_bytes=tts_audio.audio_bytes, mime_type=tts_audio.mime_type)
-        if mt != "audio/wav":
-            b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
-        return i, b
+        last_err: Exception | None = None
+        for model in _GEMINI_TTS_MODELS:
+            try:
+                tts_audio = tts_api.generate_audio(
+                    model=model,
+                    text=ch,
+                    voice_name=voice_name,
+                )
+                b, mt, _ = normalize_audio_bytes(
+                    audio_bytes=tts_audio.audio_bytes, mime_type=tts_audio.mime_type
+                )
+                if mt != "audio/wav":
+                    b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
+                return i, b
+            except Exception as ex:
+                last_err = ex
+        raise last_err or RuntimeError("TTS Gemini échoué")
 
-    workers = max(1, min(2, len(chunks)))
+    workers = 1 if len(chunks) <= 2 else max(1, min(2, len(chunks)))
     with ThreadPoolExecutor(max_workers=workers) as ex2:
         futs = [ex2.submit(_tts_job, i, ch) for i, ch in enumerate(chunks)]
         for fut in as_completed(futs):

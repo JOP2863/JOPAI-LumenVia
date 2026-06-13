@@ -11,6 +11,12 @@ from pathlib import Path
 import streamlit as st
 
 from core.config import gemini_api_key_status, load_config, resolve_gemini_api_key
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    load_voix_rules_cached,
+    service_account_json_fingerprint,
+)
 from core.gcp_clients import build_gcs_client
 from core.gemini_tts_catalog import gemini_tts_voice_names_ordered, load_gemini_tts_voice_catalog
 from core.parametres_ia import pick_effective_templates
@@ -249,7 +255,15 @@ def _render_admin_infra_diagnostic(*, cfg: object) -> None:
                     "**readings_cache** = cache lectures pour l’app ; **liturgy_fetches** (LITF) = journal des appels API AELF."
                 )
         except Exception as e:
-            st.error(f"Sheets KO — {e}")
+            msg = str(e)
+            if "429" in msg or "Quota exceeded" in msg:
+                st.error(
+                    "Sheets KO — quota de lectures par minute dépassé (HTTP 429). "
+                    "Attends **60 secondes** sans cliquer dans l'app, puis relance uniquement le diagnostic. "
+                    "Évite d'ouvrir plusieurs pages admin en parallèle."
+                )
+            else:
+                st.error(f"Sheets KO — {e}")
 
     st.divider()
     st.subheader("Dépendances runtime")
@@ -590,11 +604,11 @@ def _render_admin_voix_audio_section(*, cfg: object, gs: object) -> None:
         "La règle la plus **spécifique** l'emporte. Catalogue des voix : `data/gemini_tts_voices.json` (à jour avec la doc Google)."
     )
     try:
-        voix_all = fetch_records(
-            gspread_client=gs,
-            spreadsheet_id=cfg.gsheet_id,
-            table="Voix_Audio",
-            limit=0,
+        voix_all = load_voix_rules_cached(
+            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+            service_account_fingerprint=service_account_json_fingerprint(
+                getattr(cfg, "gcp_service_account", {}) or {}
+            ),
         )
     except Exception as ex_v:
         voix_all = []
@@ -1064,7 +1078,16 @@ def render_admin_test_resources() -> None:
         expanded=False,
         key="adm_res_exp_diag",
     ):
-        _render_admin_infra_diagnostic(cfg=cfg)
+        st.caption(
+            "Pour préserver le quota Google Sheets (~300 lectures/min), le diagnostic complet "
+            "ne se lance **que sur action** (pas à chaque rerun Streamlit)."
+        )
+        if st.button("Lancer / actualiser le diagnostic", key="adm_sheets_diag_run_btn"):
+            st.session_state["adm_sheets_diag_run"] = True
+        if st.session_state.get("adm_sheets_diag_run"):
+            _render_admin_infra_diagnostic(cfg=cfg)
+        else:
+            st.info("Clique sur le bouton ci-dessus pour tester Cloud et Sheets.")
 
     with st.expander(
         "Tests rapides IA (smoke TTS / texte)",
@@ -1077,17 +1100,21 @@ def render_admin_test_resources() -> None:
         st.info("Configure `gsheet_id` + `gcp_service_account` pour gérer voix et prompts.")
         return
 
-    gs = build_gspread_client(cfg.gcp_service_account)
+    sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
     try:
-        rows = fetch_records(
-            gspread_client=gs,
-            spreadsheet_id=cfg.gsheet_id,
-            table="Paramètres_IA",
-            limit=5000,
-        )
+        rows = adm_sheets_fetch_cached(cfg.gsheet_id, "Paramètres_IA", 5000, sa_json)
     except Exception as e:
         rows = []
-        st.warning(f"Lecture `Paramètres_IA` impossible : {e}")
+        msg = str(e)
+        if "429" in msg or "Quota exceeded" in msg:
+            st.warning(
+                "Lecture `Paramètres_IA` reportée — quota Sheets saturé. "
+                "Attends une minute puis recharge la page."
+            )
+        else:
+            st.warning(f"Lecture `Paramètres_IA` impossible : {e}")
+
+    gs = build_gspread_client(cfg.gcp_service_account)
 
     with st.expander(
         "Dictionnaire TTS (prononciation)",
