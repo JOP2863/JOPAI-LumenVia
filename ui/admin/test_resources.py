@@ -312,7 +312,8 @@ def _md_table_cell(raw: object) -> str:
 class _TtsSmokeResult:
     test_id: str
     label: str
-    role: str
+    intention: str
+    production_hint: str
     status: str
     route: str
     duration_s: float | None
@@ -359,7 +360,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
             _TtsSmokeResult(
                 test_id="vertex_tts",
                 label="Vertex TTS",
-                role="Canal GCP prioritaire (allowlist AUDIO)",
+                intention="Vérifier que le **compte GCP** peut produire de l'audio (allowlist Vertex AUDIO).",
+                production_hint="Voie **prioritaire** synthèse + lectures",
                 status="OK",
                 route="vertex_tts",
                 duration_s=dt,
@@ -377,7 +379,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
             _TtsSmokeResult(
                 test_id="vertex_tts",
                 label="Vertex TTS",
-                role="Canal GCP prioritaire (allowlist AUDIO)",
+                intention="Vérifier que le **compte GCP** peut produire de l'audio (allowlist Vertex AUDIO).",
+                production_hint="Voie **prioritaire** synthèse + lectures",
                 status="KO",
                 route="vertex_tts (refusé)",
                 duration_s=dt,
@@ -392,7 +395,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
             _TtsSmokeResult(
                 test_id="gemini_short",
                 label="Gemini API TTS (court)",
-                role="Repli seul (API clé — modèle preview)",
+                intention="Vérifier la **clé GEMINI_API_KEY** en repli (modèle API `preview-tts`, ≠ Vertex).",
+                production_hint="**Repli** si Vertex refuse ou quota",
                 status="Ignoré",
                 route="—",
                 duration_s=None,
@@ -422,7 +426,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                 _TtsSmokeResult(
                     test_id="gemini_short",
                     label="Gemini API TTS (court)",
-                    role="Repli synthèse + lectures",
+                    intention="Vérifier la **clé GEMINI_API_KEY** en repli (modèle API `preview-tts`, ≠ Vertex).",
+                    production_hint="**Repli** si Vertex refuse ou quota",
                     status="OK",
                     route=f"gemini_api ({model_used})",
                     duration_s=dt,
@@ -437,7 +442,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                 _TtsSmokeResult(
                     test_id="gemini_short",
                     label="Gemini API TTS (court)",
-                    role="Repli synthèse + lectures",
+                    intention="Vérifier la **clé GEMINI_API_KEY** en repli (modèle API `preview-tts`, ≠ Vertex).",
+                    production_hint="**Repli** si Vertex refuse ou quota",
                     status="KO",
                     route="gemini_api",
                     duration_s=dt,
@@ -452,7 +458,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
             _TtsSmokeResult(
                 test_id="readings_production",
                 label="Audio lectures (production)",
-                role="Identique à « Compléter les manquants »",
+                intention="Simuler **exactement** le code « Compléter les manquants » (4 lectures AELF lues à voix haute).",
+                production_hint="**Oui** — fichier `AudioLectures/…`",
                 status="Ignoré",
                 route="—",
                 duration_s=None,
@@ -481,7 +488,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                 _TtsSmokeResult(
                     test_id="readings_production",
                     label="Audio lectures (production)",
-                    role="Identique à « Compléter les manquants »",
+                    intention="Simuler **exactement** le code « Compléter les manquants » (4 lectures AELF lues à voix haute).",
+                    production_hint="**Oui** — fichier `AudioLectures/…`",
                     status="OK",
                     route=route_used,
                     duration_s=dt,
@@ -498,7 +506,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                 _TtsSmokeResult(
                     test_id="readings_production",
                     label="Audio lectures (production)",
-                    role="Identique à « Compléter les manquants »",
+                    intention="Simuler **exactement** le code « Compléter les manquants » (4 lectures AELF lues à voix haute).",
+                    production_hint="**Oui** — fichier `AudioLectures/…`",
                     status="KO",
                     route=route_used,
                     duration_s=dt,
@@ -514,7 +523,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
             _TtsSmokeResult(
                 test_id="synthesis_production",
                 label="Audio synthèse (repli)",
-                role="Identique au repli « Tout régénérer »",
+                intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
+                production_hint="**Oui** — fichier `Audio/…`",
                 status="Ignoré",
                 route="—",
                 duration_s=None,
@@ -538,7 +548,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                 _TtsSmokeResult(
                     test_id="synthesis_production",
                     label="Audio synthèse (production)",
-                    role="Vertex TTS direct si allowlist",
+                    intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
+                    production_hint="**Oui** — fichier `Audio/…`",
                     status="OK",
                     route="vertex_tts",
                     duration_s=dt,
@@ -567,7 +578,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                         _TtsSmokeResult(
                             test_id="synthesis_production",
                             label="Audio synthèse (production)",
-                            role="Repli après refus / quota Vertex",
+                            intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
+                            production_hint="**Oui** — repli Gemini morceaux",
                             status="OK",
                             route=route_used,
                             duration_s=dt,
@@ -584,7 +596,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                         _TtsSmokeResult(
                             test_id="synthesis_production",
                             label="Audio synthèse (production)",
-                            role="Repli après refus Vertex",
+                            intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
+                            production_hint="**Oui** — repli Gemini morceaux",
                             status="KO",
                             route=route_used,
                             duration_s=dt,
@@ -599,7 +612,8 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                     _TtsSmokeResult(
                         test_id="synthesis_production",
                         label="Audio synthèse (production)",
-                        role="Vertex TTS",
+                        intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
+                        production_hint="**Oui** — fichier `Audio/…`",
                         status="KO",
                         route="vertex_tts",
                         duration_s=dt,
@@ -613,8 +627,12 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
 
 
 def _render_tts_smoke_results_table(results: list[_TtsSmokeResult]) -> None:
+    st.caption(
+        "**Intention** = ce que ce test vérifie sur la page Ressources. "
+        "**En prod si OK** = ce qui se passe réellement lors de la génération d'un dimanche lorsque le test réussit."
+    )
     lines = [
-        "| Test | Rôle | Statut | Canal effectif | Durée | Taille | Détail |",
+        "| Test | Intention (Ressources) | En prod si OK | Statut | Canal effectif | Durée | Taille | Détail |",
         "|---|---|---|---|---:|---:|---|",
     ]
     for r in results:
@@ -622,18 +640,19 @@ def _render_tts_smoke_results_table(results: list[_TtsSmokeResult]) -> None:
         size = f"{r.bytes_n:,} o".replace(",", " ") if r.bytes_n is not None else "—"
         stat = f"**{r.status}**"
         if r.is_production_path and r.status == "OK":
-            stat = f"**{r.status}** ✓ prod."
+            stat = f"**{r.status}** ✓"
         lines.append(
             "| "
             + " | ".join(
                 [
                     _md_table_cell(r.label),
-                    _md_table_cell(r.role),
+                    _md_table_cell(r.intention),
+                    _md_table_cell(r.production_hint),
                     stat,
                     _md_table_cell(r.route),
                     _md_table_cell(dur),
                     _md_table_cell(size),
-                    _md_table_cell(r.detail[:120]),
+                    _md_table_cell(r.detail[:100]),
                 ]
             )
             + " |"
