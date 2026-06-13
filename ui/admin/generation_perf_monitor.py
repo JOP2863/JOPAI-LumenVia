@@ -16,13 +16,18 @@ from ui.streamlit_caches import adm_sheets_fetch_cached, service_account_json_fi
 
 
 def _load_perf_tables(*, gsheet_id: str, sa_fp: str) -> tuple[list[dict], list[dict], list[dict]]:
-    gen = adm_sheets_fetch_cached(gsheet_id, "generations", 0, sa_fp)
-    aud = adm_sheets_fetch_cached(gsheet_id, "audio", 0, sa_fp)
-    pdf = adm_sheets_fetch_cached(gsheet_id, "pdf_exports", 0, sa_fp)
+    _ACR = {"generations": "GEN", "audio": "AUD", "pdf_exports": "PDFX"}
+    loaded: dict[str, list[dict]] = {}
+    for logical in ("generations", "audio", "pdf_exports"):
+        try:
+            loaded[logical] = adm_sheets_fetch_cached(gsheet_id, logical, 0, sa_fp)
+        except Exception as ex:
+            acr = _ACR.get(logical, logical)
+            raise RuntimeError(f"table {logical!r} (onglet {acr}) — {ex}") from ex
     return (
-        live_generations_with_perf(gen),
-        live_audio_with_perf(aud),
-        live_pdf_with_perf(pdf),
+        live_generations_with_perf(loaded["generations"]),
+        live_audio_with_perf(loaded["audio"]),
+        live_pdf_with_perf(loaded["pdf_exports"]),
     )
 
 
@@ -48,6 +53,13 @@ def render_admin_generation_perf_monitor() -> None:
         gen_rows, aud_rows, pdf_rows = _load_perf_tables(gsheet_id=gsheet_id, sa_fp=sa_fp)
     except Exception as ex:
         st.error(f"Lecture Sheets impossible : {ex}")
+        if "duplicates" in str(ex).lower() or "dupliqu" in str(ex).lower():
+            st.info(
+                "Cause fréquente : une colonne ajoutée à la main existe déjà dans l’en-tête "
+                "(souvent **`zone`** sur **PDFX** ou **GEN**). "
+                "Ouvre l’onglet concerné, repère les deux colonnes identiques en ligne 1, "
+                "supprime celle qui est vide ou en double, puis actualise."
+            )
         return
 
     if not gen_rows and not aud_rows and not pdf_rows:

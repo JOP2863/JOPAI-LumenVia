@@ -967,13 +967,90 @@ def ensure_table(
     _ensure_header(ws, table.columns)
 
 
+def _column_name_key(name: object) -> str:
+    return str(name or "").strip().casefold()
+
+
+def header_duplicate_columns(header: list[str]) -> list[str]:
+    """Noms de colonnes présents plus d'une fois dans la ligne d'en-tête (comparaison insensible à la casse)."""
+    seen: set[str] = set()
+    dups: list[str] = []
+    for raw in header:
+        h = str(raw or "").strip()
+        if not h:
+            continue
+        key = _column_name_key(h)
+        if key in seen and h not in dups:
+            dups.append(h)
+        seen.add(key)
+    return dups
+
+
+def _missing_spec_columns(first_row: list[str], spec_columns: list[str]) -> list[str]:
+    """Colonnes du schéma absentes de l'en-tête actuel (sans recréer un nom déjà présent)."""
+    seen = {_column_name_key(c) for c in first_row if _column_name_key(c)}
+    missing: list[str] = []
+    for col in spec_columns:
+        if col == "concat":
+            continue
+        key = _column_name_key(col)
+        if key and key not in seen:
+            missing.append(col)
+            seen.add(key)
+    return missing
+
+
+def _insert_missing_header_columns(first_row: list[str], missing: list[str]) -> list[str]:
+    """
+    Insère les nouveaux noms de colonnes juste avant ``concat`` (s'il est présent),
+    au lieu de les coller après toute la ligne 1 (ce qui dupliquait par ex. ``zone``).
+    """
+    if not missing:
+        return list(first_row)
+    labels = [str(c or "").strip() for c in first_row]
+    if "concat" in labels:
+        concat_idx = labels.index("concat")
+        return list(first_row[:concat_idx]) + list(missing) + list(first_row[concat_idx:])
+    return list(first_row) + list(missing)
+
+
+def repair_worksheet_duplicate_headers(ws: gspread.Worksheet) -> list[str]:
+    """
+    Supprime les colonnes en double en ligne 1 (conserve la première occurrence de chaque nom).
+    Utile quand des colonnes ont été ajoutées à la main en fin d'onglet avec un nom déjà présent.
+    """
+    header = ws.row_values(1)
+    dups = header_duplicate_columns(header)
+    if not dups:
+        return []
+
+    seen: set[str] = set()
+    to_delete_0based: list[int] = []
+    for i, raw in enumerate(header):
+        h = str(raw or "").strip()
+        if not h:
+            continue
+        key = _column_name_key(h)
+        if key in seen:
+            to_delete_0based.append(i)
+        else:
+            seen.add(key)
+
+    for i in sorted(to_delete_0based, reverse=True):
+        ws.delete_columns(i + 1)
+    return dups
+
+
 def _ensure_header(ws: gspread.Worksheet, header: list[str]) -> None:
     first_row = ws.row_values(1)
     if first_row and [c.strip() for c in first_row if c.strip()]:
-        # Si déjà initialisé : ajoute les colonnes manquantes sans écraser l’en-tête existant.
-        missing = [c for c in header if c not in first_row]
+        dup_cols = header_duplicate_columns(first_row)
+        if dup_cols:
+            repair_worksheet_duplicate_headers(ws)
+            first_row = ws.row_values(1)
+        missing = _missing_spec_columns(first_row, header)
         if missing:
-            ws.update([first_row + missing], "A1")
+            ws.update([_insert_missing_header_columns(first_row, missing)], "A1")
         return
     ws.update([header], "A1")
 
@@ -1003,16 +1080,41 @@ def make_row(values_by_col: Mapping[str, Any], *, status: str = SHEETS_ROW_STATU
 
 
 def compute_concat(row: Mapping[str, Any], *, header: list[str]) -> str:
-    # "concat" = concaténation de toutes les colonnes précédentes dans le header.
+    # "concat" = concaténation de toutes les colonnes précédentes (chaque nom une seule fois).
     parts: list[str] = []
+    seen_cols: set[str] = set()
     for col in header:
-        if col == "concat":
+        if str(col or "").strip() == "concat":
             break
+        key = _column_name_key(col)
+        if not key or key in seen_cols:
+            continue
+        seen_cols.add(key)
         v = row.get(col, "")
+        if v is None:
+            for hk, hv in row.items():
+                if _column_name_key(hk) == key:
+                    v = hv
+                    break
         s = str(v).strip() if v is not None else ""
         if s:
             parts.append(s)
     return " | ".join(parts)
+
+
+def _prepare_worksheet_header_for_append(ws: gspread.Worksheet, *, table: str) -> list[str]:
+    """Répare les doublons d'en-tête et aligne les colonnes manquantes sur le schéma."""
+    repair_worksheet_duplicate_headers(ws)
+    try:
+        spec = get_table_spec(table)
+        _ensure_header(ws, spec.columns)
+    except KeyError:
+        pass
+    header = ws.row_values(1)
+    if header_duplicate_columns(header):
+        repair_worksheet_duplicate_headers(ws)
+        header = ws.row_values(1)
+    return header
 
 
 def append_immutable_row(
@@ -1026,7 +1128,7 @@ def append_immutable_row(
 ) -> dict[str, Any]:
     sh = open_spreadsheet(gspread_client, spreadsheet_id)
     ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
-    header = ws.row_values(1)
+    header = _prepare_worksheet_header_for_append(ws, table=table)
     if not header:
         raise RuntimeError(f"Table '{table}' non initialisée (header vide).")
 
@@ -1081,11 +1183,9 @@ def append_immutable_rows_bulk(
         return 0
     sh = open_spreadsheet(gspread_client, spreadsheet_id)
     ws = sh.worksheet(_resolve_table_name(sh=sh, table=table))
-    header = ws.row_values(1)
+    header = _prepare_worksheet_header_for_append(ws, table=table)
     if not header:
         raise RuntimeError(f"Table '{table}' non initialisée (header vide).")
-
-    rows_payload: list[list[Any]] = []
     for values_by_col in values_by_col_list:
         row = make_row(values_by_col, status=status, version=version)
         row = dict(row)
@@ -1100,6 +1200,62 @@ def append_immutable_rows_bulk(
         added += len(chunk)
     invalidate_fetch_records_cache(spreadsheet_id=spreadsheet_id, table=table)
     return added
+
+
+def _unique_header_keys(header: list[str]) -> list[str]:
+    """Clés uniques pour zip(values) quand l'en-tête Sheets contient des doublons."""
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for raw in header:
+        h = str(raw or "").strip() or "_col"
+        n = seen.get(h, 0)
+        seen[h] = n + 1
+        out.append(h if n == 0 else f"{h}__{n + 1}")
+    return out
+
+
+def _coalesce_duplicate_field_aliases(rec: dict[str, Any]) -> None:
+    """Fusionne ``zone__2`` → ``zone`` (première valeur non vide) après lecture tolérante."""
+    alias_keys = [k for k in rec if "__" in k]
+    bases: set[str] = set()
+    for k in alias_keys:
+        base, suffix = k.rsplit("__", 1)
+        if suffix.isdigit():
+            bases.add(base)
+    for base in bases:
+        if not str(rec.get(base) or "").strip():
+            for i in range(2, 20):
+                alt = f"{base}__{i}"
+                if alt not in rec:
+                    break
+                v = str(rec.get(alt) or "").strip()
+                if v:
+                    rec[base] = rec[alt]
+                    break
+        for k in alias_keys:
+            if k.startswith(f"{base}__") and k.rsplit("__", 1)[-1].isdigit():
+                rec.pop(k, None)
+
+
+def _records_from_worksheet(ws: gspread.Worksheet) -> list[dict[str, Any]]:
+    """
+    Lit un onglet en dicts sans ``get_all_records`` (gspread refuse les en-têtes dupliqués).
+    Les colonnes en double sont lues puis fusionnées (ex. deux ``zone`` → une seule clé ``zone``).
+    """
+    all_values = _gspread_call_with_retry(lambda: ws.get_all_values())
+    if not all_values:
+        return []
+    raw_header = all_values[0]
+    header = _unique_header_keys(raw_header)
+    records: list[dict[str, Any]] = []
+    for row in all_values[1:]:
+        if not any(str(c or "").strip() for c in row):
+            continue
+        padded = list(row) + [""] * max(0, len(header) - len(row))
+        rec = dict(zip(header, padded[: len(header)], strict=False))
+        _coalesce_duplicate_field_aliases(rec)
+        records.append(rec)
+    return records
 
 
 def fetch_records(
@@ -1121,12 +1277,19 @@ def fetch_records(
             return list(cached[1])
 
     sh = open_spreadsheet(gspread_client, sid, use_cache=use_cache)
-    ws = sh.worksheet(_resolve_table_name(sh=sh, table=tbl))
-    # Important: preserve phone numbers like "+336..." and other identifiers as strings.
-    # gspread may "numericise" values (cast to int/float) which would drop leading "+" / zeros.
-    records = _gspread_call_with_retry(
-        lambda: ws.get_all_records(numericise_ignore=["all"])
-    )
+    ws_name = _resolve_table_name(sh=sh, table=tbl)
+    ws = sh.worksheet(ws_name)
+    raw_header = _gspread_call_with_retry(lambda: ws.row_values(1))
+    dup_cols = header_duplicate_columns(raw_header)
+    if dup_cols:
+        import warnings
+
+        warnings.warn(
+            f"Onglet {ws_name!r} (table {tbl!r}) : en-tête avec colonnes dupliquées {dup_cols}. "
+            "Lecture tolérante activée — supprime la colonne en double dans Sheets dès que possible.",
+            stacklevel=2,
+        )
+    records = _records_from_worksheet(ws)
     # limit<=0 ou None : conserve tout l’onglet (important pour tables append-only anciennes lignes en tête).
     if limit is None or limit <= 0:
         out = records
