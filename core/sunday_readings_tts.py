@@ -97,6 +97,58 @@ def parse_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
     return out
 
 
+def coalesce_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
+    """
+    Fusionne les paragraphes orphelins dans la section liturgique précédente.
+
+    Corrige le cas « Première lecture. » (titre seul) suivi du corps sur le paragraphe
+    suivant — sans quoi le TTS lit le corps sans annoncer la section.
+    """
+    sections = parse_liturgy_reading_sections(text)
+    if not sections:
+        return []
+
+    merged: list[tuple[str, str]] = []
+    pending = ""
+
+    for title, body in sections:
+        body = (body or "").strip()
+        if title:
+            full_body = body
+            if pending:
+                full_body = (pending + "\n\n" + body).strip() if body else pending
+                pending = ""
+            merged.append((title, full_body))
+        elif merged:
+            prev_t, prev_b = merged[-1]
+            extra = body
+            if pending:
+                extra = (pending + "\n\n" + body).strip() if body else pending
+                pending = ""
+            merged[-1] = (prev_t, (prev_b + "\n\n" + extra).strip() if prev_b else extra)
+        else:
+            pending = (pending + "\n\n" + body).strip() if pending and body else (body or pending)
+
+    if pending and merged:
+        t0, b0 = merged[0]
+        merged[0] = (t0, (pending + "\n\n" + b0).strip() if b0 else pending)
+    elif pending:
+        merged.append(("", pending))
+
+    fixed: list[tuple[str, str]] = []
+    i = 0
+    while i < len(merged):
+        title, body = merged[i]
+        if title and not body and i + 1 < len(merged) and not merged[i + 1][0]:
+            _, orphan_body = merged[i + 1]
+            fixed.append((title, orphan_body))
+            i += 2
+            continue
+        fixed.append((title, body))
+        i += 1
+    return fixed
+
+
 def strip_tts_admin_preamble(text: str) -> str:
     """
     Retire une consigne ``audio_style_*`` en tête si elle a été concaténée (régression ou cache).
@@ -119,10 +171,9 @@ def strip_tts_admin_preamble(text: str) -> str:
     )
     if not has_admin_lead:
         return t
-    for marker in _READINGS_TTS_SECTION_MARKERS:
-        idx = t.find(marker)
-        if idx > 0:
-            return t[idx:].strip()
+    positions = [t.find(marker) for marker in _READINGS_TTS_SECTION_MARKERS if t.find(marker) >= 0]
+    if positions:
+        return t[min(positions) :].strip()
     # Synthèse ou autre : retirer le premier paragraphe « consigne » si plusieurs blocs.
     parts = [p.strip() for p in re.split(r"\n\s*\n", t) if p.strip()]
     while len(parts) > 1:

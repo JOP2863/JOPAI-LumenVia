@@ -8,6 +8,7 @@ from core.audio_utils import join_wav_bytes, join_wav_with_silence, normalize_au
 from core.gemini_tts_api import GeminiTtsApiClient
 from core.config import resolve_gemini_api_key
 from core.sunday_readings_tts import (
+    coalesce_liturgy_reading_sections,
     is_liturgy_readings_tts_text,
     parse_liturgy_reading_sections,
     spoken_text_for_tts,
@@ -106,12 +107,14 @@ def _liturgy_readings_tts_section_chunks(text: str, *, max_chars: int) -> list[l
     """
     grouped: list[list[str]] = []
     started = False
-    for title, body in parse_liturgy_reading_sections(text):
+    for title, body in coalesce_liturgy_reading_sections(text):
         if not title:
             if not started:
                 continue
             pieces = _split_by_size_at_word(body, max_chars=max_chars) if body else []
         else:
+            if not (body or "").strip():
+                continue
             started = True
             pieces = _liturgy_section_tts_pieces(title, body, max_chars=max_chars)
         if pieces:

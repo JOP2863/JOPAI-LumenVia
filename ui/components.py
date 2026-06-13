@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from html import escape as html_escape
 
 import streamlit as st
+
+# Streamlit n’envoie le calque au navigateur qu’après un court yield ;
+# sans pause, l’étape 1/5 est écrasée par 2/5 avant d’être visible.
+_OVERLAY_FLUSH_S = 0.35
 
 
 def update_loading_overlay(
@@ -13,6 +18,7 @@ def update_loading_overlay(
     *,
     hint: str | None = None,
     elapsed_s: float | None = None,
+    flush: bool = False,
 ) -> None:
     """Met à jour un calque plein écran déjà affiché (progression opération longue)."""
     if slot is None:
@@ -42,10 +48,12 @@ def update_loading_overlay(
 """,
         unsafe_allow_html=True,
     )
+    if flush:
+        time.sleep(_OVERLAY_FLUSH_S)
 
 
-def loading_overlay(message: str = "LumenVia travaille pour toi…") -> object:
+def loading_overlay(message: str = "LumenVia travaille pour toi…", *, flush: bool = True) -> object:
     """Calque plein écran (glassmorphism) pendant une opération serveur longue."""
     slot = st.empty()
-    update_loading_overlay(slot, message)
+    update_loading_overlay(slot, message, flush=flush)
     return slot

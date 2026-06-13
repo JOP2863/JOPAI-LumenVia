@@ -174,26 +174,54 @@ def build_liturgy_cover_pdf_bytes(
             pass
 
     c.setFillColorRGB(0.204, 0.180, 0.161)
-    c.setFont("Helvetica-Bold", 18)
-    title = (week_title or "").strip()[:260]
-    # Titre sur 2 lignes si nécessaire
-    t_lines = [ln.strip() for ln in title.splitlines() if ln.strip()]
-    if len(t_lines) >= 2:
-        # Même police / taille / graisse pour les deux lignes (comme demandé)
-        c.setFont("Helvetica-Bold", 18)
-        c.drawCentredString(w / 2, h / 2 - 3.5 * mm, t_lines[0][:160])
-        c.drawCentredString(w / 2, h / 2 - 13.5 * mm, t_lines[1][:200])
+    title_font = "Helvetica-Bold"
+    title_size = 18.0
+    title_leading = 10 * mm
+    max_title_w = w - 2 * margin
+    c.setFont(title_font, title_size)
+    title_raw = (week_title or "").strip()[:260]
+    if "\n" not in title_raw and " (" in title_raw:
+        title_raw = title_raw.replace(" (", "\n(", 1)
+    title_lines: list[str] = []
+    for block in [ln.strip() for ln in title_raw.splitlines() if ln.strip()]:
+        wrapped = _wrap_cover_lines_for_canvas(
+            c,
+            block,
+            font_name=title_font,
+            font_size=title_size,
+            max_width=max_title_w,
+        )
+        title_lines.extend(wrapped if wrapped else [block])
+    title_lines = title_lines[:4] or [""]
+
+    if len(title_lines) == 1:
+        y_title_top = h / 2 - 8 * mm
     else:
-        c.drawCentredString(w / 2, h / 2 - 8 * mm, (t_lines[0] if t_lines else ""))
+        y_title_top = h / 2 - 3.5 * mm
+    for i, ln in enumerate(title_lines):
+        c.drawCentredString(w / 2, y_title_top - i * title_leading, ln)
+    last_title_y = y_title_top - (len(title_lines) - 1) * title_leading
 
     c.setFont("Helvetica", 11)
     dline = (date_line or "").strip()[:200]
-    c.drawCentredString(w / 2, h / 2 - 22 * mm, dline)
+    y_date = last_title_y - 14 * mm
+    c.drawCentredString(w / 2, y_date, dline)
 
     ml = (meta_line or "").strip()
+    y_meta = y_date - 10 * mm
     if ml:
         c.setFont("Helvetica-Oblique", 9.5)
-        c.drawCentredString(w / 2, h / 2 - 32 * mm, ml[:220])
+        meta_wrapped = _wrap_cover_lines_for_canvas(
+            c,
+            ml[:220],
+            font_name="Helvetica-Oblique",
+            font_size=9.5,
+            max_width=max_title_w,
+        )
+        for j, mln in enumerate(meta_wrapped[:2]):
+            c.drawCentredString(w / 2, y_meta - j * 4.5 * mm, mln)
+        if meta_wrapped:
+            y_meta = y_meta - (min(len(meta_wrapped), 2) - 1) * 4.5 * mm
 
     # Audio : liens cliquables sur la couverture (lectures au-dessus de la synthèse si les deux sont présents).
     ru = (audio_readings_listen_url or "").strip()
@@ -208,8 +236,8 @@ def build_liturgy_cover_pdf_bytes(
         c.linkURL(url, (x, y_pdf - 2, x + tw, y_pdf + 10), relative=0)
 
     # Espace type « retour à la ligne » sous date / ligne méta avant les liens audio (meilleure séparation visuelle).
-    _audio_y_first = h / 2 - 48 * mm
-    _audio_y_second = h / 2 - 64 * mm
+    _audio_y_first = y_meta - 16 * mm
+    _audio_y_second = _audio_y_first - 16 * mm
     last_audio_baseline = _audio_y_first
     if ru and su:
         _cover_audio_link(label="Écouter les lectures", url=ru, y_pdf=_audio_y_first)

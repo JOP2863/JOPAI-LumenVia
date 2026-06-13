@@ -46,9 +46,72 @@ def _flow_overlay_step(
     *,
     hint: str | None = None,
     t0: float | None = None,
+    flush: bool = True,
 ) -> None:
     elapsed = (time.perf_counter() - t0) if t0 is not None else None
-    update_loading_overlay(_overlay, message, hint=hint, elapsed_s=elapsed)
+    update_loading_overlay(_overlay, message, hint=hint, elapsed_s=elapsed, flush=flush)
+
+
+_VERTEX_FINISH_TRUNCATED = frozenset({"MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH"})
+
+
+def _vertex_finish_truncated(finish_reason: object) -> bool:
+    return str(finish_reason or "").strip().upper() in _VERTEX_FINISH_TRUNCATED
+
+
+def _synthesis_min_words(target_words: int) -> int:
+    """Seuil minimal pour publier une synthèse (65 % de la cible principale, hors passerelle)."""
+    return max(80, int(int(target_words) * 0.65))
+
+
+def _synthesis_generation_usable(*, candidate: dict, text: str, min_words: int) -> bool:
+    if _vertex_finish_truncated(candidate.get("finishReason")):
+        return False
+    cites = bool((candidate.get("citationMetadata") or {}).get("citations"))
+    if cites:
+        return False
+    return len((text or "").split()) >= int(min_words)
+
+
+def _flow_result(*, ok: bool, level: str, message: str) -> dict[str, str | bool]:
+    return {"ok": ok, "level": level, "message": message}
+
+
+def _sheet_seconds(v: float | int | None) -> str:
+    if v is None:
+        return ""
+    try:
+        return str(round(float(v), 3))
+    except (TypeError, ValueError):
+        return ""
+
+
+def _append_pdf_export_row(
+    *,
+    gs: object,
+    cfg: object,
+    date_str: str,
+    zone: str,
+    gen_entity_id: str,
+    gcs_path: str,
+    duration_build_s: float,
+) -> None:
+    append_immutable_row(
+        gspread_client=gs,
+        spreadsheet_id=cfg.gsheet_id,
+        table="pdf_exports",
+        values_by_col={
+            "entity_id": sha256(f"pdf|{gen_entity_id}|{gcs_path}".encode("utf-8")).hexdigest()[:24],
+            "range_start": date_str,
+            "range_end": date_str,
+            "zone": zone,
+            "gcs_path": gcs_path,
+            "date_semaine_liturgique": date_str,
+            "gen_entity_id": gen_entity_id,
+            "kind": "fascicule_dimanche",
+            "duration_build_s": _sheet_seconds(duration_build_s),
+        },
+    )
 
 
 def _incremental_flash_payload(*, done: list[str], issues: list[str], skipped: list[str]) -> dict[str, str]:
@@ -232,6 +295,7 @@ def _run_incremental_sunday_outputs(
                             body=readings_plain, templates=templates_ia
                         )
                         vx_read = _readings_tts_vertex_client(cfg)
+                        rt0 = time.perf_counter()
                         r_bytes, r_mime, r_ext = tts_readings_audio_bytes(
                             cfg=cfg,
                             text=readings_tts,
@@ -239,8 +303,11 @@ def _run_incremental_sunday_outputs(
                             vertex_client=vx_read,
                             gemini_api_key=resolve_gemini_api_key(),
                         )
+                        duration_readings_tts_s = round(time.perf_counter() - rt0, 3)
+                        readings_tts_route = last_tts_route()
                     day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
                     readings_path = f"AudioLectures/{day_for_path_inc}/{gen_eid}.{r_ext}"
+                    ru0 = time.perf_counter()
                     upload_bytes(
                         gcs=gcs,
                         bucket_name=cfg.gcs_bucket_name,
@@ -248,6 +315,7 @@ def _run_incremental_sunday_outputs(
                         data=r_bytes,
                         content_type=r_mime,
                     )
+                    duration_readings_upload_s = round(time.perf_counter() - ru0, 3)
                     append_immutable_row(
                         gspread_client=gs,
                         spreadsheet_id=cfg.gsheet_id,
@@ -260,6 +328,10 @@ def _run_incremental_sunday_outputs(
                             "voice": voice_read,
                             "format": r_ext,
                             "gcs_path": readings_path,
+                            "kind": "lectures",
+                            "duration_tts_s": _sheet_seconds(duration_readings_tts_s),
+                            "duration_upload_s": _sheet_seconds(duration_readings_upload_s),
+                            "tts_route": readings_tts_route or "",
                         },
                     )
                     readings_path_this_run = readings_path
@@ -285,6 +357,7 @@ def _run_incremental_sunday_outputs(
                 t0=t_flow,
             )
             with st.spinner("Fascicule PDF sur Cloud…"):
+                tpdf0 = time.perf_counter()
                 img_b = ap._fetch_liturgy_illustration_full_bytes(gcs=gcs, cfg=cfg, date_str=date_str)
                 _base_pub = ""
                 try:
@@ -392,6 +465,15 @@ def _run_incremental_sunday_outputs(
                     data=pdf_b,
                     content_type="application/pdf",
                 )
+                _append_pdf_export_row(
+                    gs=gs,
+                    cfg=cfg,
+                    date_str=date_str,
+                    zone=zone,
+                    gen_entity_id=gen_eid,
+                    gcs_path=fasc_path,
+                    duration_build_s=round(time.perf_counter() - tpdf0, 3),
+                )
                 st.session_state[pdf_key] = pdf_b
                 done.append("fascicule PDF")
         except Exception as ex:
@@ -414,15 +496,20 @@ def _run_generate_sunday_flow(
     generate_readings_audio: bool,
     debug: bool,
     cfg: object,
-) -> None:
+) -> dict[str, str | bool]:
     import app as ap
     t_flow = time.perf_counter()
     date_label = str(getattr(identity, "date", "") or "")
+    retry_fallback_note = ""
     _flow_overlay_step(
         _overlay,
-        "1/5 — Préparation (prompts et voix)…",
-        hint="Aucun fichier Cloud pour l’instant — normal.",
+        "1/4 — Préparation et synthèse écrite (Vertex)…",
+        hint=(
+            "Chargement des prompts (Sheets) puis génération du texte — 1 à 3 min. "
+            f"Le fichier `.txt` apparaîtra dans `Syntheses/{date_label}/` à la fin de cette étape."
+        ),
         t0=t_flow,
+        flush=True,
     )
     target_words = max(80, int(total_words * (pct / 100.0)))
     catechese_bridge_words = (
@@ -499,16 +586,6 @@ def _run_generate_sunday_flow(
 
     vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
     perf: dict[str, float | int | str] = {}
-    _flow_overlay_step(
-        _overlay,
-        "2/5 — Synthèse écrite (Vertex Gemini)…",
-        hint=(
-            "Étape la plus longue au début (1–3 min). "
-            f"Le premier fichier apparaîtra dans `Syntheses/{date_label}/` à la fin de cette étape — "
-            "pas encore dans `Audio/`."
-        ),
-        t0=t_flow,
-    )
     with st.spinner("Génération IA (Gemini)…"):
         t0 = time.perf_counter()
         try:
@@ -528,27 +605,32 @@ def _run_generate_sunday_flow(
         except Exception as e:
             if debug:
                 st.exception(e)
-            else:
-                st.error("Erreur lors de la génération de la synthèse. Active le mode debug pour détails.")
-            return
+            return _flow_result(
+                ok=False,
+                level="error",
+                message="Erreur lors de la génération de la synthèse. Active le mode debug pour les détails.",
+            )
         t1 = time.perf_counter()
         perf["vertex_text_s"] = round(t1 - t0, 3)
 
-    # Fiabilisation : si la sortie est tronquée, on retente automatiquement une fois
-    # avec un modèle moins “pensant” et un budget de sortie maximal.
+    # Fiabilisation : relance si troncature Vertex, citations externes, ou synthèse trop courte.
     cand0 = ((gen.raw or {}).get("candidates") or [{}])[0]
+    if not isinstance(cand0, dict):
+        cand0 = {}
     fr = str(cand0.get("finishReason") or "").strip().upper()
     words_out = len((gen.text or "").split())
-    has_citations = bool((cand0.get("citationMetadata") or {}).get("citations")) if isinstance(cand0, dict) else False
-    looks_truncated = (fr in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (
-        words_out < int(total_words_budget * 0.85)
-    )
-    if looks_truncated or has_citations:
+    has_citations = bool((cand0.get("citationMetadata") or {}).get("citations"))
+    min_words = _synthesis_min_words(int(target_words))
+    hard_truncated = _vertex_finish_truncated(fr)
+    too_short = words_out < min_words
+    needs_retry = hard_truncated or too_short or has_citations
+    if needs_retry:
         _flow_overlay_step(
             _overlay,
-            "2/5 — Relance synthèse (sortie tronquée)…",
+            "1/4 — Relance synthèse (sortie tronquée)…",
             hint="Vertex retente avec un prompt renforcé — encore 1–2 min.",
             t0=t_flow,
+            flush=True,
         )
         # Prompt “durci” : aucune URL / aucune citation / uniquement textes fournis.
         hardened_prefix = templates.get("retry_hardened_prefix") or (
@@ -566,35 +648,48 @@ def _run_generate_sunday_flow(
             )
             perf["vertex_text_retry_s"] = round(time.perf_counter() - t0b, 3)
             cand0b = ((gen2.raw or {}).get("candidates") or [{}])[0]
+            if not isinstance(cand0b, dict):
+                cand0b = {}
             fr2 = str(cand0b.get("finishReason") or "").strip().upper()
             words2 = len((gen2.text or "").split())
-            cites2 = bool((cand0b.get("citationMetadata") or {}).get("citations")) if isinstance(cand0b, dict) else False
-            if (fr2 in ("MAX_TOKENS", "MAX_OUTPUT_TOKENS", "LENGTH")) or (
-                words2 < int(total_words_budget * 0.85)
-            ) or cites2:
-                st.error(
-                    "Synthèse incomplète malgré une relance automatique (MAX_TOKENS ou contenu trop court / citations). "
-                    "Réessaie plus tard, ou réduis le % demandé."
+            cites2 = bool((cand0b.get("citationMetadata") or {}).get("citations"))
+            retry_ok = _synthesis_generation_usable(candidate=cand0b, text=gen2.text or "", min_words=min_words)
+            if retry_ok:
+                gen = gen2
+                cand0 = cand0b
+            elif _synthesis_generation_usable(candidate=cand0, text=gen.text or "", min_words=min_words):
+                retry_fallback_note = (
+                    "Relance Vertex non concluante — la première synthèse a été conservée et publiée."
+                )
+            else:
+                detail = (
+                    f"Relance : finishReason={fr2 or '—'}, {words2} mots"
+                    if debug
+                    else "Réduis le % de longueur ou réessaie dans quelques minutes."
+                )
+                return _flow_result(
+                    ok=False,
+                    level="error",
+                    message=(
+                        "Synthèse incomplète malgré une relance automatique "
+                        "(MAX_TOKENS, texte trop court ou citations). " + detail
+                    ),
+                )
+        except Exception as e:
+            if _synthesis_generation_usable(candidate=cand0, text=gen.text or "", min_words=min_words):
+                retry_fallback_note = (
+                    "Relance Vertex impossible (quota/erreur) — la première synthèse a été conservée."
                 )
                 if debug:
-                    st.write(
-                        {
-                            "finishReason_1": fr,
-                            "words_1": words_out,
-                            "finishReason_2": fr2,
-                            "words_2": words2,
-                            "has_citations_1": has_citations,
-                            "has_citations_2": cites2,
-                        }
-                    )
-                return
-            gen = gen2
-        except Exception as e:
-            if debug:
-                st.exception(e)
+                    st.exception(e)
             else:
-                st.error("Relance automatique impossible (quota/erreur). Réessaie dans quelques minutes.")
-            return
+                if debug:
+                    st.exception(e)
+                return _flow_result(
+                    ok=False,
+                    level="error",
+                    message="Relance automatique impossible (quota/erreur Vertex). Réessaie dans quelques minutes.",
+                )
 
     if debug:
         usage = (gen.raw or {}).get("usageMetadata") or {}
@@ -627,8 +722,7 @@ def _run_generate_sunday_flow(
             )
 
     if not gen.text.strip():
-        st.error("Réponse IA vide.")
-        return
+        return _flow_result(ok=False, level="error", message="Réponse IA vide — aucun fichier publié.")
 
     gcs = build_gcs_client(cfg.gcp_service_account)
     gs = build_gspread_client(cfg.gcp_service_account)
@@ -638,9 +732,10 @@ def _run_generate_sunday_flow(
     text_path = f"Syntheses/{identity.date}/{gen_entity_id}.txt"
     _flow_overlay_step(
         _overlay,
-        "3/5 — Enregistrement texte sur Cloud…",
-        hint=f"Publication de `{text_path}`",
+        "2/4 — Enregistrement texte + audio synthèse…",
+        hint=f"Publication de `{text_path}` puis `Audio/{date_label}/`.",
         t0=t_flow,
+        flush=True,
     )
     ut0 = time.perf_counter()
     upload_text(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=text_path, text=gen.text)
@@ -661,6 +756,10 @@ def _run_generate_sunday_flow(
             "model": gen.model,
             "source_hash": source_hash,
             "text_gcs_path": text_path,
+            "duration_text_s": _sheet_seconds(perf.get("vertex_text_s")),
+            "duration_text_retry_s": _sheet_seconds(perf.get("vertex_text_retry_s") or 0),
+            "duration_upload_text_s": _sheet_seconds(perf.get("upload_text_s")),
+            "text_words": len((gen.text or "").split()),
         },
     )
 
@@ -693,12 +792,13 @@ def _run_generate_sunday_flow(
     audio_route = "vertex"
     _flow_overlay_step(
         _overlay,
-        "3/5 — Audio de la synthèse (TTS morcelé)…",
+        "2/4 — Audio de la synthèse (TTS morcelé)…",
         hint=(
             f"Texte déjà dans `{text_path}`. Découpage en morceaux (~1400 car.) — "
-            f"publication dans `Audio/{date_label}/` à la fin de cette étape."
+            f"publication dans `Audio/{date_label}/` à la fin de cette sous-étape."
         ),
         t0=t_flow,
+        flush=False,
     )
     with st.spinner("Synthèse audio (Vertex AI)…"):
         try:
@@ -719,16 +819,25 @@ def _run_generate_sunday_flow(
         except Exception as e:
             if debug:
                 st.exception(e)
-            else:
-                st.error(
-                    "Échec TTS synthèse. Active le mode debug pour le détail, "
-                    "ou vérifie Vertex TTS / GEMINI_API_KEY (Réglages & diagnostic)."
-                )
-            return
+            return _flow_result(
+                ok=False,
+                level="warning",
+                message=(
+                    f"Synthèse texte enregistrée dans `Syntheses/{date_label}/`, "
+                    "mais l'audio synthèse a échoué. Utilise « Compléter les manquants » "
+                    "ou vérifie Vertex TTS / GEMINI_API_KEY."
+                ),
+            )
 
         if not getattr(audio, "audio_bytes", b""):
-            st.error("Réponse audio vide.")
-            st.stop()
+            return _flow_result(
+                ok=False,
+                level="warning",
+                message=(
+                    f"Synthèse texte enregistrée dans `Syntheses/{date_label}/`, "
+                    "mais la réponse audio était vide."
+                ),
+            )
 
     audio_path = f"Audio/{identity.date}/{gen_entity_id}.{audio_ext}"
     uat0 = time.perf_counter()
@@ -752,6 +861,10 @@ def _run_generate_sunday_flow(
             "voice": voice_syn,
             "format": audio_ext,
             "gcs_path": audio_path,
+            "kind": "synthese",
+            "duration_tts_s": _sheet_seconds(perf.get("audio_vertex_s")),
+            "duration_upload_s": _sheet_seconds(perf.get("upload_audio_s")),
+            "tts_route": audio_route or "",
         },
     )
 
@@ -773,7 +886,7 @@ def _run_generate_sunday_flow(
             try:
                 _flow_overlay_step(
                     _overlay,
-                    "4/5 — Audio des lectures AELF (TTS)…",
+                    "3/4 — Audio des lectures AELF (TTS)…",
                     hint=(
                         "Découpage en plusieurs sections — souvent 3–8 min. "
                         f"Fichier final : `AudioLectures/{date_label}/`. "
@@ -804,6 +917,7 @@ def _run_generate_sunday_flow(
                                 f"(règle `#ID {perf['voice_lectures_rule_id']}`)."
                             )
                     readings_tts = compose_readings_tts_text(body=readings_plain, templates=templates)
+                    rt0 = time.perf_counter()
                     r_bytes, r_mime, r_ext = tts_readings_audio_bytes(
                         cfg=cfg,
                         text=readings_tts,
@@ -811,8 +925,11 @@ def _run_generate_sunday_flow(
                         vertex_client=vx,
                         gemini_api_key=resolve_gemini_api_key(),
                     )
+                    perf["readings_tts_s"] = round(time.perf_counter() - rt0, 3)
+                    readings_tts_route = last_tts_route()
                 day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
                 readings_path = f"AudioLectures/{day_for_path}/{gen_entity_id}.{r_ext}"
+                ru0 = time.perf_counter()
                 upload_bytes(
                     gcs=gcs,
                     bucket_name=cfg.gcs_bucket_name,
@@ -820,6 +937,7 @@ def _run_generate_sunday_flow(
                     data=r_bytes,
                     content_type=r_mime,
                 )
+                perf["readings_upload_s"] = round(time.perf_counter() - ru0, 3)
                 append_immutable_row(
                     gspread_client=gs,
                     spreadsheet_id=cfg.gsheet_id,
@@ -832,6 +950,10 @@ def _run_generate_sunday_flow(
                         "voice": voice_read,
                         "format": r_ext,
                         "gcs_path": readings_path,
+                        "kind": "lectures",
+                        "duration_tts_s": _sheet_seconds(perf.get("readings_tts_s")),
+                        "duration_upload_s": _sheet_seconds(perf.get("readings_upload_s")),
+                        "tts_route": readings_tts_route or "",
                     },
                 )
                 try:
@@ -888,7 +1010,7 @@ def _run_generate_sunday_flow(
         try:
             _flow_overlay_step(
                 _overlay,
-                "5/5 — Fascicule PDF…",
+                "4/4 — Fascicule PDF…",
                 hint=f"Assemblage puis envoi dans `Fascicules/{date_label}/`.",
                 t0=t_flow,
             )
@@ -990,6 +1112,15 @@ def _run_generate_sunday_flow(
                 data=pdf_b,
                 content_type="application/pdf",
             )
+            _append_pdf_export_row(
+                gs=gs,
+                cfg=cfg,
+                date_str=date_str,
+                zone=zone,
+                gen_entity_id=gen_entity_id,
+                gcs_path=fasc_path,
+                duration_build_s=round(time.perf_counter() - tpdf0, 3),
+            )
             st.session_state[f"liturgy_sunday_pdf_{date_str}"] = pdf_b
             perf["pdf_auto_s"] = round(time.perf_counter() - tpdf0, 3)
         except Exception as e:
@@ -1011,3 +1142,12 @@ def _run_generate_sunday_flow(
         )
         st.markdown("**Chronométrage (debug)**")
         st.write(perf)
+
+    parts = [f"Régénération terminée pour {date_label} — texte et audio synthèse publiés."]
+    if generate_readings_audio:
+        parts.append("Audio des lectures inclus.")
+    if generate_pdf:
+        parts.append("Fascicule PDF inclus.")
+    if retry_fallback_note:
+        parts.insert(0, retry_fallback_note)
+    return _flow_result(ok=True, level="success" if not retry_fallback_note else "warning", message=" ".join(parts))

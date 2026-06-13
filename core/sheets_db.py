@@ -741,6 +741,10 @@ def default_tables() -> list[TableSpec]:
                     "model",
                     "source_hash",
                     "text_gcs_path",
+                    "duration_text_s",
+                    "duration_text_retry_s",
+                    "duration_upload_text_s",
+                    "text_words",
                 ]
             ),
         ),
@@ -781,6 +785,10 @@ def default_tables() -> list[TableSpec]:
                     "voice",
                     "format",
                     "gcs_path",
+                    "kind",
+                    "duration_tts_s",
+                    "duration_upload_s",
+                    "tts_route",
                 ]
             ),
         ),
@@ -794,6 +802,10 @@ def default_tables() -> list[TableSpec]:
                     "range_end",
                     "zone",
                     "gcs_path",
+                    "date_semaine_liturgique",
+                    "gen_entity_id",
+                    "kind",
+                    "duration_build_s",
                 ]
             ),
         ),

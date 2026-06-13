@@ -34,12 +34,14 @@ from core.sheets_db import (
 from core.tts_pronunciation import tts_pronunciation_breakdown
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE, resolve_voice
 from ui.components import loading_overlay
+from ui.admin.generation_perf_monitor import render_admin_generation_perf_monitor
 
 # Clés session pour replier les expanders après reconnexion admin (voir `collapse_admin_test_resources_expanders`).
 _ADMIN_RES_EXPANDER_KEYS: tuple[str, ...] = (
     "adm_res_exp_default",
     "adm_res_exp_diag",
     "adm_res_exp_smoke",
+    "adm_res_exp_perf",
     "adm_res_exp_voix",
     "adm_res_exp_tts_pron",
     "adm_res_exp_audio",
@@ -1384,6 +1386,13 @@ def render_admin_test_resources() -> None:
         key="adm_res_exp_smoke",
     ):
         _render_admin_ia_smoke_tests(cfg=cfg)
+
+    with st.expander(
+        "Performance génération (temps par artefact)",
+        expanded=False,
+        key="adm_res_exp_perf",
+    ):
+        render_admin_generation_perf_monitor()
 
     if not (cfg.gsheet_id and cfg.gcp_service_account):
         st.info("Configure `gsheet_id` + `gcp_service_account` pour gérer voix et prompts.")

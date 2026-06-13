@@ -737,8 +737,8 @@ def render_sunday() -> None:
                 "« Compléter les manquants » ajoute seulement ce qui manque encore sur Cloud, selon les cases "
                 "**Audio des lectures** et **fascicule PDF** — sans refaire la synthèse IA. "
                 "« Tout régénérer (long) » relance Vertex + audios ; prévoir **5–10 min** si les lectures sont cochées. "
-                "Le **premier** fichier Cloud est le texte (`Syntheses/…`) après 1–3 min ; les audios suivent. "
-                "L’overlay affiche l’étape en cours et le temps écoulé. "
+                "Progression affichée en **4 étapes** (1/4 synthèse écrite → 2/4 audios synthèse → 3/4 lectures → 4/4 PDF). "
+                "Le **premier** fichier Cloud est le texte (`Syntheses/…`) après l’étape 1/4 ; les audios suivent. "
                 "L’audio passe par **Vertex TTS** en priorité ; si le projet n’est pas "
                 "allowlisté pour l’audio, configure `GEMINI_API_KEY` dans les secrets pour le repli automatique."
             )
@@ -803,9 +803,12 @@ def render_sunday() -> None:
                         finally:
                             overlay_inc.empty()
                 if full_clicked:
-                    overlay = loading_overlay("LumenVia régénère la synthèse et les audios (long)…")
+                    overlay = loading_overlay(
+                        "1/4 — Préparation et synthèse écrite (Vertex)…",
+                        flush=True,
+                    )
                     try:
-                        _run_generate_sunday_flow(
+                        flow_result = _run_generate_sunday_flow(
                             _overlay=overlay,
                             identity=identity,
                             texts=texts,
@@ -819,6 +822,14 @@ def render_sunday() -> None:
                             debug=bool(debug),
                             cfg=cfg,
                         )
+                        if flow_result.get("message"):
+                            _set_sunday_admin_flash(
+                                date_str=date_str,
+                                level=str(flow_result.get("level") or ("success" if flow_result.get("ok") else "error")),
+                                message=str(flow_result.get("message") or ""),
+                            )
+                        if flow_result.get("ok"):
+                            _month_content_status.clear()
                         st.rerun()
                     finally:
                         overlay.empty()
