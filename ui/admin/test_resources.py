@@ -352,6 +352,9 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
             voice_name=voice_name,
         )
         dt = time.perf_counter() - t0
+        from core.sunday_gemini_tts import clear_vertex_tts_allowlist_blocked
+
+        clear_vertex_tts_allowlist_blocked()
         results.append(
             _TtsSmokeResult(
                 test_id="vertex_tts",
@@ -389,7 +392,7 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
             _TtsSmokeResult(
                 test_id="gemini_short",
                 label="Gemini API TTS (court)",
-                role="Repli synthèse + lectures",
+                role="Repli seul (API clé — modèle preview)",
                 status="Ignoré",
                 route="—",
                 duration_s=None,
@@ -403,7 +406,7 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
         audio_b: bytes | None = None
         mime = ""
         model_used = ""
-        for model in ("gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts"):
+        for model in ("gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"):
             try:
                 cli = GeminiTtsApiClient(api_key=str(gemini_key))
                 res = cli.generate_audio(model=model, text=sample_short, voice_name=voice_name)
@@ -424,7 +427,7 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                     route=f"gemini_api ({model_used})",
                     duration_s=dt,
                     bytes_n=len(audio_b),
-                    detail="Clé API détectée — modèle GA en priorité.",
+                    detail="Modèle API : `gemini-2.5-flash-preview-tts` (le GA `flash-tts` est réservé à Vertex).",
                     audio_bytes=audio_b,
                     audio_mime=mime,
                 )
@@ -471,10 +474,9 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                 gemini_api_key=str(gemini_key),
             )
             dt = time.perf_counter() - t0
-            from core.sunday_gemini_tts import vertex_tts_allowlist_blocked
+            from core.sunday_gemini_tts import last_tts_route
 
-            if vertex_tts_allowlist_blocked():
-                route_used = "gemini_api (repli après allowlist Vertex)"
+            route_used = last_tts_route() or "vertex_tts"
             results.append(
                 _TtsSmokeResult(
                     test_id="readings_production",
@@ -556,7 +558,7 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                 try:
                     cli = GeminiTtsApiClient(api_key=str(gemini_key))
                     res = cli.generate_audio(
-                        model="gemini-2.5-flash-tts",
+                        model="gemini-2.5-flash-preview-tts",
                         text=sample_short,
                         voice_name=voice_name,
                     )
@@ -661,12 +663,22 @@ def _production_tts_verdict(*, results: list[_TtsSmokeResult], gemini_key: str |
             + ". Corrige avant de regénérer un dimanche."
         )
     vertex = next((r for r in results if r.test_id == "vertex_tts"), None)
-    if vertex and vertex.status == "KO" and gemini_key:
-        gem = next((r for r in results if r.test_id == "gemini_short"), None)
+    gem = next((r for r in results if r.test_id == "gemini_short"), None)
+    if vertex and vertex.status == "OK":
+        st.info(
+            "Vertex TTS est **opérationnel** sur ce projet (`gemini-2.5-flash-tts` via GCP). "
+            "La génération dominicale utilisera **Vertex en priorité** — meilleure qualité que l'API Gemini seule."
+        )
+        if gem and gem.status == "KO" and "404" in (gem.detail or ""):
+            st.caption(
+                "Le test « Gemini API TTS (court) » en KO est **normal** : le modèle `gemini-2.5-flash-tts` "
+                "n'existe que sur Vertex. Le repli Gemini API utilise `gemini-2.5-flash-preview-tts` si Vertex refuse."
+            )
+    elif vertex and vertex.status == "KO" and gemini_key:
         if gem and gem.status == "OK":
             st.info(
-                "Comportement **normal** sur ton projet : Vertex TTS refuse l'audio (allowlist), "
-                "l'enregistrement passera par **Gemini API TTS** — c'est la méthode attendue chez toi."
+                "Vertex TTS refuse l'audio (allowlist) — l'enregistrement passera par **Gemini API TTS** "
+                "(`gemini-2.5-flash-preview-tts`)."
             )
 
 

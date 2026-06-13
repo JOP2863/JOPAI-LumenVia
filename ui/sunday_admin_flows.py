@@ -666,7 +666,7 @@ def _run_generate_sunday_flow(
                 def _tts_job(i: int, ch: str) -> tuple[int, bytes, float]:
                     ct0 = time.perf_counter()
                     tts_audio = tts_api.generate_audio(
-                        model="gemini-2.5-flash-tts",
+                        model="gemini-2.5-flash-preview-tts",
                         text=ch,
                         voice_name=voice_syn,
                     )

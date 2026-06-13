@@ -14,11 +14,20 @@ from core.sunday_readings_tts import (
 )
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
 
-# Modèle TTS Gemini API — GA en priorité (meilleure qualité que preview sur morceaux courts).
-_GEMINI_TTS_MODELS = (
+# Modèles TTS — l'API Gemini (clé) et Vertex (GCP) n'exposent pas les mêmes noms.
+_GEMINI_API_TTS_MODELS = (
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
+)
+_VERTEX_TTS_MODELS = (
     "gemini-2.5-flash-tts",
     "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
 )
+
+_LAST_TTS_ROUTE_SESSION_KEY = "lumenvia_last_tts_route"
 
 # Pause entre Première lecture / Psaume / Deuxième lecture / Évangile (millisecondes).
 _LITURGY_SECTION_PAUSE_MS = 750
@@ -175,7 +184,7 @@ def _tts_chunks_to_wav(
 
     def _tts_job(i: int, ch: str) -> tuple[int, bytes]:
         last_err: Exception | None = None
-        for model in _GEMINI_TTS_MODELS:
+        for model in _GEMINI_API_TTS_MODELS:
             try:
                 tts_audio = tts_api.generate_audio(
                     model=model,
@@ -212,13 +221,36 @@ def _tts_chunks_to_wav(
     return join_wav_bytes(wav_parts)
 
 
-_VERTEX_TTS_MODELS = (
-    "gemini-2.5-flash-tts",
-    "gemini-2.5-flash-preview-tts",
-    "gemini-2.5-pro-preview-tts",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-)
+_VERTEX_TTS_ALLOWLIST_SESSION_KEY = "lumenvia_vertex_tts_allowlist_blocked"
+
+
+def last_tts_route() -> str:
+    """Canal TTS du dernier appel ``tts_readings_audio_bytes`` (session Streamlit)."""
+    try:
+        import streamlit as st  # type: ignore
+
+        return str(st.session_state.get(_LAST_TTS_ROUTE_SESSION_KEY) or "").strip()
+    except Exception:
+        return ""
+
+
+def _set_last_tts_route(route: str) -> None:
+    try:
+        import streamlit as st  # type: ignore
+
+        st.session_state[_LAST_TTS_ROUTE_SESSION_KEY] = route
+    except Exception:
+        pass
+
+
+def clear_vertex_tts_allowlist_blocked() -> None:
+    """Réinitialise le mémorandum allowlist (ex. après un Vertex TTS réussi)."""
+    try:
+        import streamlit as st  # type: ignore
+
+        st.session_state.pop(_VERTEX_TTS_ALLOWLIST_SESSION_KEY, None)
+    except Exception:
+        pass
 
 
 def vertex_tts_fallback_eligible(exc: BaseException) -> bool:
@@ -227,9 +259,6 @@ def vertex_tts_fallback_eligible(exc: BaseException) -> bool:
     allowlist = ("not allowlisted" in msg) or ("allowlisted" in msg) or ("audio output" in msg and "400" in msg)
     transient = ("429" in msg) or ("quota" in msg) or ("rate" in msg) or ("tempor" in msg) or ("503" in msg)
     return allowlist or transient
-
-
-_VERTEX_TTS_ALLOWLIST_SESSION_KEY = "lumenvia_vertex_tts_allowlist_blocked"
 
 
 def vertex_tts_allowlist_blocked() -> bool:
@@ -372,6 +401,7 @@ def tts_readings_audio_bytes(
     joined: bytes | None = None
     vtx_err: Exception | None = None
     gem_err: Exception | None = None
+    route = ""
     allowlist_blocked = vertex_tts_allowlist_blocked()
     try_vertex = vertex_client is not None and not allowlist_blocked
     if try_vertex:
@@ -382,6 +412,8 @@ def tts_readings_audio_bytes(
                 gemini_api_key=None,
                 vertex_client=vertex_client,
             )
+            clear_vertex_tts_allowlist_blocked()
+            route = "vertex_tts"
         except Exception as ex:
             vtx_err = ex
             mark_vertex_tts_allowlist_blocked(ex)
@@ -397,10 +429,16 @@ def tts_readings_audio_bytes(
                 gemini_api_key=gemini_key,
                 vertex_client=None,
             )
+            route = "gemini_api (repli)" if vtx_err else "gemini_api"
         except Exception as ex:
             gem_err = ex
     if joined is None:
         raise format_tts_unavailable_error(vtx_err=vtx_err, gemini_key=gemini_key, gem_err=gem_err)
+    if vtx_err and route.startswith("gemini"):
+        route = "vertex_tts → gemini_api"
+    elif not route:
+        route = "gemini_api"
+    _set_last_tts_route(route)
     b_out, mime_out, ext_out = normalize_audio_bytes(audio_bytes=joined, mime_type="audio/wav")
     return b_out, mime_out, ext_out
 
