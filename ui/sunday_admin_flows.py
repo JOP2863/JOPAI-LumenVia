@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import sha256
 from pathlib import Path
 
 import streamlit as st
 
-from core.audio_utils import join_wav_bytes, normalize_audio_bytes
+from core.audio_utils import normalize_audio_bytes
 from core.gcp_clients import build_gcs_client
-from core.gemini_tts_api import GeminiTtsApiClient
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
 from core.synthesis_vertex_prompt import (
     CATECHESE_BRIDGE_TARGET_WORDS,
@@ -29,14 +27,28 @@ from core.config import resolve_gemini_api_key
 from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
 from core.readings_cache_loader import load_aelf_from_readings_cache
 from core.sunday_gemini_tts import (
+    last_tts_route,
     mark_vertex_tts_allowlist_blocked,
     tts_readings_audio_bytes,
+    tts_spoken_audio_bytes,
     vertex_tts_allowlist_blocked,
 )
 from core.vertex_gemini import VertexGeminiClient
 from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
+from ui.components import update_loading_overlay
 from ui.pages.about import _ABOUT_MARKDOWN
+
+
+def _flow_overlay_step(
+    _overlay: object,
+    message: str,
+    *,
+    hint: str | None = None,
+    t0: float | None = None,
+) -> None:
+    elapsed = (time.perf_counter() - t0) if t0 is not None else None
+    update_loading_overlay(_overlay, message, hint=hint, elapsed_s=elapsed)
 
 
 def _incremental_flash_payload(*, done: list[str], issues: list[str], skipped: list[str]) -> dict[str, str]:
@@ -114,10 +126,12 @@ def _run_incremental_sunday_outputs(
     also_pdf_if_missing: bool,
     also_readings_if_missing: bool,
     pdf_key: str,
+    _overlay: object | None = None,
 ) -> dict[str, str]:
     """Sans nouvelle synthèse Vertex : audio des lectures (TTS) et/ou fascicule PDF si absents sur Cloud."""
     import app as ap
     date_str = str(identity.date)
+    t_flow = time.perf_counter()
     done: list[str] = []
     issues: list[str] = []
     skipped: list[str] = []
@@ -179,6 +193,16 @@ def _run_incremental_sunday_outputs(
                 )
             else:
                 try:
+                    _flow_overlay_step(
+                        _overlay,
+                        "Audio des lectures (TTS)…",
+                        hint=(
+                            "Plusieurs appels Vertex/Gemini — le fichier n’apparaît dans "
+                            f"`AudioLectures/{date_str}/` qu’à la fin (3–8 min). "
+                            "La synthèse existante reste dans `Syntheses/`."
+                        ),
+                        t0=t_flow,
+                    )
                     with st.spinner("Audio des lectures (TTS)…"):
                         templates_ia: dict[str, str] = {}
                         voix_r: list[dict] = []
@@ -254,6 +278,12 @@ def _run_incremental_sunday_outputs(
             issues.append("Synthèse introuvable — le fascicule PDF ne peut pas être produit.")
     if need_pdf:
         try:
+            _flow_overlay_step(
+                _overlay,
+                "Fascicule PDF sur Cloud…",
+                hint=f"Publication dans `Fascicules/{date_str}/` à la fin de l’assemblage.",
+                t0=t_flow,
+            )
             with st.spinner("Fascicule PDF sur Cloud…"):
                 img_b = ap._fetch_liturgy_illustration_full_bytes(gcs=gcs, cfg=cfg, date_str=date_str)
                 _base_pub = ""
@@ -386,6 +416,14 @@ def _run_generate_sunday_flow(
     cfg: object,
 ) -> None:
     import app as ap
+    t_flow = time.perf_counter()
+    date_label = str(getattr(identity, "date", "") or "")
+    _flow_overlay_step(
+        _overlay,
+        "1/5 — Préparation (prompts et voix)…",
+        hint="Aucun fichier Cloud pour l’instant — normal.",
+        t0=t_flow,
+    )
     target_words = max(80, int(total_words * (pct / 100.0)))
     catechese_bridge_words = (
         CATECHESE_BRIDGE_TARGET_WORDS if include_catechese_bridge else 0
@@ -461,6 +499,16 @@ def _run_generate_sunday_flow(
 
     vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
     perf: dict[str, float | int | str] = {}
+    _flow_overlay_step(
+        _overlay,
+        "2/5 — Synthèse écrite (Vertex Gemini)…",
+        hint=(
+            "Étape la plus longue au début (1–3 min). "
+            f"Le premier fichier apparaîtra dans `Syntheses/{date_label}/` à la fin de cette étape — "
+            "pas encore dans `Audio/`."
+        ),
+        t0=t_flow,
+    )
     with st.spinner("Génération IA (Gemini)…"):
         t0 = time.perf_counter()
         try:
@@ -496,6 +544,12 @@ def _run_generate_sunday_flow(
         words_out < int(total_words_budget * 0.85)
     )
     if looks_truncated or has_citations:
+        _flow_overlay_step(
+            _overlay,
+            "2/5 — Relance synthèse (sortie tronquée)…",
+            hint="Vertex retente avec un prompt renforcé — encore 1–2 min.",
+            t0=t_flow,
+        )
         # Prompt “durci” : aucune URL / aucune citation / uniquement textes fournis.
         hardened_prefix = templates.get("retry_hardened_prefix") or (
             "IMPORTANT — SOURCES: ne cite aucune source externe, aucune URL, aucun site web. "
@@ -582,6 +636,12 @@ def _run_generate_sunday_flow(
     gen_entity_id = sha256(f"{identity.date}|{zone}|{source_hash}".encode("utf-8")).hexdigest()[:24]
 
     text_path = f"Syntheses/{identity.date}/{gen_entity_id}.txt"
+    _flow_overlay_step(
+        _overlay,
+        "3/5 — Enregistrement texte sur Cloud…",
+        hint=f"Publication de `{text_path}`",
+        t0=t_flow,
+    )
     ut0 = time.perf_counter()
     upload_text(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=text_path, text=gen.text)
     perf["upload_text_s"] = round(time.perf_counter() - ut0, 3)
@@ -631,98 +691,45 @@ def _run_generate_sunday_flow(
     )
 
     audio_route = "vertex"
+    _flow_overlay_step(
+        _overlay,
+        "3/5 — Audio de la synthèse (TTS morcelé)…",
+        hint=(
+            f"Texte déjà dans `{text_path}`. Découpage en morceaux (~1400 car.) — "
+            f"publication dans `Audio/{date_label}/` à la fin de cette étape."
+        ),
+        t0=t_flow,
+    )
     with st.spinner("Synthèse audio (Vertex AI)…"):
         try:
             at0 = time.perf_counter()
-            audio = vx.generate_audio_auto(
-                preferred_models=[
-                    "gemini-2.5-flash-preview-tts",
-                    "gemini-2.5-pro-preview-tts",
-                    "gemini-2.5-flash",
-                    "gemini-2.0-flash",
-                ],
+            audio_bytes_norm, audio_mime_norm, audio_ext = tts_spoken_audio_bytes(
+                cfg=cfg,
                 text=tts_payload,
                 voice_name=voice_syn,
+                vertex_client=vx,
+                gemini_api_key=resolve_gemini_api_key(),
             )
             perf["audio_vertex_s"] = round(time.perf_counter() - at0, 3)
+            audio_route = last_tts_route() or "vertex_tts"
+            audio = type("AudioWrap", (), {})()
+            audio.audio_bytes = audio_bytes_norm
+            audio.mime_type = audio_mime_norm
+            audio.model = audio_route
         except Exception as e:
-            # Fallback si Vertex refuse AUDIO (allowlist) OU si erreur transitoire/quota.
-            msg = str(e).lower()
-            allowlist = ("not allowlisted" in msg) or ("allowlisted" in msg)
-            transient = ("429" in msg) or ("quota" in msg) or ("rate" in msg) or ("tempor" in msg) or ("503" in msg)
-            if allowlist:
-                mark_vertex_tts_allowlist_blocked(e)
-            gemini_key = resolve_gemini_api_key() or getattr(cfg, "gemini_api_key", None)
-            if (allowlist or transient) and gemini_key:
-                audio_route = "gemini_api_chunked"
-                ft0 = time.perf_counter()
-                tts_api = GeminiTtsApiClient(api_key=str(gemini_key))
-                chunks = ap._chunk_text_for_tts(tts_payload, max_chars=1400)
-                perf["tts_chunks"] = len(chunks)
-                wav_parts_by_i: dict[int, bytes] = {}
-                tts_chunk_total_s = 0.0
-                tts_errors: list[str] = []
-
-                def _tts_job(i: int, ch: str) -> tuple[int, bytes, float]:
-                    ct0 = time.perf_counter()
-                    tts_audio = tts_api.generate_audio(
-                        model="gemini-2.5-flash-preview-tts",
-                        text=ch,
-                        voice_name=voice_syn,
-                    )
-                    elapsed = time.perf_counter() - ct0
-                    b, mt, _ = normalize_audio_bytes(audio_bytes=tts_audio.audio_bytes, mime_type=tts_audio.mime_type)
-                    if mt != "audio/wav":
-                        b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
-                    return i, b, elapsed
-
-                # Quotas Gemini API : réduire le parallélisme limite les 429.
-                workers = max(1, min(2, len(chunks)))
-                with ThreadPoolExecutor(max_workers=workers) as ex2:
-                    futs = [ex2.submit(_tts_job, i, ch) for i, ch in enumerate(chunks)]
-                    for fut in as_completed(futs):
-                        try:
-                            i, b, elapsed = fut.result()
-                            wav_parts_by_i[i] = b
-                            tts_chunk_total_s += float(elapsed)
-                        except Exception as ex:
-                            tts_errors.append(str(ex))
-
-                if tts_errors or len(wav_parts_by_i) != len(chunks):
-                    st.error(
-                        "Audio incomplet : certains morceaux TTS ont échoué (quota/erreur). "
-                        "Réessaie dans quelques minutes."
-                    )
-                    if debug and tts_errors:
-                        st.write({"tts_errors": tts_errors[:6], "chunks_ok": len(wav_parts_by_i), "chunks_total": len(chunks)})
-                    st.stop()
-
-                wav_parts = [wav_parts_by_i[i] for i in range(len(chunks)) if i in wav_parts_by_i]
-                joined = join_wav_bytes(wav_parts)
-                perf["audio_fallback_s"] = round(time.perf_counter() - ft0, 3)
-                perf["tts_chunk_total_s"] = round(tts_chunk_total_s, 3)
-                audio = type("AudioWrap", (), {})()
-                audio.audio_bytes = joined
-                audio.mime_type = "audio/wav"
-                audio.model = "gemini-api-tts:chunked"
+            if debug:
+                st.exception(e)
             else:
-                # Pas de clé Gemini : on remonte l'erreur.
-                if allowlist and not gemini_key:
-                    st.error(
-                        "Audio indisponible via Vertex AI (compte non allowlist AUDIO). "
-                        "Ajoute/valide GEMINI_API_KEY pour activer le fallback TTS."
-                    )
-                    st.stop()
-                raise
+                st.error(
+                    "Échec TTS synthèse. Active le mode debug pour le détail, "
+                    "ou vérifie Vertex TTS / GEMINI_API_KEY (Réglages & diagnostic)."
+                )
+            return
 
         if not getattr(audio, "audio_bytes", b""):
             st.error("Réponse audio vide.")
             st.stop()
 
-    audio_bytes_norm, audio_mime_norm, audio_ext = normalize_audio_bytes(
-        audio_bytes=getattr(audio, "audio_bytes", b""),
-        mime_type=getattr(audio, "mime_type", None),
-    )
     audio_path = f"Audio/{identity.date}/{gen_entity_id}.{audio_ext}"
     uat0 = time.perf_counter()
     upload_bytes(
@@ -764,6 +771,17 @@ def _run_generate_sunday_flow(
         readings_plain = plain_readings_for_tts(texts)
         if readings_plain.strip():
             try:
+                _flow_overlay_step(
+                    _overlay,
+                    "4/5 — Audio des lectures AELF (TTS)…",
+                    hint=(
+                        "Découpage en plusieurs sections — souvent 3–8 min. "
+                        f"Fichier final : `AudioLectures/{date_label}/`. "
+                        "Rafraîchis la console GCS : les dossiers `Audio/` et `Syntheses/` "
+                        "peuvent déjà contenir la synthèse."
+                    ),
+                    t0=t_flow,
+                )
                 with st.spinner("LumenVia génère l’audio des lectures (AELF)…"):
                     voice_read_res = resolve_voice(
                         voix_rows,
@@ -868,6 +886,12 @@ def _run_generate_sunday_flow(
                 icon="ℹ️",
             )
         try:
+            _flow_overlay_step(
+                _overlay,
+                "5/5 — Fascicule PDF…",
+                hint=f"Assemblage puis envoi dans `Fascicules/{date_label}/`.",
+                t0=t_flow,
+            )
             tpdf0 = time.perf_counter()
             date_str = str(identity.date)
             img_b = ap._fetch_liturgy_illustration_full_bytes(gcs=gcs, cfg=cfg, date_str=date_str)

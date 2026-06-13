@@ -538,12 +538,17 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
         route_used = "vertex_tts"
         try:
             vx = VertexGeminiClient(service_account_info=cfg.gcp_service_account)
-            res = vx.generate_audio_auto(
-                preferred_models=["gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts"],
+            from core.sunday_gemini_tts import last_tts_route, tts_spoken_audio_bytes
+
+            audio_b, mime, _ext = tts_spoken_audio_bytes(
+                cfg=cfg,
                 text=sample_short,
                 voice_name=voice_name,
+                vertex_client=vx,
+                gemini_api_key=str(gemini_key),
             )
             dt = time.perf_counter() - t0
+            route_used = last_tts_route() or "vertex_tts"
             results.append(
                 _TtsSmokeResult(
                     test_id="synthesis_production",
@@ -551,77 +556,31 @@ def _run_tts_smoke_battery(*, cfg: object, gemini_key: str | None, voice_name: s
                     intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
                     production_hint="**Oui** — fichier `Audio/…`",
                     status="OK",
-                    route="vertex_tts",
+                    route=route_used,
                     duration_s=dt,
-                    bytes_n=len(res.audio_bytes or b""),
-                    detail="Vertex TTS disponible — pas de repli Gemini pour la synthèse.",
-                    audio_bytes=res.audio_bytes,
-                    audio_mime=res.mime_type,
+                    bytes_n=len(audio_b),
+                    detail="Même code que « Tout régénérer » (TTS morcelé Vertex → repli Gemini).",
+                    audio_bytes=audio_b,
+                    audio_mime=mime,
                     is_production_path=True,
                 )
             )
         except Exception as ex:
-            msg = str(ex).lower()
-            allowlist = ("allowlisted" in msg) or ("audio output" in msg)
-            transient = ("429" in msg) or ("quota" in msg) or ("503" in msg)
-            if (allowlist or transient) and gemini_key:
-                route_used = "gemini_api_chunked"
-                try:
-                    cli = GeminiTtsApiClient(api_key=str(gemini_key))
-                    res = cli.generate_audio(
-                        model="gemini-2.5-flash-preview-tts",
-                        text=sample_short,
-                        voice_name=voice_name,
-                    )
-                    dt = time.perf_counter() - t0
-                    results.append(
-                        _TtsSmokeResult(
-                            test_id="synthesis_production",
-                            label="Audio synthèse (production)",
-                            intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
-                            production_hint="**Oui** — repli Gemini morceaux",
-                            status="OK",
-                            route=route_used,
-                            duration_s=dt,
-                            bytes_n=len(res.audio_bytes or b""),
-                            detail="Même repli que la génération dominicale.",
-                            audio_bytes=res.audio_bytes,
-                            audio_mime=res.mime_type,
-                            is_production_path=True,
-                        )
-                    )
-                except Exception as ex2:
-                    dt = time.perf_counter() - t0
-                    results.append(
-                        _TtsSmokeResult(
-                            test_id="synthesis_production",
-                            label="Audio synthèse (production)",
-                            intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
-                            production_hint="**Oui** — repli Gemini morceaux",
-                            status="KO",
-                            route=route_used,
-                            duration_s=dt,
-                            bytes_n=None,
-                            detail=str(ex2)[:220],
-                            is_production_path=True,
-                        )
-                    )
-            else:
-                dt = time.perf_counter() - t0
-                results.append(
-                    _TtsSmokeResult(
-                        test_id="synthesis_production",
-                        label="Audio synthèse (production)",
-                        intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
-                        production_hint="**Oui** — fichier `Audio/…`",
-                        status="KO",
-                        route="vertex_tts",
-                        duration_s=dt,
-                        bytes_n=None,
-                        detail=str(ex)[:220],
-                        is_production_path=True,
-                    )
+            dt = time.perf_counter() - t0
+            results.append(
+                _TtsSmokeResult(
+                    test_id="synthesis_production",
+                    label="Audio synthèse (production)",
+                    intention="Simuler le TTS de la **synthèse dominicale** (bouton « Tout régénérer »).",
+                    production_hint="**Oui** — fichier `Audio/…`",
+                    status="KO",
+                    route=route_used,
+                    duration_s=dt,
+                    bytes_n=None,
+                    detail=str(ex)[:220],
+                    is_production_path=True,
                 )
+            )
 
     return results
 

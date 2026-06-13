@@ -257,7 +257,7 @@ def vertex_tts_fallback_eligible(exc: BaseException) -> bool:
     """True si l'échec Vertex TTS justifie un repli Gemini API (allowlist ou quota transitoire)."""
     msg = str(exc).lower()
     allowlist = ("not allowlisted" in msg) or ("allowlisted" in msg) or ("audio output" in msg and "400" in msg)
-    transient = ("429" in msg) or ("quota" in msg) or ("rate" in msg) or ("tempor" in msg) or ("503" in msg)
+    transient = ("429" in msg) or ("quota" in msg) or ("rate" in msg) or ("tempor" in msg) or ("503" in msg) or ("timeout" in msg)
     return allowlist or transient
 
 
@@ -310,8 +310,24 @@ def format_tts_unavailable_error(
 def _tts_vertex_chunks_to_wav(*, vertex_client: object, voice_name: str, chunks: list[str]) -> bytes:
     if not chunks:
         raise ValueError("Texte vide")
-    wav_parts: list[bytes] = []
-    for ch in chunks:
+    if len(chunks) == 1:
+        audio = vertex_client.generate_audio_auto(
+            preferred_models=list(_VERTEX_TTS_MODELS),
+            text=chunks[0],
+            voice_name=voice_name,
+        )
+        b, mt, _ = normalize_audio_bytes(
+            audio_bytes=getattr(audio, "audio_bytes", b""),
+            mime_type=getattr(audio, "mime_type", None),
+        )
+        if mt != "audio/wav":
+            b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
+        return b
+
+    wav_parts_by_i: dict[int, bytes] = {}
+    tts_errors: list[str] = []
+
+    def _vertex_job(i: int, ch: str) -> tuple[int, bytes]:
         audio = vertex_client.generate_audio_auto(
             preferred_models=list(_VERTEX_TTS_MODELS),
             text=ch,
@@ -323,7 +339,25 @@ def _tts_vertex_chunks_to_wav(*, vertex_client: object, voice_name: str, chunks:
         )
         if mt != "audio/wav":
             b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
-        wav_parts.append(b)
+        return i, b
+
+    workers = 1 if len(chunks) <= 2 else max(1, min(2, len(chunks)))
+    with ThreadPoolExecutor(max_workers=workers) as ex2:
+        futs = [ex2.submit(_vertex_job, i, ch) for i, ch in enumerate(chunks)]
+        for fut in as_completed(futs):
+            try:
+                i, b = fut.result()
+                wav_parts_by_i[i] = b
+            except Exception as ex:
+                tts_errors.append(str(ex))
+
+    if tts_errors or len(wav_parts_by_i) != len(chunks):
+        raise RuntimeError(
+            "TTS Vertex incomplet : "
+            + (tts_errors[0][:200] if tts_errors else "morceaux manquants")
+        )
+
+    wav_parts = [wav_parts_by_i[i] for i in range(len(chunks))]
     return join_wav_bytes(wav_parts)
 
 
@@ -380,7 +414,7 @@ def _resolve_tts_gemini_key(*, cfg: object, gemini_api_key: str | None) -> str |
     return resolve_gemini_api_key()
 
 
-def tts_readings_audio_bytes(
+def tts_spoken_audio_bytes(
     *,
     cfg: object,
     text: str,
@@ -389,14 +423,16 @@ def tts_readings_audio_bytes(
     gemini_api_key: str | None = None,
 ) -> tuple[bytes, str, str]:
     """
-    Audio des lectures intégrales : Vertex TTS fragmenté en priorité,
-    repli Gemini API fragmenté (même logique que la synthèse dominicale).
+    TTS morcelé (Vertex puis repli Gemini API) pour synthèse ou lectures.
+
+    Les textes longs sont découpés (~1400 car.) : un seul appel Vertex sur toute
+    la synthèse provoquait des timeouts silencieux (plusieurs minutes sans fichier Audio/).
     """
     if voice_name is None or not str(voice_name).strip():
         voice_name = DEFAULT_GEMINI_TTS_VOICE
     spoken = spoken_text_for_tts(text)
     if not spoken:
-        raise ValueError("Texte des lectures vide")
+        raise ValueError("Texte TTS vide")
     gemini_key = _resolve_tts_gemini_key(cfg=cfg, gemini_api_key=gemini_api_key)
     joined: bytes | None = None
     vtx_err: Exception | None = None
@@ -441,6 +477,24 @@ def tts_readings_audio_bytes(
     _set_last_tts_route(route)
     b_out, mime_out, ext_out = normalize_audio_bytes(audio_bytes=joined, mime_type="audio/wav")
     return b_out, mime_out, ext_out
+
+
+def tts_readings_audio_bytes(
+    *,
+    cfg: object,
+    text: str,
+    voice_name: str | None = None,
+    vertex_client: object | None = None,
+    gemini_api_key: str | None = None,
+) -> tuple[bytes, str, str]:
+    """Audio des lectures intégrales (découpage liturgique + pauses entre sections)."""
+    return tts_spoken_audio_bytes(
+        cfg=cfg,
+        text=text,
+        voice_name=voice_name,
+        vertex_client=vertex_client,
+        gemini_api_key=gemini_api_key,
+    )
 
 
 def tts_gemini_chunked_bytes(*, cfg: object, text: str, voice_name: str | None = None) -> tuple[bytes, str, str]:

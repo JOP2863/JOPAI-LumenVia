@@ -64,6 +64,7 @@ class VertexGeminiClient:
         self.locations = locations or ["europe-west1", "us-central1"]
         self.publisher = publisher
         self._session = requests.Session()
+        self._model_list_cache: dict[str, tuple[float, list[str]]] = {}
 
         self._creds = service_account.Credentials.from_service_account_info(
             self.service_account_info,
@@ -86,6 +87,13 @@ class VertexGeminiClient:
         )
 
     def list_models(self, *, location: str) -> list[str]:
+        loc = (location or "").strip()
+        if not loc:
+            return []
+        now = time.monotonic()
+        cached = self._model_list_cache.get(loc)
+        if cached and (now - cached[0]) < 600.0:
+            return list(cached[1])
         host = _vertex_api_host(location)
         url = (
             f"https://{host}/v1/"
@@ -101,6 +109,7 @@ class VertexGeminiClient:
             name = (m or {}).get("name")
             if isinstance(name, str) and "/models/" in name:
                 out.append(name.split("/models/")[-1])
+        self._model_list_cache[loc] = (now, out)
         return out
 
     def pick_first_available(self, *, preferred: list[str], location: str) -> str | None:
@@ -199,6 +208,7 @@ class VertexGeminiClient:
                     }
                 },
             },
+            timeout_s=300,
         )
 
         b64, mime = _extract_inline_audio(raw)
@@ -231,6 +241,7 @@ class VertexGeminiClient:
                     }
                 },
             },
+            timeout_s=300,
         )
         b64, mime = _extract_inline_audio(raw)
         audio_bytes = base64.b64decode(b64) if b64 else b""

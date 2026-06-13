@@ -736,8 +736,10 @@ def render_sunday() -> None:
             st.caption(
                 "« Compléter les manquants » ajoute seulement ce qui manque encore sur Cloud, selon les cases "
                 "**Audio des lectures** et **fascicule PDF** — sans refaire la synthèse IA. "
-                "« Tout régénérer (long) » relance Vertex + audios ; prévoir plusieurs minutes. "
-                "L’audio (synthèse et lectures) passe par **Vertex TTS** en priorité ; si le projet n’est pas "
+                "« Tout régénérer (long) » relance Vertex + audios ; prévoir **5–10 min** si les lectures sont cochées. "
+                "Le **premier** fichier Cloud est le texte (`Syntheses/…`) après 1–3 min ; les audios suivent. "
+                "L’overlay affiche l’étape en cours et le temps écoulé. "
+                "L’audio passe par **Vertex TTS** en priorité ; si le projet n’est pas "
                 "allowlisté pour l’audio, configure `GEMINI_API_KEY` dans les secrets pour le repli automatique."
             )
             if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
@@ -788,6 +790,7 @@ def render_sunday() -> None:
                                 also_pdf_if_missing=bool(auto_pdf),
                                 also_readings_if_missing=bool(audio_readings_gen),
                                 pdf_key=pdf_key,
+                                _overlay=overlay_inc,
                             )
                             _set_sunday_admin_flash(
                                 date_str=date_str,
