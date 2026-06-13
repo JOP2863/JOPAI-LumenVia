@@ -43,6 +43,18 @@ _LITURGY_SECTION_LINE_RE = re.compile(
 )
 
 
+# Annonce dédiée (≥ _MIN_LITURGY_TTS_CHARS dans sunday_gemini_tts) — évite que Vertex
+# « avale » « Première lecture » au tout début du fichier audio.
+PREMIERE_LECTURE_TTS_INTRO = (
+    "Première lecture. "
+    "Écoutez la première lecture de la Parole, selon le lectionnaire de ce dimanche."
+)
+
+
+def premiere_lecture_tts_intro() -> str:
+    return PREMIERE_LECTURE_TTS_INTRO
+
+
 def normalize_liturgy_section_title(title: str) -> str:
     """Libellé oral canonique pour annoncer une section du lectionnaire."""
     low = (title or "").strip().lower()
@@ -130,10 +142,9 @@ def coalesce_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
             pending = (pending + "\n\n" + body).strip() if pending and body else (body or pending)
 
     if pending and merged:
-        t0, b0 = merged[0]
-        merged[0] = (t0, (pending + "\n\n" + b0).strip() if b0 else pending)
+        merged.insert(0, ("Première lecture", pending))
     elif pending:
-        merged.append(("", pending))
+        merged.insert(0, ("Première lecture", pending))
 
     fixed: list[tuple[str, str]] = []
     i = 0
@@ -171,6 +182,9 @@ def strip_tts_admin_preamble(text: str) -> str:
     )
     if not has_admin_lead:
         return t
+    trimmed = _trim_to_first_liturgy_section(t)
+    if trimmed != t:
+        return trimmed
     positions = [t.find(marker) for marker in _READINGS_TTS_SECTION_MARKERS if t.find(marker) >= 0]
     if positions:
         return t[min(positions) :].strip()

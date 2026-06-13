@@ -14,6 +14,132 @@ from core.sunday_generation_perf import (
 )
 from ui.streamlit_caches import adm_sheets_fetch_cached, service_account_json_fingerprint
 
+# Colonnes du graphique d'évolution — secondes vs mots (deux ordonnées distinctes).
+_SECONDS_SERIES: dict[str, str] = {
+    "duration_text_s": "Texte Vertex — 1re passe (s)",
+    "duration_text_retry_s": "Texte Vertex — relance (s)",
+    "duration_tts_synthese_s": "TTS synthèse (s)",
+    "duration_tts_lectures_s": "TTS lectures (s)",
+    "duration_pdf_s": "PDF (s)",
+}
+_WORDS_SERIES: dict[str, str] = {
+    "text_words": "Mots synthèse",
+}
+
+
+def _render_evolution_dual_axis_chart(df: object) -> None:
+    """Courbes temporelles : ordonnée gauche = secondes, droite = mots (synthèse)."""
+    import pandas as pd
+
+    plot_df = df.copy()
+    if "date" not in plot_df.columns:
+        return
+    plot_df["date"] = pd.to_datetime(plot_df["date"])
+
+    sec_keys = [k for k in _SECONDS_SERIES if k in plot_df.columns and plot_df[k].notna().any()]
+    has_words = "text_words" in plot_df.columns and plot_df["text_words"].notna().any()
+    if not sec_keys and not has_words:
+        st.info("Historique sans colonnes graphiques exploitables.")
+        return
+
+    try:
+        import altair as alt
+
+        layers: list[alt.Chart] = []
+
+        if sec_keys:
+            df_sec = plot_df[["date", *sec_keys]].melt(
+                id_vars="date",
+                value_vars=sec_keys,
+                var_name="metric_key",
+                value_name="seconds",
+            )
+            df_sec = df_sec.dropna(subset=["seconds"])
+            df_sec["metric"] = df_sec["metric_key"].map(_SECONDS_SERIES)
+            layers.append(
+                alt.Chart(df_sec)
+                .mark_line(point={"filled": True, "size": 40})
+                .encode(
+                    x=alt.X("date:T", title="Dimanche"),
+                    y=alt.Y(
+                        "seconds:Q",
+                        title="Secondes",
+                        axis=alt.Axis(titleColor="#0b2745"),
+                    ),
+                    color=alt.Color(
+                        "metric:N",
+                        title="Durées",
+                        scale=alt.Scale(range=["#0b2745", "#0d9488", "#0369a1", "#7c3aed", "#64748b"]),
+                    ),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Dimanche"),
+                        "metric:N",
+                        alt.Tooltip("seconds:Q", title="Valeur", format=".1f"),
+                    ],
+                )
+            )
+
+        if has_words:
+            df_words = plot_df[["date", "text_words"]].dropna(subset=["text_words"])
+            layers.append(
+                alt.Chart(df_words)
+                .mark_line(
+                    point={"filled": True, "size": 46},
+                    color="#b45309",
+                    strokeWidth=2.5,
+                    strokeDash=[6, 3],
+                )
+                .encode(
+                    x=alt.X("date:T", title="Dimanche"),
+                    y=alt.Y(
+                        "text_words:Q",
+                        title="Mots (synthèse)",
+                        axis=alt.Axis(orient="right", titleColor="#b45309"),
+                    ),
+                    tooltip=[
+                        alt.Tooltip("date:T", title="Dimanche"),
+                        alt.Tooltip("text_words:Q", title="Mots synthèse", format="d"),
+                    ],
+                )
+            )
+
+        chart = (
+            alt.layer(*layers)
+            .resolve_scale(y="independent")
+            .properties(height=360)
+            .configure_axis(labelFont="Lora", titleFont="Lora")
+        )
+        st.altair_chart(chart, use_container_width=True)
+    except Exception:
+        sec_present = [k for k in _SECONDS_SERIES if k in plot_df.columns and plot_df[k].notna().any()]
+        if sec_present:
+            st.caption("Évolution — durées (secondes)")
+            st.line_chart(
+                plot_df.set_index("date")[sec_present].rename(columns=_SECONDS_SERIES),
+                height=280,
+            )
+        if has_words:
+            st.caption("Évolution — volume synthèse (mots)")
+            st.line_chart(
+                plot_df.set_index("date")[["text_words"]].rename(columns=_WORDS_SERIES),
+                height=220,
+            )
+
+
+def _render_bar_seconds_only(df: object) -> None:
+    import pandas as pd
+
+    bar_rows: list[dict[str, str | float]] = []
+    for col, label in _SECONDS_SERIES.items():
+        if col not in df.columns:
+            continue
+        avg = mean_metric(df.to_dict("records"), col)
+        if avg is not None and (col != "duration_text_retry_s" or avg > 0):
+            bar_rows.append({"Artefact": label, "Secondes": avg})
+    if bar_rows:
+        bar_df = pd.DataFrame(bar_rows).set_index("Artefact")
+        st.bar_chart(bar_df, height=260)
+
 
 def _load_perf_tables(*, gsheet_id: str, sa_fp: str) -> tuple[list[dict], list[dict], list[dict]]:
     _ACR = {"generations": "GEN", "audio": "AUD", "pdf_exports": "PDFX"}
@@ -36,7 +162,9 @@ def render_admin_generation_perf_monitor() -> None:
     st.caption(
         "Durées enregistrées dans **GEN** (texte), **AUD** (audios) et **PDFX** (fascicules) "
         "à chaque « Tout régénérer » ou « Compléter les manquants ». "
-        "Seules les lignes **Actif** avec au moins une métrique de durée sont prises en compte."
+        "Seules les lignes **Actif** avec au moins une métrique de durée sont prises en compte. "
+        "**Texte Vertex (s)** = temps d’appel API Gemini (1re passe ; relance séparée si besoin) ; "
+        "**Mots synthèse** = longueur du texte produit (volume, pas une durée)."
     )
 
     cfg = load_config()
@@ -86,7 +214,7 @@ def render_admin_generation_perf_monitor() -> None:
         "duration_tts_s",
     )
     c1.metric("Synthèses suivies", n_gen)
-    c2.metric("Temps texte moyen", f"{m_text:.0f} s" if m_text is not None else "—")
+    c2.metric("Vertex 1re passe (moy.)", f"{m_text:.0f} s" if m_text is not None else "—")
     c3.metric("Mots moyens", f"{int(round(m_words))}" if m_words is not None else "—")
     c4.metric("TTS lectures moy.", f"{m_lect:.0f} s" if m_lect is not None else "—")
 
@@ -104,48 +232,39 @@ def render_admin_generation_perf_monitor() -> None:
     import pandas as pd
 
     df = pd.DataFrame(joined)
-    chart_cols = {
-        "duration_text_s": "Texte Vertex (s)",
-        "duration_tts_synthese_s": "TTS synthèse (s)",
-        "duration_tts_lectures_s": "TTS lectures (s)",
-        "duration_pdf_s": "PDF (s)",
-        "text_words": "Mots synthèse",
-    }
-    present = [c for c in chart_cols if c in df.columns and df[c].notna().any()]
-    if not present:
-        st.info("Historique sans colonnes graphiques exploitables.")
-        return
+    drift_labels = {**_SECONDS_SERIES, **_WORDS_SERIES}
 
     st.markdown("#### Évolution par dimanche")
-    plot_df = df.set_index("date")[present].rename(columns={k: chart_cols[k] for k in present})
-    st.line_chart(plot_df, height=320)
+    st.caption(
+        "Ordonnée **gauche** : durées (secondes). Ordonnée **droite** (trait orange) : "
+        "nombre de mots de la synthèse."
+    )
+    _render_evolution_dual_axis_chart(df)
 
-    st.markdown("#### Moyennes par artefact (période affichée)")
-    bar_rows = []
-    for col, label in chart_cols.items():
-        if col not in df.columns:
-            continue
-        avg = mean_metric(df.to_dict("records"), col)
-        if avg is not None:
-            bar_rows.append({"Artefact": label, "Secondes (ou mots)": avg})
-    if bar_rows:
-        bar_df = pd.DataFrame(bar_rows).set_index("Artefact")
-        st.bar_chart(bar_df, height=280)
+    st.markdown("#### Moyennes par artefact — durées (secondes)")
+    _render_bar_seconds_only(df)
+    m_words_avg = mean_metric(df.to_dict("records"), "text_words")
+    if m_words_avg is not None:
+        st.metric("Mots synthèse (moyenne sur la période)", f"{int(round(m_words_avg))} mots")
 
     st.markdown("#### Dérives récentes (derniers 8 dimanches vs moyenne globale)")
     recent = df.tail(8)
     drift_lines: list[str] = []
-    for col, label in chart_cols.items():
+    for col, label in drift_labels.items():
         if col not in df.columns:
             continue
         global_avg = mean_metric(df.to_dict("records"), col)
         recent_avg = mean_metric(recent.to_dict("records"), col)
         if global_avg is None or recent_avg is None or global_avg <= 0:
             continue
+        if col == "duration_text_retry_s" and global_avg <= 0:
+            continue
+        unit = " mots" if col == "text_words" else ""
         delta_pct = ((recent_avg - global_avg) / global_avg) * 100.0
         if abs(delta_pct) >= 15:
             drift_lines.append(
-                f"- **{label}** : {recent_avg:.0f} récent vs {global_avg:.0f} moy. ({delta_pct:+.0f} %)"
+                f"- **{label}** : {recent_avg:.0f}{unit} récent vs {global_avg:.0f}{unit} moy. "
+                f"({delta_pct:+.0f} %)"
             )
     if drift_lines:
         st.warning("Écart notable détecté :\n" + "\n".join(drift_lines))

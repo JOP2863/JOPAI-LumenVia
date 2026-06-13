@@ -10,7 +10,9 @@ from core.config import resolve_gemini_api_key
 from core.sunday_readings_tts import (
     coalesce_liturgy_reading_sections,
     is_liturgy_readings_tts_text,
+    normalize_liturgy_section_title,
     parse_liturgy_reading_sections,
+    premiere_lecture_tts_intro,
     spoken_text_for_tts,
 )
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
@@ -75,17 +77,20 @@ def _liturgy_section_tts_pieces(title: str, body: str, *, max_chars: int) -> lis
     Le titre (« Première lecture. », etc.) est **toujours** lu avec le début du corps —
     jamais isolé en morceau de 2 mots (Gemini TTS hallucine alors du contenu inventé).
     """
-    from core.sunday_readings_tts import normalize_liturgy_section_title
-
     body = " ".join((body or "").split())
     if not body:
         return []
     title_norm = normalize_liturgy_section_title(title) if title else ""
+    if title_norm == "Première lecture":
+        intro = premiere_lecture_tts_intro()
+        pieces: list[str] = [intro]
+        pieces.extend(_split_by_size_at_word(body, max_chars=max_chars))
+        return pieces
     prefix = f"{title_norm}. " if title_norm else ""
     full = f"{prefix}{body}".strip()
     if len(full) <= max_chars:
         return [full]
-    pieces: list[str] = []
+    pieces = []
     first_budget = max(max_chars, _MIN_LITURGY_TTS_CHARS) - len(prefix)
     if first_budget < 32:
         first_budget = max_chars - len(prefix)
@@ -110,6 +115,9 @@ def _liturgy_readings_tts_section_chunks(text: str, *, max_chars: int) -> list[l
     for title, body in coalesce_liturgy_reading_sections(text):
         if not title:
             if not started:
+                if (body or "").strip():
+                    started = True
+                    pieces = _liturgy_section_tts_pieces("Première lecture", body, max_chars=max_chars)
                 continue
             pieces = _split_by_size_at_word(body, max_chars=max_chars) if body else []
         else:
