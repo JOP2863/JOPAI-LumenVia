@@ -150,6 +150,62 @@ _VERTEX_TTS_MODELS = (
 )
 
 
+def vertex_tts_fallback_eligible(exc: BaseException) -> bool:
+    """True si l'échec Vertex TTS justifie un repli Gemini API (allowlist ou quota transitoire)."""
+    msg = str(exc).lower()
+    allowlist = ("not allowlisted" in msg) or ("allowlisted" in msg) or ("audio output" in msg and "400" in msg)
+    transient = ("429" in msg) or ("quota" in msg) or ("rate" in msg) or ("tempor" in msg) or ("503" in msg)
+    return allowlist or transient
+
+
+_VERTEX_TTS_ALLOWLIST_SESSION_KEY = "lumenvia_vertex_tts_allowlist_blocked"
+
+
+def vertex_tts_allowlist_blocked() -> bool:
+    """True si Vertex TTS a déjà refusé l'audio (allowlist) durant cette session Streamlit."""
+    try:
+        import streamlit as st  # type: ignore
+
+        return bool(st.session_state.get(_VERTEX_TTS_ALLOWLIST_SESSION_KEY))
+    except Exception:
+        return False
+
+
+def mark_vertex_tts_allowlist_blocked(exc: BaseException) -> None:
+    msg = str(exc).lower()
+    if ("allowlisted" in msg) or ("audio output" in msg and "400" in msg):
+        try:
+            import streamlit as st  # type: ignore
+
+            st.session_state[_VERTEX_TTS_ALLOWLIST_SESSION_KEY] = True
+        except Exception:
+            pass
+
+
+def format_tts_unavailable_error(
+    *,
+    vtx_err: BaseException | None,
+    gemini_key: str | None,
+    gem_err: BaseException | None = None,
+) -> RuntimeError:
+    if gem_err is not None:
+        return RuntimeError(
+            "Repli Gemini API échoué après refus Vertex TTS : "
+            f"{str(gem_err)[:400]}"
+        )
+    if vtx_err is not None and vertex_tts_fallback_eligible(vtx_err):
+        if not gemini_key:
+            return RuntimeError(
+                "Audio indisponible via Vertex AI (projet non allowlisté pour l'audio). "
+                "Ajoute `GEMINI_API_KEY` dans `.streamlit/secrets.toml` (section IA) puis redémarre l'app."
+            )
+    if vtx_err is not None:
+        return RuntimeError(str(vtx_err))
+    return RuntimeError(
+        "Audio impossible : vérifie Vertex TTS (allowlist AUDIO) ou configure `GEMINI_API_KEY`."
+    )
+
+
 def _tts_vertex_chunks_to_wav(*, vertex_client: object, voice_name: str, chunks: list[str]) -> bytes:
     if not chunks:
         raise ValueError("Texte vide")
@@ -221,8 +277,8 @@ def tts_readings_audio_bytes(
     vertex_client: object | None = None,
 ) -> tuple[bytes, str, str]:
     """
-    Audio des lectures intégrales : Gemini API fragmenté si clé dispo,
-    sinon Vertex TTS fragmenté (même logique que la synthèse dominicale).
+    Audio des lectures intégrales : Vertex TTS fragmenté en priorité,
+    repli Gemini API fragmenté (même logique que la synthèse dominicale).
     """
     if voice_name is None or not str(voice_name).strip():
         voice_name = DEFAULT_GEMINI_TTS_VOICE
@@ -231,8 +287,23 @@ def tts_readings_audio_bytes(
         raise ValueError("Texte des lectures vide")
     gemini_key = str(getattr(cfg, "gemini_api_key", "") or "").strip() or None
     joined: bytes | None = None
+    vtx_err: Exception | None = None
     gem_err: Exception | None = None
-    if gemini_key:
+    try_vertex = vertex_client is not None and not vertex_tts_allowlist_blocked()
+    if try_vertex:
+        try:
+            joined = _tts_chunked_bytes_from_spoken(
+                spoken=spoken,
+                voice_name=str(voice_name),
+                gemini_api_key=None,
+                vertex_client=vertex_client,
+            )
+        except Exception as ex:
+            vtx_err = ex
+            mark_vertex_tts_allowlist_blocked(ex)
+            if not (gemini_key and vertex_tts_fallback_eligible(ex)):
+                raise format_tts_unavailable_error(vtx_err=vtx_err, gemini_key=gemini_key) from ex
+    if joined is None and gemini_key:
         try:
             joined = _tts_chunked_bytes_from_spoken(
                 spoken=spoken,
@@ -243,19 +314,7 @@ def tts_readings_audio_bytes(
         except Exception as ex:
             gem_err = ex
     if joined is None:
-        if vertex_client is None:
-            if gem_err is not None:
-                raise gem_err
-            raise RuntimeError(
-                "Audio des lectures impossible : ajoute GEMINI_API_KEY dans les secrets "
-                "ou vérifie que Vertex TTS (AUDIO) est autorisé sur le projet GCP."
-            )
-        joined = _tts_chunked_bytes_from_spoken(
-            spoken=spoken,
-            voice_name=str(voice_name),
-            gemini_api_key=None,
-            vertex_client=vertex_client,
-        )
+        raise format_tts_unavailable_error(vtx_err=vtx_err, gemini_key=gemini_key, gem_err=gem_err)
     b_out, mime_out, ext_out = normalize_audio_bytes(audio_bytes=joined, mime_type="audio/wav")
     return b_out, mime_out, ext_out
 

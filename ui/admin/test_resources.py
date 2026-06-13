@@ -68,8 +68,46 @@ _AUDIO_PROMPT_KEYS: tuple[str, ...] = (
 )
 
 
+def _render_admin_ai_pipeline_matrix() -> None:
+    """Tableau de référence : quel contenu passe par quelle IA."""
+    st.markdown("#### Matrice IA — contenus du dimanche")
+    st.markdown(
+        """
+| Élément | Généré par IA ? | Service | Modèles / remarque |
+|---|---|---|---|
+| **Synthèse (texte)** | Oui | **Vertex AI** (GCP) | `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-pro-latest`… — prompt = lectures AELF + `Paramètres_IA` |
+| **Audio de la synthèse** | Oui (TTS) | **Vertex TTS** → repli **API Gemini** | `gemini-2.5-flash-preview-tts`… — lit le texte de la synthèse (pas les consignes `audio_style_*`) |
+| **Lectures (texte)** | Non | **API AELF** / cache **`readings_cache`** (RDC) | Textes officiels du lectionnaire — pas de réécriture LLM |
+| **Audio des lectures** | Oui (TTS seul) | **Vertex TTS** → repli **API Gemini** | Même moteurs que la synthèse ; texte découpé par section liturgique (1re lecture, Psaume, Évangile…) |
+| **PDF du dimanche** | Non (assemblage) | **ReportLab** (Python) | Mise en page : illustration + lectures + synthèse + liens audio |
+| **Illustration (couverture)** | Oui *(à part)* | **Vertex** (image) | Générée sur la page admin illustrations, puis intégrée au PDF |
+
+Seuls la **synthèse écrite**, les **deux audios (TTS)** et éventuellement **l’illustration** passent par une IA.
+Les **lectures textuelles** viennent de l’**AELF** ; le **PDF** est un **montage** de contenus déjà produits.
+"""
+    )
+    st.markdown("#### Stratégie audio (TTS) — Vertex ou API Gemini ?")
+    st.markdown(
+        """
+**Recommandation LumenVia : Vertex en priorité, API Gemini en repli.**
+
+| | **Vertex AI** (compte de service GCP) | **API Gemini** (`GEMINI_API_KEY`) |
+|---|---|---|
+| **Rôle** | Voie **production** — même projet GCP que Sheets / GCS / texte | **Repli** si Vertex TTS refuse ou quota temporaire |
+| **Atouts** | Facturation GCP unifiée, pas de clé séparée, aligné avec la synthèse écrite | Fonctionne sans allowlist AUDIO Vertex ; pratique pour morceaux longs |
+| **Limites** | Modèles TTS parfois soumis à une **allowlist** projet | Quotas API plus stricts (429) — morceaux limités et parallélisme réduit |
+
+**Synthèse et lectures utilisent la même logique** : Vertex TTS d’abord, puis Gemini API fragmenté si allowlist / quota / 429.
+La synthèse envoie souvent **un seul appel** Vertex (texte plus court) ; les lectures sont **découpées** par section liturgique car le texte AELF est plus long.
+"""
+    )
+
+
 def _render_admin_default_behavior_summary() -> None:
     """Encart « si je ne touche à rien » : montre le pipeline effectif par défaut."""
+    _render_admin_ai_pipeline_matrix()
+    st.divider()
+    st.markdown("#### Voix TTS par défaut (`Voix_Audio`)")
     st.markdown(
         """
 **Texte de la synthèse** *(inchangé)* :  
