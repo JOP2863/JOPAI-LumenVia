@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import smtplib
-import quopri
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.utils import make_msgid, parseaddr
 import re
 from time import sleep
 
@@ -37,12 +37,22 @@ def send_smtp_email(
     body_text: str,
     body_html: str | None = None,
     html_only: bool = False,
+    reply_to: str | None = None,
+    list_unsubscribe_url: str | None = None,
 ) -> None:
     msg = EmailMessage()
-    msg["From"] = cfg.from_email
+    from_addr = (cfg.from_email or "").strip()
+    msg["From"] = from_addr
     msg["To"] = to_email
-    # Assure un affichage UTF‑8 correct (accents/œ) sur un maximum de clients.
     msg["Subject"] = str(subject or "")
+    if reply_to and str(reply_to).strip():
+        msg["Reply-To"] = str(reply_to).strip()
+    unsub = str(list_unsubscribe_url or "").strip()
+    if unsub.startswith("http://") or unsub.startswith("https://"):
+        msg["List-Unsubscribe"] = f"<{unsub}>"
+    _, from_domain = parseaddr(from_addr)
+    if "@" in from_domain:
+        msg["Message-ID"] = make_msgid(domain=from_domain.split("@", 1)[1])
     text_part = (body_text or "").strip()
     html_part = (body_html or "").strip() if body_html else ""
     if not text_part and html_part:

@@ -761,6 +761,8 @@ def render_emailing_manual_broadcast(
                             body_text=_notice_txt_mail,
                             body_html=html2,
                             html_only=bool(send_email_html_only and send_email_as_html),
+                            reply_to=_secret_get("SMTP_REPLY_TO") or smtp_cfg.from_email,
+                            list_unsubscribe_url=str(values2.get("optout_url") or "").strip() or None,
                         )
                         ok += 1
                         if debug_verbose:
