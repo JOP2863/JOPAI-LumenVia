@@ -489,22 +489,41 @@ audio {
   width: 100%;
 }
 
-/* Identité du jour — lecteurs audio pleine largeur (lectures + synthèse) */
-div[class*="st-key-lv_sunday_readings_audio"] [data-testid="stAudio"],
-div[class*="st-key-lv_sunday_synth_audio"] [data-testid="stAudio"] {
+/* Identité du jour — boîte livrables (liseré couleur liturgique de la semaine) */
+div[class*="st-key-lv_sunday_deliverables_box"] {
+  border: 3px solid var(--liturgie-accent) !important;
+  border-radius: 8px !important;
+  padding: clamp(0.9rem, 2.2vw, 1.35rem) clamp(0.8rem, 2.8vw, 1.45rem) !important;
+  margin: 0 auto 1.1rem !important;
+  max-width: min(44rem, calc(100% - 0.35rem)) !important;
+  background: linear-gradient(
+    165deg,
+    rgba(255, 253, 248, 0.98) 0%,
+    rgba(252, 248, 240, 0.94) 55%,
+    rgba(255, 251, 245, 0.97) 100%
+  ) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.65) inset,
+    0 3px 18px color-mix(in srgb, var(--liturgie-accent) 22%, transparent) !important;
+}
+
+/* Lecteurs audio pleine largeur dans la boîte livrables */
+div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stAudio"] {
   width: 100% !important;
   max-width: 100% !important;
 }
-div[class*="st-key-lv_sunday_readings_audio"] [data-testid="stAudio"] audio,
-div[class*="st-key-lv_sunday_synth_audio"] [data-testid="stAudio"] audio {
+div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stAudio"] audio {
   width: 100% !important;
   max-width: 100% !important;
   display: block !important;
 }
 
-/* Bloc PDF + texte encadré entre les deux audios */
+/* Séparateur discret PDF + texte entre les deux audios */
 div[class*="st-key-lv_sunday_format_actions"] {
-  margin: 0.35rem 0 0.55rem !important;
+  margin: 0.55rem 0 !important;
+  padding: 0.55rem 0 0.35rem !important;
+  border-top: 1px solid color-mix(in srgb, var(--liturgie-accent) 28%, transparent) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--liturgie-accent) 28%, transparent) !important;
 }
 
 /* 7. Correction radicale — Expanders & Selectbox */
