@@ -489,6 +489,24 @@ audio {
   width: 100%;
 }
 
+/* Identité du jour — lecteurs audio pleine largeur (lectures + synthèse) */
+div[class*="st-key-lv_sunday_readings_audio"] [data-testid="stAudio"],
+div[class*="st-key-lv_sunday_synth_audio"] [data-testid="stAudio"] {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+div[class*="st-key-lv_sunday_readings_audio"] [data-testid="stAudio"] audio,
+div[class*="st-key-lv_sunday_synth_audio"] [data-testid="stAudio"] audio {
+  width: 100% !important;
+  max-width: 100% !important;
+  display: block !important;
+}
+
+/* Bloc PDF + texte encadré entre les deux audios */
+div[class*="st-key-lv_sunday_format_actions"] {
+  margin: 0.35rem 0 0.55rem !important;
+}
+
 /* 7. Correction radicale — Expanders & Selectbox */
 
 [data-testid="stExpander"] summary {

@@ -66,6 +66,14 @@ def _show_sunday_admin_flash(date_str: str) -> None:
         st.info(message)
 
 
+def _sunday_identity_audio(data: bytes, mime: str) -> None:
+    """Lecteur audio pleine largeur (Streamlit ≥ 1.56 : ``width='stretch'``)."""
+    try:
+        st.audio(data, format=mime, width="stretch")
+    except TypeError:
+        st.audio(data, format=mime)
+
+
 def render_sunday() -> None:
     import app as ap
     st.title("La Lumière du Dimanche")
@@ -410,7 +418,7 @@ def render_sunday() -> None:
 
     st.subheader("Identité du jour")
     with st.container():
-        # Formats publiés : intro selon le nombre réel, puis Pdf / Audio synthèse / Texte (colonnes) + bloc lectures audio.
+        # Formats publiés : lectures audio (pleine largeur) → PDF + texte (encadrés) → synthèse audio (pleine largeur).
         has_pdf_fmt = bool(pdf_bytes_for_user)
         has_audio_fmt = bundle_audio is not None
         has_text_fmt = bool((bundle_synth_text or "").strip())
@@ -450,53 +458,56 @@ def render_sunday() -> None:
         )
 
         if has_readings_fmt:
-            st.markdown(
-                "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.4;color:#5f4f3a;"
-                "font-size:0.95rem;\"><strong>Écouter les lectures (intégrales)</strong></p>",
-                unsafe_allow_html=True,
-            )
-            st.audio(bundle_readings_audio[0], format=bundle_readings_audio[1])
-
-        if has_pdf_fmt or has_text_fmt or has_audio_fmt:
-            col_pdf, col_texte = st.columns(2, gap="medium")
-            with col_pdf:
-                if has_pdf_fmt:
-                    st.download_button(
-                        label="Télécharger le PDF du dimanche",
-                        data=pdf_bytes_for_user,
-                        file_name=f"lumenvia_dimanche_{date_str}.pdf",
-                        mime="application/pdf",
-                        key=f"dl_sunday_top_{date_str}",
-                        type="secondary",
-                        use_container_width=True,
-                    )
-                else:
-                    st.caption("PDF indisponible pour cette date.")
-            with col_texte:
-                with st.expander("Lire le texte de cette synthèse", expanded=False):
-                    if has_text_fmt:
-                        st.markdown(bundle_synth_text)
-                    elif has_audio_fmt:
-                        st.info(
-                            "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
-                            "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
-                        )
-                    else:
-                        st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
-
-        if has_audio_fmt:
-            st.markdown(
-                "<p style=\"text-align:center;margin:0.65rem 0 0.35rem;line-height:1.4;color:#5f4f3a;"
-                "font-size:0.95rem;\"><strong>Audio de la synthèse</strong></p>",
-                unsafe_allow_html=True,
-            )
-            if bundle_from_disk:
+            with st.container(key="lv_sunday_readings_audio"):
                 st.markdown(
-                    "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.35;"
-                    "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
+                    "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.4;color:#5f4f3a;"
+                    "font-size:0.95rem;\"><strong>Écouter les lectures (intégrales)</strong></p>",
                     unsafe_allow_html=True,
                 )
-            st.audio(bundle_audio[0], format=bundle_audio[1])
+                _sunday_identity_audio(bundle_readings_audio[0], bundle_readings_audio[1])
+
+        if has_pdf_fmt or has_text_fmt:
+            with st.container(border=True, key="lv_sunday_format_actions"):
+                col_pdf, col_texte = st.columns(2, gap="medium")
+                with col_pdf:
+                    if has_pdf_fmt:
+                        st.download_button(
+                            label="Télécharger le PDF du dimanche",
+                            data=pdf_bytes_for_user,
+                            file_name=f"lumenvia_dimanche_{date_str}.pdf",
+                            mime="application/pdf",
+                            key=f"dl_sunday_top_{date_str}",
+                            type="secondary",
+                            use_container_width=True,
+                        )
+                    else:
+                        st.caption("PDF indisponible pour cette date.")
+                with col_texte:
+                    with st.expander("Lire le texte de cette synthèse", expanded=False):
+                        if has_text_fmt:
+                            st.markdown(bundle_synth_text)
+                        elif has_audio_fmt:
+                            st.info(
+                                "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
+                                "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
+                            )
+                        else:
+                            st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
+
+        if has_audio_fmt:
+            with st.container(key="lv_sunday_synth_audio"):
+                st.markdown(
+                    "<p style=\"text-align:center;margin:0.65rem 0 0.35rem;line-height:1.4;color:#5f4f3a;"
+                    "font-size:0.95rem;\"><strong>Audio de la synthèse</strong></p>",
+                    unsafe_allow_html=True,
+                )
+                if bundle_from_disk:
+                    st.markdown(
+                        "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.35;"
+                        "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
+                        unsafe_allow_html=True,
+                    )
+                _sunday_identity_audio(bundle_audio[0], bundle_audio[1])
         elif has_readings_fmt or has_pdf_fmt or has_text_fmt:
             st.markdown(
                 "<p style=\"text-align:center;margin:0.65rem 0 0.25rem;line-height:1.4;color:#5f4f3a;"
