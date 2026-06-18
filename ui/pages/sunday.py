@@ -485,7 +485,7 @@ def render_sunday() -> None:
                 else:
                     st.caption("PDF indisponible pour cette date.")
             with col_texte:
-                with st.expander("Lire le texte de cette synthèse", expanded=False):
+                with st.expander("Lire le texte de cette synthèse\n\u00a0", expanded=False):
                     if has_text_fmt:
                         st.markdown(bundle_synth_text)
                     elif has_audio_fmt:

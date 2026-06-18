@@ -501,7 +501,7 @@ h2.lv-sunday-identity-heading {
   border-bottom: 2.5px solid var(--liturgie-accent) !important;
 }
 
-/* Cadre : prolonge le filet du titre (côtés + bas), sans double trait en haut */
+/* Cadre extérieur : même liseré que le filet sous le titre (remplace le gris Streamlit) */
 div[class*="st-key-lv_sunday_deliverables_box"] {
   margin: 0 0 1.15rem !important;
   max-width: 100% !important;
@@ -527,12 +527,33 @@ div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stAudio"] audio {
   display: block !important;
 }
 
-/* Séparateur discret entre les deux audios (PDF + texte) */
-div[class*="st-key-lv_sunday_deliverables_box"] div[data-testid="stHorizontalBlock"] {
-  margin: 0.5rem 0 !important;
-  padding: 0.45rem 0 !important;
-  border-top: 1px solid color-mix(in srgb, var(--liturgie-accent) 32%, transparent) !important;
-  border-bottom: 1px solid color-mix(in srgb, var(--liturgie-accent) 32%, transparent) !important;
+/* PDF + texte : même hauteur, sans cadre interne */
+div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stHorizontalBlock"] {
+  align-items: stretch !important;
+  margin: 0.55rem 0 !important;
+}
+div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="column"] {
+  display: flex !important;
+  flex-direction: column !important;
+}
+div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="column"] > div[data-testid="stVerticalBlock"] {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+div[class*="st-key-lv_sunday_deliverables_box"] button[kind="secondary"],
+div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stExpander"] {
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  margin: 0 !important;
+}
+div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stExpander"] summary {
+  min-height: 64px !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: pre-line !important;
 }
 
 /* 7. Correction radicale — Expanders & Selectbox */
