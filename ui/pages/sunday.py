@@ -416,8 +416,11 @@ def render_sunday() -> None:
         + (texts.evangile or "")
     )
 
-    st.subheader("Identité du jour")
-    # Livrables numériques : boîte liserée couleur liturgique de la semaine.
+    st.markdown(
+        '<h2 class="lv-sunday-identity-heading">Identité du jour</h2>',
+        unsafe_allow_html=True,
+    )
+    # Livrables numériques : cadre complet (filet liturgique) sous le titre.
     has_pdf_fmt = bool(pdf_bytes_for_user)
     has_audio_fmt = bundle_audio is not None
     has_text_fmt = bool((bundle_synth_text or "").strip())
@@ -450,7 +453,7 @@ def render_sunday() -> None:
             f"<strong style=\"color:#584610;\">{date_prep}</strong>.</span>"
         )
 
-    with st.container(key="lv_sunday_deliverables_box"):
+    with st.container(border=True, key="lv_sunday_deliverables_box"):
         st.markdown(
             f"<p style=\"font-size:clamp(0.95rem, 0.35vw + 0.94rem, 1.06rem);line-height:1.52;"
             f"text-align:center;text-wrap:balance;max-width:min(42rem,calc(100% - 0.75rem));"
@@ -467,32 +470,31 @@ def render_sunday() -> None:
             _sunday_identity_audio(bundle_readings_audio[0], bundle_readings_audio[1])
 
         if has_pdf_fmt or has_text_fmt:
-            with st.container(key="lv_sunday_format_actions"):
-                col_pdf, col_texte = st.columns(2, gap="medium")
-                with col_pdf:
-                    if has_pdf_fmt:
-                        st.download_button(
-                            label="Télécharger le PDF du dimanche",
-                            data=pdf_bytes_for_user,
-                            file_name=f"lumenvia_dimanche_{date_str}.pdf",
-                            mime="application/pdf",
-                            key=f"dl_sunday_top_{date_str}",
-                            type="secondary",
-                            use_container_width=True,
+            col_pdf, col_texte = st.columns(2, gap="medium")
+            with col_pdf:
+                if has_pdf_fmt:
+                    st.download_button(
+                        label="Télécharger le PDF du dimanche",
+                        data=pdf_bytes_for_user,
+                        file_name=f"lumenvia_dimanche_{date_str}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_sunday_top_{date_str}",
+                        type="secondary",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("PDF indisponible pour cette date.")
+            with col_texte:
+                with st.expander("Lire le texte de cette synthèse", expanded=False):
+                    if has_text_fmt:
+                        st.markdown(bundle_synth_text)
+                    elif has_audio_fmt:
+                        st.info(
+                            "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
+                            "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
                         )
                     else:
-                        st.caption("PDF indisponible pour cette date.")
-                with col_texte:
-                    with st.expander("Lire le texte de cette synthèse", expanded=False):
-                        if has_text_fmt:
-                            st.markdown(bundle_synth_text)
-                        elif has_audio_fmt:
-                            st.info(
-                                "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
-                                "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
-                            )
-                        else:
-                            st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
+                        st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
 
         if has_audio_fmt:
             st.markdown(

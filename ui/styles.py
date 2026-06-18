@@ -489,25 +489,34 @@ audio {
   width: 100%;
 }
 
-/* Identité du jour — boîte livrables (liseré couleur liturgique de la semaine) */
-div[class*="st-key-lv_sunday_deliverables_box"] {
-  border: 3px solid var(--liturgie-accent) !important;
-  border-radius: 8px !important;
-  padding: clamp(0.9rem, 2.2vw, 1.35rem) clamp(0.8rem, 2.8vw, 1.45rem) !important;
-  margin: 0 auto 1.1rem !important;
-  max-width: min(44rem, calc(100% - 0.35rem)) !important;
-  background: linear-gradient(
-    165deg,
-    rgba(255, 253, 248, 0.98) 0%,
-    rgba(252, 248, 240, 0.94) 55%,
-    rgba(255, 251, 245, 0.97) 100%
-  ) !important;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.65) inset,
-    0 3px 18px color-mix(in srgb, var(--liturgie-accent) 22%, transparent) !important;
+/* Identité du jour — titre + cadre livrables (couleur liturgique de la semaine) */
+h2.lv-sunday-identity-heading {
+  font-family: 'Cormorant Garamond', serif !important;
+  text-align: center !important;
+  color: var(--liturgie-text) !important;
+  font-size: clamp(1.35rem, 2.2vw, 1.65rem) !important;
+  font-weight: 600 !important;
+  margin: 0 0 0 !important;
+  padding: 0 0 0.55rem !important;
+  border-bottom: 2.5px solid var(--liturgie-accent) !important;
 }
 
-/* Lecteurs audio pleine largeur dans la boîte livrables */
+/* Cadre : prolonge le filet du titre (côtés + bas), sans double trait en haut */
+div[class*="st-key-lv_sunday_deliverables_box"] {
+  margin: 0 0 1.15rem !important;
+  max-width: 100% !important;
+}
+div[class*="st-key-lv_sunday_deliverables_box"] > div[data-testid="stVerticalBlockBorderWrapper"] {
+  border: 2.5px solid var(--liturgie-accent) !important;
+  border-top: none !important;
+  border-radius: 0 !important;
+  padding: clamp(0.85rem, 2.2vw, 1.3rem) clamp(0.75rem, 2.5vw, 1.25rem) !important;
+  margin-top: 0 !important;
+  background: rgba(255, 253, 248, 0.55) !important;
+  box-shadow: none !important;
+}
+
+/* Lecteurs audio pleine largeur dans le cadre */
 div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stAudio"] {
   width: 100% !important;
   max-width: 100% !important;
@@ -518,12 +527,12 @@ div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stAudio"] audio {
   display: block !important;
 }
 
-/* Séparateur discret PDF + texte entre les deux audios */
-div[class*="st-key-lv_sunday_format_actions"] {
-  margin: 0.55rem 0 !important;
-  padding: 0.55rem 0 0.35rem !important;
-  border-top: 1px solid color-mix(in srgb, var(--liturgie-accent) 28%, transparent) !important;
-  border-bottom: 1px solid color-mix(in srgb, var(--liturgie-accent) 28%, transparent) !important;
+/* Séparateur discret entre les deux audios (PDF + texte) */
+div[class*="st-key-lv_sunday_deliverables_box"] div[data-testid="stHorizontalBlock"] {
+  margin: 0.5rem 0 !important;
+  padding: 0.45rem 0 !important;
+  border-top: 1px solid color-mix(in srgb, var(--liturgie-accent) 32%, transparent) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--liturgie-accent) 32%, transparent) !important;
 }
 
 /* 7. Correction radicale — Expanders & Selectbox */
