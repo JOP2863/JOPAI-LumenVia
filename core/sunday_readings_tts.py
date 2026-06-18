@@ -5,6 +5,12 @@ from __future__ import annotations
 import re
 
 from core.aelf_text_cleanup import clean_aelf_text_for_display
+from core.catechese_section_strip import (
+    CATECHESE_SECTION_TITLE,
+    CATECHESE_SECTION_TITLES,
+    find_catechese_section_index,
+    strip_catechese_title_prefix,
+)
 from core.tts_pronunciation import apply_tts_pronunciation
 
 # Clés ``Paramètres_IA`` (Levier B) : documentation admin / choix de voix — jamais lues à voix haute.
@@ -55,6 +61,19 @@ def premiere_lecture_tts_intro() -> str:
     return PREMIERE_LECTURE_TTS_INTRO
 
 
+_SYNTHESIS_TTS_HEADINGS: tuple[str, ...] = (
+    "Le Psaume",
+    "À retenir",
+    *CATECHESE_SECTION_TITLES,
+)
+
+_SYNTHESIS_HEADING_SPLIT_RE = re.compile(
+    r"(?im)(?:^|\n)\s*(?:#{1,3}\s*|\*\*)?\s*("
+    + "|".join(re.escape(h) for h in _SYNTHESIS_TTS_HEADINGS)
+    + r")(?:\*\*)?\s*(?=\n|$)"
+)
+
+
 def normalize_liturgy_section_title(title: str) -> str:
     """Libellé oral canonique pour annoncer une section du lectionnaire."""
     low = (title or "").strip().lower()
@@ -67,6 +86,138 @@ def normalize_liturgy_section_title(title: str) -> str:
     if low.startswith("évangile") or low.startswith("evangile"):
         return "Évangile"
     return (title or "").strip()
+
+
+def liturgy_section_oral_announcement(title: str) -> str:
+    """Annonce orale d'une césure liturgique ou d'une sous-section de synthèse."""
+    raw = (title or "").strip()
+    norm = normalize_liturgy_section_title(raw)
+    if norm == "Première lecture":
+        return premiere_lecture_tts_intro()
+    if norm == "Psaume" or raw.lower() == "le psaume":
+        return "Le Psaume."
+    if norm == "Deuxième lecture":
+        return "Deuxième lecture."
+    if norm == "Évangile":
+        return "Évangile."
+    if raw.lower().startswith("à retenir"):
+        return "À retenir."
+    return f"{raw}." if raw and not raw.endswith(".") else raw
+
+
+def dedupe_tts_section_body(section_title: str, body: str) -> str:
+    """
+    Retire un début de corps redondant avec l'annonce de section.
+
+    Ex. annonce « Le Psaume. » + corps « Le psaume exprime… » → « Il exprime… ».
+    """
+    text = " ".join((body or "").split())
+    if not text:
+        return text
+
+    norm = normalize_liturgy_section_title(section_title)
+    raw = (section_title or "").strip()
+    stems: list[tuple[str, str | None]] = []
+
+    if norm == "Psaume" or raw.lower() == "le psaume":
+        stems = [
+            ("le psaume", "Il"),
+            ("psaume", "Il"),
+            ("ce psaume", "Il"),
+        ]
+    elif norm == "Première lecture":
+        stems = [
+            ("la première lecture", "Elle"),
+            ("première lecture", "Elle"),
+            ("premiere lecture", "Elle"),
+        ]
+    elif norm == "Deuxième lecture":
+        stems = [
+            ("la deuxième lecture", "Elle"),
+            ("deuxième lecture", "Elle"),
+            ("deuxieme lecture", "Elle"),
+        ]
+    elif norm == "Évangile":
+        stems = [
+            ("l'évangile", "Il"),
+            ("l'evangile", "Il"),
+            ("évangile", "Il"),
+            ("evangile", "Il"),
+        ]
+    elif raw.lower().startswith("à retenir"):
+        stems = [("à retenir", None), ("a retenir", None)]
+
+    low = text.lower()
+    for stem, pronoun in stems:
+        if not low.startswith(stem):
+            continue
+        rest = text[len(stem) :].lstrip(" ,:;.-")
+        if not rest:
+            return text
+        if pronoun:
+            return f"{pronoun} {rest}"
+        return rest
+    return text
+
+
+def _canonical_synthesis_section_title(raw: str) -> str:
+    t = (raw or "").strip()
+    low = t.lower()
+    if low == "le psaume":
+        return "Le Psaume"
+    if low.startswith("à retenir"):
+        return "À retenir"
+    for cate in CATECHESE_SECTION_TITLES:
+        if low.startswith(cate.lower()):
+            return CATECHESE_SECTION_TITLE
+    return t
+
+
+def parse_synthesis_tts_sections(text: str) -> list[tuple[str, str]] | None:
+    """
+    Découpe une synthèse en sections pour TTS (« Le Psaume », « À retenir », passerelle…).
+
+    Retourne ``None`` si aucune sous-section détectée (texte continu).
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+
+    matches = list(_SYNTHESIS_HEADING_SPLIT_RE.finditer(t))
+    if not matches:
+        idx = find_catechese_section_index(t)
+        if idx < 0:
+            return None
+        before = t[:idx].strip()
+        cate_body = strip_catechese_title_prefix(t[idx:].strip())
+        out: list[tuple[str, str]] = []
+        if before:
+            out.append(("", before))
+        if cate_body:
+            out.append((CATECHESE_SECTION_TITLE, cate_body))
+        return out if out else None
+
+    sections: list[tuple[str, str]] = []
+    if matches[0].start() > 0:
+        lead = t[: matches[0].start()].strip()
+        if lead:
+            sections.append(("", lead))
+
+    for i, match in enumerate(matches):
+        title = _canonical_synthesis_section_title(match.group(1))
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(t)
+        body = t[start:end].strip()
+        if title == CATECHESE_SECTION_TITLE:
+            body = strip_catechese_title_prefix(f"{match.group(1)}\n{body}")
+        if body or title == CATECHESE_SECTION_TITLE:
+            sections.append((title, body))
+
+    if not sections:
+        return None
+    if len(sections) == 1 and not sections[0][0]:
+        return None
+    return sections
 
 
 def _trim_to_first_liturgy_section(text: str) -> str:

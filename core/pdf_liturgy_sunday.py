@@ -24,9 +24,12 @@ from reportlab.platypus import KeepInFrame, PageBreak, Paragraph, SimpleDocTempl
 from reportlab.platypus.doctemplate import BaseDocTemplate, PageTemplate as PdfPageTemplate, _doNothing
 from reportlab.platypus.frames import Frame
 
+from core.catechese_section_strip import (
+    CATECHESE_SECTION_TITLE,
+    find_catechese_section_index,
+    strip_catechese_title_prefix,
+)
 from core.pdf_graine_parole_mensuel import strip_light_markdown_to_plain
-
-_CATECHESE_SECTION_TITLE = "Passerelle catéchèse — L’écho des paraboles"
 from core.pdf_liturgy_cover import build_liturgy_cover_pdf_bytes, draw_jopai_footer_bar
 
 
@@ -313,7 +316,7 @@ def build_liturgy_body_pdf_bytes(
         syn_part = syn_raw
         cate_part = ""
         try:
-            idx = syn_raw.lower().find(_CATECHESE_SECTION_TITLE.lower())
+            idx = find_catechese_section_index(syn_raw)
             if idx >= 0:
                 syn_part = syn_raw[:idx].strip()
                 cate_part = syn_raw[idx:].strip()
@@ -332,11 +335,8 @@ def build_liturgy_body_pdf_bytes(
 
         if cate_part:
             story.append(PageBreak())
-            story.append(Paragraph(_CATECHESE_SECTION_TITLE, chapter))
-            # Retire le titre en double si le texte le contient.
-            cate_body = cate_part
-            if cate_body.lower().startswith(_CATECHESE_SECTION_TITLE.lower()):
-                cate_body = cate_body[len(_CATECHESE_SECTION_TITLE) :].lstrip(" \t\r\n-:#")
+            story.append(Paragraph(CATECHESE_SECTION_TITLE, chapter))
+            cate_body = strip_catechese_title_prefix(cate_part)
             _append_markdownish_text(story, cate_body, body_style=body, sub_style=sub)
     else:
         story.append(

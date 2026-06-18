@@ -7,12 +7,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.audio_utils import join_wav_bytes, join_wav_with_silence, normalize_audio_bytes
 from core.gemini_tts_api import GeminiTtsApiClient
 from core.config import resolve_gemini_api_key
+from core.catechese_section_strip import (
+    CATECHESE_SECTION_TITLE,
+    CATECHESE_TTS_INTRO,
+)
 from core.sunday_readings_tts import (
     coalesce_liturgy_reading_sections,
+    dedupe_tts_section_body,
     is_liturgy_readings_tts_text,
+    liturgy_section_oral_announcement,
     normalize_liturgy_section_title,
-    parse_liturgy_reading_sections,
-    premiere_lecture_tts_intro,
+    parse_synthesis_tts_sections,
     spoken_text_for_tts,
 )
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
@@ -32,11 +37,11 @@ _VERTEX_TTS_MODELS = (
 
 _LAST_TTS_ROUTE_SESSION_KEY = "lumenvia_last_tts_route"
 
-# Pause entre Première lecture / Psaume / Deuxième lecture / Évangile (millisecondes).
+# Pause entre sections liturgiques / sous-sections de synthèse.
 _LITURGY_SECTION_PAUSE_MS = 750
-
-# En dessous de ce seuil, Gemini TTS invente parfois du contenu (ex. « menhirs ») sur un titre seul.
-_MIN_LITURGY_TTS_CHARS = 64
+# Pause entre l'annonce d'une césure et le début de son corps.
+_SECTION_INTRO_PAUSE_MS = 600
+_CATECHESE_TTS_PAUSE_MS = 900
 
 
 def _split_by_size(text: str, *, max_chars: int) -> list[str]:
@@ -72,45 +77,28 @@ def _split_by_size_at_word(text: str, *, max_chars: int) -> list[str]:
 
 def _liturgy_section_tts_pieces(title: str, body: str, *, max_chars: int) -> list[str]:
     """
-    Morceaux TTS d'une section liturgique.
+    Morceaux TTS d'une section liturgique ou d'une sous-section de synthèse.
 
-    Le titre (« Première lecture. », etc.) est **toujours** lu avec le début du corps —
-    jamais isolé en morceau de 2 mots (Gemini TTS hallucine alors du contenu inventé).
+    Annonce orale séparée du corps (pause audio ajoutée à l'assemblage) ; le corps est
+    dédoublonné si son début répète le titre de la césure.
     """
+    body = dedupe_tts_section_body(title, body)
     body = " ".join((body or "").split())
     if not body:
         return []
+
     title_norm = normalize_liturgy_section_title(title) if title else ""
-    if title_norm == "Première lecture":
-        intro = premiere_lecture_tts_intro()
-        pieces: list[str] = [intro]
-        pieces.extend(_split_by_size_at_word(body, max_chars=max_chars))
-        return pieces
-    prefix = f"{title_norm}. " if title_norm else ""
-    full = f"{prefix}{body}".strip()
-    if len(full) <= max_chars:
-        return [full]
-    pieces = []
-    first_budget = max(max_chars, _MIN_LITURGY_TTS_CHARS) - len(prefix)
-    if first_budget < 32:
-        first_budget = max_chars - len(prefix)
-    first_body = body[:first_budget]
-    if len(body) > first_budget and " " in first_body:
-        first_body = first_body.rsplit(" ", 1)[0]
-    if not first_body:
-        first_body = body[: max_chars - len(prefix)]
-    pieces.append(f"{prefix}{first_body}".strip())
-    rest = body[len(first_body) :].strip()
-    if rest:
-        pieces.extend(_split_by_size_at_word(rest, max_chars=max_chars))
+    announcement = liturgy_section_oral_announcement(title_norm or title)
+    pieces: list[str] = [announcement]
+    pieces.extend(_split_by_size_at_word(body, max_chars=max_chars))
     return pieces
 
 
-def _liturgy_readings_tts_section_chunks(text: str, *, max_chars: int) -> list[list[str]]:
-    """
-    Par section liturgique : morceaux TTS avec annonce + corps (titre jamais seul).
-    """
-    grouped: list[list[str]] = []
+def _liturgy_readings_tts_section_chunk_specs(
+    text: str, *, max_chars: int
+) -> list[tuple[list[str], int | None]]:
+    """Par section liturgique : morceaux TTS + pause éventuelle après l'annonce."""
+    specs: list[tuple[list[str], int | None]] = []
     started = False
     for title, body in coalesce_liturgy_reading_sections(text):
         if not title:
@@ -118,15 +106,28 @@ def _liturgy_readings_tts_section_chunks(text: str, *, max_chars: int) -> list[l
                 if (body or "").strip():
                     started = True
                     pieces = _liturgy_section_tts_pieces("Première lecture", body, max_chars=max_chars)
+                    if pieces:
+                        intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
+                        specs.append((pieces, intro_pause))
                 continue
             pieces = _split_by_size_at_word(body, max_chars=max_chars) if body else []
+            intro_pause = None
         else:
             if not (body or "").strip():
                 continue
             started = True
             pieces = _liturgy_section_tts_pieces(title, body, max_chars=max_chars)
+            intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
         if pieces:
-            grouped.append(pieces)
+            specs.append((pieces, intro_pause))
+    return specs
+
+
+def _liturgy_readings_tts_section_chunks(text: str, *, max_chars: int) -> list[list[str]]:
+    """Compatibilité : liste plate de morceaux par section."""
+    grouped: list[list[str]] = []
+    for pieces, _pause in _liturgy_readings_tts_section_chunk_specs(text, max_chars=max_chars):
+        grouped.append(pieces)
     return grouped
 
 
@@ -184,6 +185,45 @@ def chunk_text_for_tts(text: str, *, max_chars: int = 1400) -> list[str]:
     return final
 
 
+def _synthesis_tts_section_chunk_specs(
+    spoken: str, *, max_chars: int
+) -> list[tuple[list[str], int | None]] | None:
+    """
+    Découpe synthèse en sections orales (Le Psaume, À retenir, passerelle catéchèse…).
+    """
+    sections = parse_synthesis_tts_sections(spoken)
+    if not sections:
+        return None
+
+    specs: list[tuple[list[str], int | None]] = []
+    for title, body in sections:
+        if not title:
+            chunks = chunk_text_for_tts(body, max_chars=max_chars)
+            if chunks:
+                specs.append((chunks, None))
+            continue
+        if title == CATECHESE_SECTION_TITLE:
+            if body:
+                specs.append(([CATECHESE_TTS_INTRO], None))
+                body_chunks = chunk_text_for_tts(body, max_chars=max_chars)
+                if body_chunks:
+                    specs.append((body_chunks, None))
+            continue
+        pieces = _liturgy_section_tts_pieces(title, body, max_chars=max_chars)
+        if pieces:
+            intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
+            specs.append((pieces, intro_pause))
+    return specs or None
+
+
+def _synthesis_catechese_tts_section_chunks(spoken: str, *, max_chars: int) -> list[list[str]] | None:
+    """Compatibilité : morceaux plats par groupe de section."""
+    specs = _synthesis_tts_section_chunk_specs(spoken, max_chars=max_chars)
+    if not specs:
+        return None
+    return [pieces for pieces, _pause in specs if pieces]
+
+
 def _tts_chunks_to_wav(
     *,
     tts_api: GeminiTtsApiClient,
@@ -230,6 +270,84 @@ def _tts_chunks_to_wav(
 
     wav_parts = [wav_parts_by_i[i] for i in range(len(chunks))]
     return join_wav_bytes(wav_parts)
+
+
+def _synthesize_chunks_to_wav(
+    *,
+    chunks: list[str],
+    voice_name: str,
+    gemini_api_key: str | None,
+    vertex_client: object | None,
+) -> bytes:
+    if gemini_api_key:
+        tts_api = GeminiTtsApiClient(api_key=str(gemini_api_key))
+        return _tts_chunks_to_wav(tts_api=tts_api, voice_name=voice_name, chunks=chunks)
+    if vertex_client is not None:
+        return _tts_vertex_chunks_to_wav(
+            vertex_client=vertex_client, voice_name=voice_name, chunks=chunks
+        )
+    raise RuntimeError(
+        "Audio impossible : ajoute GEMINI_API_KEY dans les secrets "
+        "ou vérifie que Vertex TTS (AUDIO) est autorisé sur le projet GCP."
+    )
+
+
+def _tts_pieces_to_wav(
+    pieces: list[str],
+    *,
+    intro_pause_ms: int | None,
+    voice_name: str,
+    gemini_api_key: str | None,
+    vertex_client: object | None,
+) -> bytes:
+    if not pieces:
+        raise ValueError("Morceaux TTS vides")
+    if intro_pause_ms and len(pieces) > 1:
+        head_wav = _synthesize_chunks_to_wav(
+            chunks=[pieces[0]],
+            voice_name=voice_name,
+            gemini_api_key=gemini_api_key,
+            vertex_client=vertex_client,
+        )
+        tail_wav = _synthesize_chunks_to_wav(
+            chunks=pieces[1:],
+            voice_name=voice_name,
+            gemini_api_key=gemini_api_key,
+            vertex_client=vertex_client,
+        )
+        return join_wav_with_silence([head_wav, tail_wav], pause_ms=intro_pause_ms)
+    return _synthesize_chunks_to_wav(
+        chunks=pieces,
+        voice_name=voice_name,
+        gemini_api_key=gemini_api_key,
+        vertex_client=vertex_client,
+    )
+
+
+def _tts_section_specs_to_wav(
+    specs: list[tuple[list[str], int | None]],
+    *,
+    inter_section_pause_ms: int,
+    voice_name: str,
+    gemini_api_key: str | None,
+    vertex_client: object | None,
+) -> bytes:
+    section_wavs: list[bytes] = []
+    for pieces, intro_pause_ms in specs:
+        if not pieces:
+            continue
+        section_wavs.append(
+            _tts_pieces_to_wav(
+                pieces,
+                intro_pause_ms=intro_pause_ms,
+                voice_name=voice_name,
+                gemini_api_key=gemini_api_key,
+                vertex_client=vertex_client,
+            )
+        )
+    if not section_wavs:
+        raise ValueError("Texte vide")
+    return join_wav_with_silence(section_wavs, pause_ms=inter_section_pause_ms)
 
 
 _VERTEX_TTS_ALLOWLIST_SESSION_KEY = "lumenvia_vertex_tts_allowlist_blocked"
@@ -380,38 +498,37 @@ def _tts_chunked_bytes_from_spoken(
     vertex_client: object | None,
 ) -> bytes:
     if is_liturgy_readings_tts_text(spoken):
-        section_groups = _liturgy_readings_tts_section_chunks(spoken, max_chars=1400)
-        if not section_groups:
+        section_specs = _liturgy_readings_tts_section_chunk_specs(spoken, max_chars=1400)
+        if not section_specs:
             raise ValueError("Texte liturgique vide")
-        section_wavs: list[bytes] = []
-        for section in section_groups:
-            if gemini_api_key:
-                tts_api = GeminiTtsApiClient(api_key=str(gemini_api_key))
-                section_wavs.append(
-                    _tts_chunks_to_wav(tts_api=tts_api, voice_name=voice_name, chunks=section)
-                )
-            elif vertex_client is not None:
-                section_wavs.append(
-                    _tts_vertex_chunks_to_wav(
-                        vertex_client=vertex_client, voice_name=voice_name, chunks=section
-                    )
-                )
-            else:
-                raise RuntimeError(
-                    "Audio des lectures impossible : ajoute GEMINI_API_KEY dans les secrets "
-                    "ou vérifie que Vertex TTS (AUDIO) est autorisé sur le projet GCP."
-                )
-        return join_wav_with_silence(section_wavs, pause_ms=_LITURGY_SECTION_PAUSE_MS)
+        return _tts_section_specs_to_wav(
+            section_specs,
+            inter_section_pause_ms=_LITURGY_SECTION_PAUSE_MS,
+            voice_name=voice_name,
+            gemini_api_key=gemini_api_key,
+            vertex_client=vertex_client,
+        )
+
+    synth_specs = _synthesis_tts_section_chunk_specs(spoken, max_chars=1400)
+    if synth_specs:
+        has_catechese = any(
+            pieces and pieces[0] == CATECHESE_TTS_INTRO for pieces, _pause in synth_specs
+        )
+        inter_pause = _CATECHESE_TTS_PAUSE_MS if has_catechese else _LITURGY_SECTION_PAUSE_MS
+        return _tts_section_specs_to_wav(
+            synth_specs,
+            inter_section_pause_ms=inter_pause,
+            voice_name=voice_name,
+            gemini_api_key=gemini_api_key,
+            vertex_client=vertex_client,
+        )
 
     chunks = chunk_text_for_tts(spoken, max_chars=1400)
-    if gemini_api_key:
-        tts_api = GeminiTtsApiClient(api_key=str(gemini_api_key))
-        return _tts_chunks_to_wav(tts_api=tts_api, voice_name=voice_name, chunks=chunks)
-    if vertex_client is not None:
-        return _tts_vertex_chunks_to_wav(vertex_client=vertex_client, voice_name=voice_name, chunks=chunks)
-    raise RuntimeError(
-        "Audio des lectures impossible : ajoute GEMINI_API_KEY dans les secrets "
-        "ou vérifie que Vertex TTS (AUDIO) est autorisé sur le projet GCP."
+    return _synthesize_chunks_to_wav(
+        chunks=chunks,
+        voice_name=voice_name,
+        gemini_api_key=gemini_api_key,
+        vertex_client=vertex_client,
     )
 
 

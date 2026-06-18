@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-# Budget fixe pour la section « Passerelle catéchèse — L’écho des paraboles » (indépendant du % synthèse).
+from core.catechese_section_strip import CATECHESE_SECTION_TITLE
+
+# Budget fixe pour la section « Passerelle catéchèse » (indépendant du % synthèse).
 CATECHESE_BRIDGE_TARGET_WORDS = 275
 
 
@@ -43,7 +45,7 @@ def build_sunday_vertex_synthesis_prompt(
     if include_catechese_bridge:
         bridge_words = int(catechese_bridge_words or CATECHESE_BRIDGE_TARGET_WORDS)
         catechese_block = tpls.get("overlay_catechese_bridge") or (
-            "\nAjouter à la fin une section titrée exactement : « Passerelle catéchèse — L’écho des paraboles ».\n"
+            f"\nAjouter à la fin une section titrée exactement : « {CATECHESE_SECTION_TITLE} ».\n"
             "Cette passerelle catéchèse doit être structurée en 5 sous-parties (titres exacts) :\n"
             "Important : ne mets pas de numérotation (pas de « 1) », « 2) », etc.).\n"
             "Important : n'utilise aucun emoji, aucune puce décorative, aucun symbole (ni carrés, ni ronds), et aucun caractère isolé en préfixe.\n"
@@ -67,7 +69,7 @@ def build_sunday_vertex_synthesis_prompt(
     length_parts = [length_synth]
     if include_catechese_bridge:
         length_parts.append(
-            f"Contrainte de longueur — passerelle catéchèse seule (« Passerelle catéchèse — L’écho des paraboles ») : "
+            f"Contrainte de longueur — passerelle catéchèse seule (« {CATECHESE_SECTION_TITLE} ») : "
             f"vise environ {bridge_words} mots (+/- 10%), indépendamment du pourcentage de synthèse ; "
             f"ne rogne pas cette section pour respecter la synthèse générale."
         )

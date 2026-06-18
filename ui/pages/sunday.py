@@ -457,51 +457,52 @@ def render_sunday() -> None:
             )
             st.audio(bundle_readings_audio[0], format=bundle_readings_audio[1])
 
-        col_pdf, col_audio, col_texte = st.columns([1, 1.25, 1], gap="medium")
-        with col_pdf:
-            if has_pdf_fmt:
-                st.download_button(
-                    label="Télécharger le PDF du dimanche",
-                    data=pdf_bytes_for_user,
-                    file_name=f"lumenvia_dimanche_{date_str}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_sunday_top_{date_str}",
-                    type="secondary",
-                    use_container_width=True,
-                )
-            else:
-                st.caption("Indisponible pour cette date.")
-        with col_audio:
-            if has_audio_fmt:
-                st.markdown(
-                    "<p style=\"text-align:center;margin:0 0 0.3rem;line-height:1.35;color:#5f4f3a;"
-                    "font-size:0.95rem;\"><strong>Audio de la synthèse</strong></p>",
-                    unsafe_allow_html=True,
-                )
-                if bundle_from_disk:
-                    st.markdown(
-                        "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.35;"
-                        "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
-                        unsafe_allow_html=True,
-                    )
-                st.audio(bundle_audio[0], format=bundle_audio[1])
-            else:
-                st.markdown(
-                    "<p style=\"text-align:center;margin:0 0 0.25rem;line-height:1.4;color:#5f4f3a;"
-                    "font-size:0.85rem;\">Pas encore publié. Les lectures sont affichées plus bas.</p>",
-                    unsafe_allow_html=True,
-                )
-        with col_texte:
-            with st.expander("Lire le texte de cette synthèse", expanded=False):
-                if has_text_fmt:
-                    st.markdown(bundle_synth_text)
-                elif has_audio_fmt:
-                    st.info(
-                        "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
-                        "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
+        if has_pdf_fmt or has_text_fmt or has_audio_fmt:
+            col_pdf, col_texte = st.columns(2, gap="medium")
+            with col_pdf:
+                if has_pdf_fmt:
+                    st.download_button(
+                        label="Télécharger le PDF du dimanche",
+                        data=pdf_bytes_for_user,
+                        file_name=f"lumenvia_dimanche_{date_str}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_sunday_top_{date_str}",
+                        type="secondary",
+                        use_container_width=True,
                     )
                 else:
-                    st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
+                    st.caption("PDF indisponible pour cette date.")
+            with col_texte:
+                with st.expander("Lire le texte de cette synthèse", expanded=False):
+                    if has_text_fmt:
+                        st.markdown(bundle_synth_text)
+                    elif has_audio_fmt:
+                        st.info(
+                            "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
+                            "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
+                        )
+                    else:
+                        st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
+
+        if has_audio_fmt:
+            st.markdown(
+                "<p style=\"text-align:center;margin:0.65rem 0 0.35rem;line-height:1.4;color:#5f4f3a;"
+                "font-size:0.95rem;\"><strong>Audio de la synthèse</strong></p>",
+                unsafe_allow_html=True,
+            )
+            if bundle_from_disk:
+                st.markdown(
+                    "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.35;"
+                    "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
+                    unsafe_allow_html=True,
+                )
+            st.audio(bundle_audio[0], format=bundle_audio[1])
+        elif has_readings_fmt or has_pdf_fmt or has_text_fmt:
+            st.markdown(
+                "<p style=\"text-align:center;margin:0.65rem 0 0.25rem;line-height:1.4;color:#5f4f3a;"
+                "font-size:0.85rem;\">Pas encore publié. Les lectures sont affichées plus bas.</p>",
+                unsafe_allow_html=True,
+            )
 
         if not has_pdf_fmt and not has_audio_fmt and not has_text_fmt and not has_readings_fmt:
             _synth_na_msg = (
@@ -532,7 +533,7 @@ def render_sunday() -> None:
                         icon="ℹ️",
                     )
                 include_catechese_pdf = st.checkbox(
-                    "Inclure la « Passerelle catéchèse — L’écho des paraboles » dans le PDF",
+                    "Inclure la « Passerelle catéchèse » dans le PDF",
                     value=True,
                     key=f"pdf_catechese_{date_str}",
                     help="Si la synthèse contient cette section, elle sera incluse dans le PDF (coché par défaut).",
@@ -731,7 +732,7 @@ def render_sunday() -> None:
                 "Inclure “À retenir” (3–5 points)", value=True, key=f"adm_sunday_takeaways_{date_str}"
             )
             include_catechese_bridge_gen = st.checkbox(
-                "Inclure « Passerelle catéchèse — L’écho des paraboles »",
+                "Inclure « Passerelle catéchèse »",
                 value=True,
                 help=(
                     "Ajoute la passerelle catéchèse (5 sous-parties) en fin de synthèse. "
