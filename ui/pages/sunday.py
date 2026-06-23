@@ -15,7 +15,7 @@ import streamlit as st
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
-from core.readings_cache_loader import load_aelf_from_readings_cache
+from core.readings_cache_loader import load_aelf_from_readings_cache, readings_cache_row_from_aelf_texts
 from core.sheets_db import append_immutable_row, build_gspread_client, utc_now_iso
 from core.storage import download_bytes, upload_bytes, upload_text
 from core.local_aelf_cache import load_aelf_snapshot, persist_aelf_snapshot
@@ -300,33 +300,27 @@ def render_sunday() -> None:
         # 2) AELF API (cache streamlit) + snapshot disque — sauté si lectures déjà fournies par RDC (Sheets).
         if identity is None or texts is None:
             try:
-                identity, texts = ap.cached_aelf(date_str, zone=zone, _identity_schema=4)
+                identity, texts = ap.cached_aelf(date_str, zone=zone, _identity_schema=5)
                 persist_aelf_snapshot(date_str, zone, identity, texts)
                 # Écrit dans Sheets (sans champs chiffrés) pour éviter les appels futurs.
                 if cfg.gcp_service_account and cfg.gsheet_id:
                     try:
                         gs2 = build_gspread_client(cfg.gcp_service_account)
+                        row = readings_cache_row_from_aelf_texts(
+                            ds=date_str[:10],
+                            zone=zone,
+                            identity=identity,
+                            texts=texts,
+                        )
+                        row["entity_id"] = sha256(
+                            f"read|{date_str[:10]}|{zone}|{utc_now_iso()}".encode("utf-8")
+                        ).hexdigest()[:24]
+                        row["source"] = "aelf_api"
                         append_immutable_row(
                             gspread_client=gs2,
                             spreadsheet_id=cfg.gsheet_id,
                             table="readings_cache",
-                            values_by_col={
-                                "entity_id": sha256(f"read|{date_str[:10]}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
-                                "date": date_str[:10],
-                                "zone": zone,
-                                "periode": getattr(identity, "periode", None) or "",
-                                "semaine": getattr(identity, "semaine", None) or "",
-                                "annee": getattr(identity, "annee", None) or "",
-                                "couleur": getattr(identity, "couleur", None) or "",
-                                "fete": getattr(identity, "fete", None) or "",
-                                "jour_liturgique_nom": getattr(identity, "jour_liturgique_nom", None) or "",
-                                "premiere_lecture": _normalize_aelf_text_for_cache(texts.premiere_lecture),
-                                "psaume": _normalize_aelf_text_for_cache(texts.psaume),
-                                "deuxieme_lecture": _normalize_aelf_text_for_cache(texts.deuxieme_lecture),
-                                "evangile": _normalize_aelf_text_for_cache(texts.evangile),
-                                "source": "aelf_api",
-                                "error": "",
-                            },
+                            values_by_col=row,
                         )
                     except Exception:
                         pass
@@ -672,10 +666,7 @@ def render_sunday() -> None:
                             f"Cycle {ap._cycle_year_display(getattr(identity, 'annee', None))} · "
                             f"{ap._liturgy_display_label(getattr(identity, 'couleur', None))}"
                         ),
-                        premiere_lecture=texts.premiere_lecture,
-                        psaume=texts.psaume,
-                        deuxieme_lecture=texts.deuxieme_lecture,
-                        evangile=texts.evangile,
+                        **pdf_liturgy_reading_kwargs(texts),
                         synthesis_text=synth_for_pdf,
                         audio_listen_url=aud_url,
                         audio_listen_note=aud_note,
@@ -888,11 +879,35 @@ def render_sunday() -> None:
     if gcs_top and cfg.gcs_bucket_name:
         ap._try_show_liturgy_illustration(gcs=gcs_top, cfg=cfg, date_str=date_str)
 
+    from core.aelf_reading_meta import compose_psalm_text, pdf_liturgy_reading_kwargs
+
     st.subheader("Lectures")
     # (supprimé) Total lectures : non affiché
-    render_liturgy_block("Première lecture", texts.premiere_lecture)
-    render_liturgy_block("Psaume", texts.psaume)
-    render_liturgy_block("Deuxième lecture", texts.deuxieme_lecture)
-    render_liturgy_block("Évangile", texts.evangile)
+    render_liturgy_block(
+        "Première lecture",
+        texts.premiere_lecture,
+        intro_lue=getattr(texts, "premiere_lecture_intro", None),
+        ref=getattr(texts, "premiere_lecture_ref", None),
+    )
+    render_liturgy_block(
+        "Psaume",
+        compose_psalm_text(
+            refrain=getattr(texts, "psaume_refrain", None),
+            body=texts.psaume,
+        ),
+        ref=getattr(texts, "psaume_ref", None),
+    )
+    render_liturgy_block(
+        "Deuxième lecture",
+        texts.deuxieme_lecture,
+        intro_lue=getattr(texts, "deuxieme_lecture_intro", None),
+        ref=getattr(texts, "deuxieme_lecture_ref", None),
+    )
+    render_liturgy_block(
+        "Évangile",
+        texts.evangile,
+        intro_lue=getattr(texts, "evangile_intro", None),
+        ref=getattr(texts, "evangile_ref", None),
+    )
 
 

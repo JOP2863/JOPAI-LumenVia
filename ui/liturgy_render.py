@@ -8,8 +8,23 @@ import streamlit as st
 from core.aelf_text_cleanup import clean_aelf_text_for_display
 
 
-def render_liturgy_block(title: str, text: str | None) -> None:
+def render_liturgy_block(
+    title: str,
+    text: str | None,
+    *,
+    intro_lue: str | None = None,
+    ref: str | None = None,
+) -> None:
+    from core.aelf_reading_meta import reading_caption
+
     st.markdown(f"**{title}**")
+    caption = reading_caption(intro_lue=intro_lue, ref=ref)
+    if caption:
+        st.markdown(
+            f"<p style=\"margin:0.15rem 0 0.65rem;font-size:0.92rem;font-style:italic;"
+            f"color:#5f4f3a;text-align:center;\">{html.escape(caption)}</p>",
+            unsafe_allow_html=True,
+        )
     if not text:
         st.write("—")
         return

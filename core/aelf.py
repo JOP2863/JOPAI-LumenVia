@@ -26,11 +26,33 @@ class AelfDayIdentity:
 
 
 @dataclass(frozen=True)
+class AelfReadingBlock:
+    """Corps + métadonnées d'une lecture (champs AELF ``intro_lue``, ``ref``, etc.)."""
+
+    body: str | None
+    intro_lue: str | None = None
+    ref: str | None = None
+    titre: str | None = None
+    refrain: str | None = None
+    ref_refrain: str | None = None
+
+
+@dataclass(frozen=True)
 class AelfTexts:
     premiere_lecture: str | None
     psaume: str | None
     deuxieme_lecture: str | None
     evangile: str | None
+    premiere_lecture_intro: str | None = None
+    premiere_lecture_ref: str | None = None
+    psaume_intro: str | None = None
+    psaume_ref: str | None = None
+    psaume_refrain: str | None = None
+    psaume_ref_refrain: str | None = None
+    deuxieme_lecture_intro: str | None = None
+    deuxieme_lecture_ref: str | None = None
+    evangile_intro: str | None = None
+    evangile_ref: str | None = None
 
 
 class AelfClient:
@@ -70,11 +92,25 @@ class AelfClient:
 
         lectures = (first_messe or {}).get("lectures") or []
 
+        b1 = _extract_reading_block(lectures, ["lecture_1", "premiere_lecture", "lecture1"])
+        bp = _extract_reading_block(lectures, ["psaume", "psalm"])
+        b2 = _extract_reading_block(lectures, ["lecture_2", "deuxieme_lecture", "lecture2"])
+        be = _extract_reading_block(lectures, ["evangile", "evangel"])
         return AelfTexts(
-            premiere_lecture=_extract_reading(lectures, ["lecture_1", "premiere_lecture", "lecture1"]),
-            psaume=_extract_reading(lectures, ["psaume", "psalm"]),
-            deuxieme_lecture=_extract_reading(lectures, ["lecture_2", "deuxieme_lecture", "lecture2"]),
-            evangile=_extract_reading(lectures, ["evangile", "evangel"]),
+            premiere_lecture=b1.body,
+            psaume=bp.body,
+            deuxieme_lecture=b2.body,
+            evangile=be.body,
+            premiere_lecture_intro=b1.intro_lue,
+            premiere_lecture_ref=b1.ref,
+            psaume_intro=bp.intro_lue,
+            psaume_ref=bp.ref,
+            psaume_refrain=bp.refrain,
+            psaume_ref_refrain=bp.ref_refrain,
+            deuxieme_lecture_intro=b2.intro_lue,
+            deuxieme_lecture_ref=b2.ref,
+            evangile_intro=be.intro_lue,
+            evangile_ref=be.ref,
         )
 
 
@@ -112,20 +148,40 @@ def _get_nested_str(d: dict[str, Any], path: list[str]) -> str | None:
     return s or None
 
 
-def _extract_reading(lectures: Any, keys: list[str]) -> str | None:
-    # Cas 1: format dict (ancien / alternatif)
+def _aelf_plain_field(value: Any) -> str | None:
+    if value is None:
+        return None
+    s = _clean_aelf_html(str(value).strip())
+    return s or None
+
+
+def _reading_block_from_item(item: dict[str, Any]) -> AelfReadingBlock:
+    txt = item.get("texte") or item.get("text") or item.get("contenu")
+    body = _aelf_plain_field(txt)
+    refrain_raw = item.get("refrain_psalmique")
+    return AelfReadingBlock(
+        body=body,
+        intro_lue=_aelf_plain_field(item.get("intro_lue")),
+        ref=_aelf_plain_field(item.get("ref")),
+        titre=_aelf_plain_field(item.get("titre")),
+        refrain=_aelf_plain_field(refrain_raw),
+        ref_refrain=_aelf_plain_field(item.get("ref_refrain")),
+    )
+
+
+def _extract_reading_block(lectures: Any, keys: list[str]) -> AelfReadingBlock:
+    empty = AelfReadingBlock(body=None)
     if isinstance(lectures, dict):
         for k in keys:
             v = lectures.get(k)
             if isinstance(v, dict):
-                txt = v.get("texte") or v.get("text") or v.get("contenu")
-                if txt:
-                    return _clean_aelf_html(str(txt).strip()) or None
+                block = _reading_block_from_item(v)
+                if block.body or block.intro_lue or block.ref:
+                    return block
             elif isinstance(v, str) and v.strip():
-                return _clean_aelf_html(v.strip()) or None
-        return None
+                return AelfReadingBlock(body=_clean_aelf_html(v.strip()) or None)
+        return empty
 
-    # Cas 2: format list (AELF courant): [{"type":"lecture_1", "contenu":"<p>...</p>", ...}, ...]
     if isinstance(lectures, list):
         wanted = {k.lower() for k in keys}
         for item in lectures:
@@ -133,12 +189,16 @@ def _extract_reading(lectures: Any, keys: list[str]) -> str | None:
                 continue
             t = str(item.get("type", "")).strip().lower()
             if t in wanted:
-                txt = item.get("texte") or item.get("text") or item.get("contenu")
-                if txt:
-                    return _clean_aelf_html(str(txt).strip()) or None
-        return None
+                block = _reading_block_from_item(item)
+                if block.body or block.intro_lue or block.ref or block.refrain:
+                    return block
+        return empty
 
-    return None
+    return empty
+
+
+def _extract_reading(lectures: Any, keys: list[str]) -> str | None:
+    return _extract_reading_block(lectures, keys).body
 
 
 _BR_RE = re.compile(r"(?i)<br\s*/?>")

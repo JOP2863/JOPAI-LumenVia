@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import re
 
+from core.aelf_reading_meta import (
+    encode_readings_tts_meta_line,
+    liturgy_tts_sections_from_texts,
+    oral_reading_intro_phrase,
+    split_readings_tts_body_meta,
+)
 from core.aelf_text_cleanup import clean_aelf_text_for_display
 from core.catechese_section_strip import (
     CATECHESE_SECTION_TITLE,
@@ -49,16 +55,12 @@ _LITURGY_SECTION_LINE_RE = re.compile(
 )
 
 
-# Annonce dédiée (≥ _MIN_LITURGY_TTS_CHARS dans sunday_gemini_tts) — évite que Vertex
-# « avale » « Première lecture » au tout début du fichier audio.
-PREMIERE_LECTURE_TTS_INTRO = (
-    "Première lecture. "
-    "Écoutez la première lecture de la Parole, selon le lectionnaire de ce dimanche."
-)
+# Annonce de repli si l'API AELF ne fournit pas ``intro_lue`` (cache ancien).
+PREMIERE_LECTURE_TTS_INTRO_FALLBACK = "Première lecture. Écoutez la première lecture de la Parole."
 
 
-def premiere_lecture_tts_intro() -> str:
-    return PREMIERE_LECTURE_TTS_INTRO
+def premiere_lecture_tts_intro(intro_lue: str | None = None) -> str:
+    return oral_reading_intro_phrase("Première lecture", intro_lue=intro_lue)
 
 
 _SYNTHESIS_TTS_HEADINGS: tuple[str, ...] = (
@@ -88,24 +90,28 @@ def normalize_liturgy_section_title(title: str) -> str:
     return (title or "").strip()
 
 
-def liturgy_section_oral_announcement(title: str) -> str:
+def liturgy_section_oral_announcement(
+    title: str,
+    *,
+    intro_lue: str | None = None,
+    ref: str | None = None,
+) -> str:
     """Annonce orale d'une césure liturgique ou d'une sous-section de synthèse."""
     raw = (title or "").strip()
-    norm = normalize_liturgy_section_title(raw)
-    if norm == "Première lecture":
-        return premiere_lecture_tts_intro()
-    if norm == "Psaume" or raw.lower() == "le psaume":
-        return "Le Psaume."
-    if norm == "Deuxième lecture":
-        return "Deuxième lecture."
-    if norm == "Évangile":
-        return "Évangile."
     if raw.lower().startswith("à retenir"):
         return "À retenir."
+    norm = normalize_liturgy_section_title(raw)
+    if norm in ("Première lecture", "Deuxième lecture", "Psaume", "Évangile") or raw.lower() == "le psaume":
+        return oral_reading_intro_phrase(norm or raw, intro_lue=intro_lue, ref=ref)
     return f"{raw}." if raw and not raw.endswith(".") else raw
 
 
-def dedupe_tts_section_body(section_title: str, body: str) -> str:
+def dedupe_tts_section_body(
+    section_title: str,
+    body: str,
+    *,
+    intro_lue: str | None = None,
+) -> str:
     """
     Retire un début de corps redondant avec l'annonce de section.
 
@@ -157,6 +163,14 @@ def dedupe_tts_section_body(section_title: str, body: str) -> str:
         if pronoun:
             return f"{pronoun} {rest}"
         return rest
+
+    intro = (intro_lue or "").strip()
+    if intro:
+        intro_low = intro.lower().rstrip(".")
+        if low.startswith(intro_low):
+            rest = text[len(intro_low) :].lstrip(" ,:;.-")
+            if rest:
+                return rest
     return text
 
 
@@ -369,23 +383,25 @@ def spoken_text_for_tts(body: str) -> str:
 def plain_readings_for_tts(texts: object) -> str:
     """Texte continu pour TTS des quatre lectures AELF (sans HTML)."""
     parts: list[str] = []
-
-    def _seg(title: str, body: str | None) -> None:
-        raw = clean_aelf_text_for_display(body or "")
+    for sec in liturgy_tts_sections_from_texts(texts):
+        raw = clean_aelf_text_for_display(sec.body or "")
         raw = re.sub(r"<[^>]+>", " ", raw)
-        raw = " ".join(raw.split())
+        if sec.title == "Psaume":
+            raw = re.sub(r"[ \t]+\n", "\n", raw)
+            raw = re.sub(r"\n{3,}", "\n\n", raw).strip()
+        else:
+            raw = " ".join(raw.split())
         raw = strip_tts_admin_preamble(raw)
         if not raw.strip():
-            return
-        # Rubriques résiduelles (ex. dimanche sans psaume responsorial).
-        if len(raw.strip()) < 12 and title.lower().startswith("psaume"):
-            return
-        parts.append(f"{title}. {raw.strip()}")
-
-    _seg("Première lecture", getattr(texts, "premiere_lecture", None))
-    _seg("Psaume", getattr(texts, "psaume", None))
-    _seg("Deuxième lecture", getattr(texts, "deuxieme_lecture", None))
-    _seg("Évangile", getattr(texts, "evangile", None))
+            continue
+        if len(raw.strip()) < 12 and sec.title.lower().startswith("psaume"):
+            continue
+        block = f"{sec.title}."
+        meta = encode_readings_tts_meta_line(intro_lue=sec.intro_lue, ref=sec.ref)
+        if meta:
+            block = f"{block}\n{meta}"
+        block = f"{block}\n\n{raw.strip()}"
+        parts.append(block)
     return strip_tts_admin_preamble("\n\n".join(parts).strip())
 
 

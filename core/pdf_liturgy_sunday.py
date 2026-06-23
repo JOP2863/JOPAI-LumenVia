@@ -24,6 +24,7 @@ from reportlab.platypus import KeepInFrame, PageBreak, Paragraph, SimpleDocTempl
 from reportlab.platypus.doctemplate import BaseDocTemplate, PageTemplate as PdfPageTemplate, _doNothing
 from reportlab.platypus.frames import Frame
 
+from core.aelf_reading_meta import reading_caption
 from core.catechese_section_strip import (
     CATECHESE_SECTION_TITLE,
     find_catechese_section_index,
@@ -201,6 +202,14 @@ def build_liturgy_body_pdf_bytes(
     psaume: str | None,
     deuxieme_lecture: str | None,
     evangile: str | None,
+    premiere_lecture_intro: str | None = None,
+    premiere_lecture_ref: str | None = None,
+    psaume_intro: str | None = None,
+    psaume_ref: str | None = None,
+    deuxieme_lecture_intro: str | None = None,
+    deuxieme_lecture_ref: str | None = None,
+    evangile_intro: str | None = None,
+    evangile_ref: str | None = None,
     synthesis_text: str | None,
     audio_listen_url: str | None,
     audio_listen_note: str | None = None,
@@ -275,6 +284,17 @@ def build_liturgy_body_pdf_bytes(
         spaceAfter=5,
         keepWithNext=True,
     )
+    caption_style = ParagraphStyle(
+        name="LVLecCaption",
+        parent=body,
+        fontName="Helvetica-Oblique",
+        fontSize=9,
+        leading=11,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#5f4f3a"),
+        spaceBefore=0,
+        spaceAfter=6,
+    )
     try:
         # Accentue la hiérarchie (proche du site) : titres + chapitres suivent l’accent.
         h.textColor = colors.HexColor(hx)
@@ -284,28 +304,39 @@ def build_liturgy_body_pdf_bytes(
         pass
 
     story: list = []
+
+    def _append_reading(
+        title: str,
+        txt: str | None,
+        *,
+        intro_lue: str | None,
+        ref: str | None,
+    ) -> None:
+        story.append(Paragraph(xml_escape(title), h))
+        cap = reading_caption(intro_lue=intro_lue, ref=ref)
+        if cap:
+            story.append(Paragraph(xml_escape(cap), caption_style))
+        story.append(Paragraph(_to_para_html_aelf(txt), body))
+        story.append(Spacer(1, 10))
+
     # Lectures sur 2 pages (moins condensé) :
     # - Page 1 : Première lecture + Psaume
     # - Page 2 : Deuxième lecture + Évangile
     blocks_page1 = [
-        ("Première lecture", premiere_lecture),
-        ("Psaume", psaume),
+        ("Première lecture", premiere_lecture, premiere_lecture_intro, premiere_lecture_ref),
+        ("Psaume", psaume, psaume_intro, psaume_ref),
     ]
     blocks_page2 = [
-        ("Deuxième lecture", deuxieme_lecture),
-        ("Évangile", evangile),
+        ("Deuxième lecture", deuxieme_lecture, deuxieme_lecture_intro, deuxieme_lecture_ref),
+        ("Évangile", evangile, evangile_intro, evangile_ref),
     ]
 
-    for title, txt in blocks_page1:
-        story.append(Paragraph(xml_escape(title), h))
-        story.append(Paragraph(_to_para_html_aelf(txt), body))
-        story.append(Spacer(1, 10))
+    for title, txt, intro_lue, ref in blocks_page1:
+        _append_reading(title, txt, intro_lue=intro_lue, ref=ref)
 
     story.append(PageBreak())
-    for title, txt in blocks_page2:
-        story.append(Paragraph(xml_escape(title), h))
-        story.append(Paragraph(_to_para_html_aelf(txt), body))
-        story.append(Spacer(1, 10))
+    for title, txt, intro_lue, ref in blocks_page2:
+        _append_reading(title, txt, intro_lue=intro_lue, ref=ref)
 
     # Chapitre Synthèse
     story.append(PageBreak())
@@ -598,6 +629,14 @@ def build_liturgy_sunday_pdf_bytes(
     psaume: str | None,
     deuxieme_lecture: str | None,
     evangile: str | None,
+    premiere_lecture_intro: str | None = None,
+    premiere_lecture_ref: str | None = None,
+    psaume_intro: str | None = None,
+    psaume_ref: str | None = None,
+    deuxieme_lecture_intro: str | None = None,
+    deuxieme_lecture_ref: str | None = None,
+    evangile_intro: str | None = None,
+    evangile_ref: str | None = None,
     synthesis_text: str | None,
     audio_listen_url: str | None,
     audio_listen_note: str | None = None,
@@ -624,6 +663,14 @@ def build_liturgy_sunday_pdf_bytes(
         psaume=psaume,
         deuxieme_lecture=deuxieme_lecture,
         evangile=evangile,
+        premiere_lecture_intro=premiere_lecture_intro,
+        premiere_lecture_ref=premiere_lecture_ref,
+        psaume_intro=psaume_intro,
+        psaume_ref=psaume_ref,
+        deuxieme_lecture_intro=deuxieme_lecture_intro,
+        deuxieme_lecture_ref=deuxieme_lecture_ref,
+        evangile_intro=evangile_intro,
+        evangile_ref=evangile_ref,
         synthesis_text=synthesis_text,
         audio_listen_url=audio_listen_url,
         audio_listen_note=audio_listen_note,

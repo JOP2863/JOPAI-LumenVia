@@ -109,12 +109,12 @@ def load_voix_rules_cached(*, gsheet_id: str, service_account_fingerprint: str) 
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def _cached_aelf_raw(date_str: str, zone: str = "france", *, _identity_schema: int = 4) -> tuple[dict, dict]:
+def _cached_aelf_raw(date_str: str, zone: str = "france", *, _identity_schema: int = 5) -> tuple[dict, dict]:
     """Retour dict (pickle-safe) ; _identity_schema invalide le cache si le schéma AELF évolue."""
     identity, texts = fetch_aelf_day(date_str, zone=zone)
     return asdict(identity), asdict(texts)
 
 
-def cached_aelf(date_str: str, zone: str = "france", *, _identity_schema: int = 4) -> tuple[AelfDayIdentity, AelfTexts]:
+def cached_aelf(date_str: str, zone: str = "france", *, _identity_schema: int = 5) -> tuple[AelfDayIdentity, AelfTexts]:
     id_d, txt_d = _cached_aelf_raw(date_str, zone=zone, _identity_schema=_identity_schema)
     return AelfDayIdentity(**id_d), AelfTexts(**txt_d)

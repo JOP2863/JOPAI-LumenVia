@@ -9,6 +9,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from core.aelf_reading_meta import pdf_liturgy_reading_kwargs
 from core.audio_utils import normalize_audio_bytes
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
@@ -444,10 +445,7 @@ def _run_incremental_sunday_outputs(
                         f"Cycle {ap._cycle_year_display(getattr(identity, 'annee', None))} · "
                         f"{ap._liturgy_display_label(getattr(identity, 'couleur', None))}"
                     ),
-                    premiere_lecture=texts.premiere_lecture,
-                    psaume=texts.psaume,
-                    deuxieme_lecture=texts.deuxieme_lecture,
-                    evangile=texts.evangile,
+                    **pdf_liturgy_reading_kwargs(texts),
                     synthesis_text=synth_for_pdf,
                     audio_listen_url=aud_url,
                     audio_listen_note=aud_note,
@@ -1090,10 +1088,7 @@ def _run_generate_sunday_flow(
                     f"Cycle {ap._cycle_year_display(getattr(identity, 'annee', None))} · "
                     f"{ap._liturgy_display_label(getattr(identity, 'couleur', None))}"
                 ),
-                premiere_lecture=getattr(texts, "premiere_lecture", None),
-                psaume=getattr(texts, "psaume", None),
-                deuxieme_lecture=getattr(texts, "deuxieme_lecture", None),
-                evangile=getattr(texts, "evangile", None),
+                **pdf_liturgy_reading_kwargs(texts),
                 synthesis_text=gen.text,
                 audio_listen_url=aud_url,
                 audio_listen_note=aud_note,

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.audio_utils import join_wav_bytes, join_wav_with_silence, normalize_audio_bytes
 from core.gemini_tts_api import GeminiTtsApiClient
 from core.config import resolve_gemini_api_key
+from core.aelf_reading_meta import split_readings_tts_body_meta
 from core.catechese_section_strip import (
     CATECHESE_SECTION_TITLE,
     CATECHESE_TTS_INTRO,
@@ -75,20 +77,36 @@ def _split_by_size_at_word(text: str, *, max_chars: int) -> list[str]:
     return out
 
 
-def _liturgy_section_tts_pieces(title: str, body: str, *, max_chars: int) -> list[str]:
+def _liturgy_section_tts_pieces(
+    title: str,
+    body: str,
+    *,
+    max_chars: int,
+    intro_lue: str | None = None,
+    ref: str | None = None,
+) -> list[str]:
     """
     Morceaux TTS d'une section liturgique ou d'une sous-section de synthèse.
 
     Annonce orale séparée du corps (pause audio ajoutée à l'assemblage) ; le corps est
     dédoublonné si son début répète le titre de la césure.
     """
-    body = dedupe_tts_section_body(title, body)
-    body = " ".join((body or "").split())
+    body = dedupe_tts_section_body(title, body, intro_lue=intro_lue)
+    title_norm = normalize_liturgy_section_title(title) if title else ""
+    if title_norm == "Psaume":
+        body = re.sub(r"[ \t]+\n", "\n", (body or ""))
+        body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    else:
+        body = " ".join((body or "").split())
     if not body:
         return []
 
     title_norm = normalize_liturgy_section_title(title) if title else ""
-    announcement = liturgy_section_oral_announcement(title_norm or title)
+    announcement = liturgy_section_oral_announcement(
+        title_norm or title,
+        intro_lue=intro_lue,
+        ref=ref,
+    )
     pieces: list[str] = [announcement]
     pieces.extend(_split_by_size_at_word(body, max_chars=max_chars))
     return pieces
@@ -101,11 +119,23 @@ def _liturgy_readings_tts_section_chunk_specs(
     specs: list[tuple[list[str], int | None]] = []
     started = False
     for title, body in coalesce_liturgy_reading_sections(text):
+        intro_lue: str | None = None
+        ref: str | None = None
+        if body:
+            meta_intro, meta_ref, rest = split_readings_tts_body_meta(body)
+            if meta_intro is not None or meta_ref is not None:
+                intro_lue, ref, body = meta_intro, meta_ref, rest
         if not title:
             if not started:
                 if (body or "").strip():
                     started = True
-                    pieces = _liturgy_section_tts_pieces("Première lecture", body, max_chars=max_chars)
+                    pieces = _liturgy_section_tts_pieces(
+                        "Première lecture",
+                        body,
+                        max_chars=max_chars,
+                        intro_lue=intro_lue,
+                        ref=ref,
+                    )
                     if pieces:
                         intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
                         specs.append((pieces, intro_pause))
@@ -116,7 +146,13 @@ def _liturgy_readings_tts_section_chunk_specs(
             if not (body or "").strip():
                 continue
             started = True
-            pieces = _liturgy_section_tts_pieces(title, body, max_chars=max_chars)
+            pieces = _liturgy_section_tts_pieces(
+                title,
+                body,
+                max_chars=max_chars,
+                intro_lue=intro_lue,
+                ref=ref,
+            )
             intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
         if pieces:
             specs.append((pieces, intro_pause))

@@ -10,6 +10,7 @@ import streamlit as st
 
 from core.aelf import fetch_aelf_day, is_aelf_not_found_error
 from core.config import load_config
+from core.readings_cache_loader import readings_cache_row_from_aelf_texts
 from core.sheets_db import (
     BASE_COLUMNS,
     TableSpec,
@@ -57,23 +58,9 @@ def _readings_row_is_aelf_unavailable(r: dict, *, zone: str, year: int) -> bool:
 
 
 def _readings_cache_row_from_aelf(*, ds: str, zone: str, identity, texts) -> dict[str, str]:
-    return {
-        "entity_id": sha256(f"read|{ds}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
-        "date": ds,
-        "zone": zone,
-        "periode": getattr(identity, "periode", None) or "",
-        "semaine": getattr(identity, "semaine", None) or "",
-        "annee": getattr(identity, "annee", None) or "",
-        "couleur": getattr(identity, "couleur", None) or "",
-        "fete": getattr(identity, "fete", None) or "",
-        "jour_liturgique_nom": getattr(identity, "jour_liturgique_nom", None) or "",
-        "premiere_lecture": _normalize_aelf_text_for_cache(getattr(texts, "premiere_lecture", None)),
-        "psaume": _normalize_aelf_text_for_cache(getattr(texts, "psaume", None)),
-        "deuxieme_lecture": _normalize_aelf_text_for_cache(getattr(texts, "deuxieme_lecture", None)),
-        "evangile": _normalize_aelf_text_for_cache(getattr(texts, "evangile", None)),
-        "source": "aelf_api_prefetch",
-        "error": "",
-    }
+    row = readings_cache_row_from_aelf_texts(ds=ds, zone=zone, identity=identity, texts=texts)
+    row["entity_id"] = sha256(f"read|{ds}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
+    return row
 
 
 def render_admin_readings_cache() -> None:
