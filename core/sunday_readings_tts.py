@@ -364,20 +364,62 @@ def strip_tts_admin_preamble(text: str) -> str:
     return "\n\n".join(parts).strip() if parts else t
 
 
-def spoken_text_for_tts(body: str) -> str:
+def spoken_text_for_tts(body: str, *, liturgy_readings: bool = False) -> str:
     """
-    Texte envoyé tel quel à Vertex ou Gemini TTS.
+    Texte parlé nettoyé (prononciation, préambules admin).
 
-    Les modèles ne distinguent pas « consigne » et « contenu » : tout le champ ``text``
-    est prononcé. Le style oral est porté par ``Voix_Audio`` (nom de voix), pas par les
-    clés ``audio_style_*`` dans Sheets.
+    Le wrapping director / ``# Transcript`` est appliqué juste avant l'appel API
+    via ``strict_verbatim_tts_prompt`` (Vertex + Gemini) — pas ici, pour que le
+    découpage sections / morceaux reste sur le texte oral seul.
 
-    Le dictionnaire ``data/tts_pronunciation_fr.json`` (+ clé ``tts_pronunciation`` dans
-    ``Paramètres_IA``) est appliqué ici pour corriger certaines prononciations (ex. Moïse).
+    ``liturgy_readings=True`` : retire les préambules admin et coupe avant la 1re lecture.
+    Ne pas activer pour la synthèse (sinon un « Première lecture. » en milieu de texte
+    tronque tout le début de la synthèse).
     """
-    cleaned = strip_tts_admin_preamble((body or "").strip())
-    cleaned = _trim_to_first_liturgy_section(cleaned)
+    cleaned = (body or "").strip()
+    if liturgy_readings:
+        cleaned = strip_tts_admin_preamble(cleaned)
+        cleaned = _trim_to_first_liturgy_section(cleaned)
+    else:
+        # Synthèse : retirer seulement une consigne admin en tête, sans trim liturgique.
+        cleaned = strip_tts_admin_preamble(cleaned)
+        if is_liturgy_readings_tts_text(cleaned):
+            # Garde-fou : un corps de synthèse ne doit pas être traité comme lectionnaire.
+            pass
     return apply_tts_pronunciation(cleaned)
+
+
+_TTS_VERBATIM_TRANSCRIPT_MARKER = "# Transcript"
+
+
+def strict_verbatim_tts_prompt(spoken: str) -> str:
+    """
+    Enveloppe le texte oral d'un prompt director Gemini TTS (non lu à voix haute).
+
+    Empêche le modèle d'inventer / prolonger le texte quand un morceau est court
+    (annonce seule, titre, etc.). Format recommandé Google : préambule TTS +
+    Director's Notes + marqueur ``# Transcript`` avant le contenu à lire.
+    """
+    t = (spoken or "").strip()
+    if not t:
+        return t
+    # Déjà enveloppé (double appel spoken_text → generate_audio).
+    if t.lstrip().startswith("# TTS") and _TTS_VERBATIM_TRANSCRIPT_MARKER in t:
+        return t
+    return (
+        "# TTS\n"
+        "Synthesize speech for the transcript below. "
+        "Speak ONLY the words of the Transcript. "
+        "Do not add, invent, paraphrase, summarize, introduce, conclude, "
+        "continue, comment, or improvise any words beyond the Transcript. "
+        "Do not invent biblical verses, liturgical formulas, or pastoral commentary. "
+        "Do not read these instructions or the director notes aloud.\n\n"
+        "# Director's Notes\n"
+        "French liturgical or pastoral reading. Clear, neutral delivery. "
+        "Verbatim only — zero extra words before, during, or after the Transcript.\n\n"
+        f"{_TTS_VERBATIM_TRANSCRIPT_MARKER}\n"
+        f"{t}"
+    )
 
 
 def plain_readings_for_tts(texts: object) -> str:
@@ -413,10 +455,10 @@ def compose_synthesis_tts_text(
 ) -> str:
     """Texte lu pour l’audio de la synthèse (sans préfixes ``audio_style_*``)."""
     del templates, periode  # compatibilité des appels existants
-    return spoken_text_for_tts(body)
+    return spoken_text_for_tts(body, liturgy_readings=False)
 
 
 def compose_readings_tts_text(*, body: str, templates: dict[str, str] | None = None) -> str:
     """Texte lu pour l’audio des lectures intégrales (sans préfixe ``audio_style_lectures``)."""
     del templates
-    return spoken_text_for_tts(body)
+    return spoken_text_for_tts(body, liturgy_readings=True)

@@ -33,9 +33,9 @@ class GeminiTtsApiClient:
         voice_name: str = "Kore",
         max_retries: int = 6,
     ) -> GeminiTtsResult:
-        from core.sunday_readings_tts import spoken_text_for_tts
+        from core.sunday_readings_tts import spoken_text_for_tts, strict_verbatim_tts_prompt
 
-        text = spoken_text_for_tts(text)
+        text = strict_verbatim_tts_prompt(spoken_text_for_tts(text))
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={self.api_key}"

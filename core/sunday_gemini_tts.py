@@ -44,6 +44,33 @@ _LITURGY_SECTION_PAUSE_MS = 750
 # Pause entre l'annonce d'une césure et le début de son corps.
 _SECTION_INTRO_PAUSE_MS = 750
 _CATECHESE_TTS_PAUSE_MS = 900
+# Sous ce seuil, un morceau isolé pousse Gemini TTS à inventer du texte.
+_MIN_TTS_CHUNK_CHARS = 100
+
+
+def coalesce_short_tts_chunks(
+    chunks: list[str],
+    *,
+    min_chars: int = _MIN_TTS_CHUNK_CHARS,
+    max_chars: int = 1400,
+) -> list[str]:
+    """Fusionne les micro-morceaux pour éviter un appel TTS trop court (hallucinations)."""
+    cleaned = [c.strip() for c in chunks if (c or "").strip()]
+    if not cleaned:
+        return []
+    out: list[str] = [cleaned[0]]
+    for ch in cleaned[1:]:
+        prev = out[-1]
+        if len(prev) < min_chars and len(prev) + 1 + len(ch) <= max_chars:
+            out[-1] = f"{prev} {ch}".strip()
+        elif len(ch) < min_chars and len(prev) + 1 + len(ch) <= max_chars:
+            out[-1] = f"{prev} {ch}".strip()
+        else:
+            out.append(ch)
+    if len(out) >= 2 and len(out[-1]) < min_chars and len(out[-2]) + 1 + len(out[-1]) <= max_chars:
+        out[-2] = f"{out[-2]} {out[-1]}".strip()
+        out.pop()
+    return out
 
 
 def _split_by_size(text: str, *, max_chars: int) -> list[str]:
@@ -88,8 +115,8 @@ def _liturgy_section_tts_pieces(
     """
     Morceaux TTS d'une section liturgique ou d'une sous-section de synthèse.
 
-    Annonce orale séparée du corps (pause audio ajoutée à l'assemblage) ; le corps est
-    dédoublonné si son début répète le titre de la césure.
+    L'annonce (intro AELF) est collée au début du premier morceau du corps : un appel TTS
+    trop court sur la seule annonce provoque des hallucinations Gemini (texte inventé).
     """
     body = dedupe_tts_section_body(title, body, intro_lue=intro_lue)
     title_norm = normalize_liturgy_section_title(title) if title else ""
@@ -101,15 +128,26 @@ def _liturgy_section_tts_pieces(
     if not body:
         return []
 
-    title_norm = normalize_liturgy_section_title(title) if title else ""
     announcement = liturgy_section_oral_announcement(
         title_norm or title,
         intro_lue=intro_lue,
         ref=ref,
     )
-    pieces: list[str] = [announcement]
-    pieces.extend(_split_by_size_at_word(body, max_chars=max_chars))
-    return pieces
+    body_chunks = _split_by_size_at_word(body, max_chars=max_chars)
+    if not body_chunks:
+        return []
+    # Annonce + premier segment du corps dans le même appel TTS.
+    room = max(32, max_chars - len(announcement) - 2)
+    first_body = body_chunks[0]
+    if len(first_body) > room and room > 64:
+        # Recoupe le premier segment si l'annonce + corps dépasse max_chars.
+        split_first = _split_by_size_at_word(first_body, max_chars=room)
+        first_body = split_first[0]
+        body_chunks = split_first[1:] + body_chunks[1:]
+    else:
+        body_chunks = body_chunks[1:]
+    first = f"{announcement} {first_body}".strip()
+    return coalesce_short_tts_chunks([first, *body_chunks], max_chars=max_chars)
 
 
 def _liturgy_readings_tts_section_chunk_specs(
@@ -137,10 +175,17 @@ def _liturgy_readings_tts_section_chunk_specs(
                         ref=ref,
                     )
                     if pieces:
-                        intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
-                        specs.append((pieces, intro_pause))
+                        # Pause entre sections uniquement (plus entre annonce isolée et corps).
+                        specs.append((pieces, None))
                 continue
-            pieces = _split_by_size_at_word(body, max_chars=max_chars) if body else []
+            pieces = (
+                coalesce_short_tts_chunks(
+                    _split_by_size_at_word(body, max_chars=max_chars),
+                    max_chars=max_chars,
+                )
+                if body
+                else []
+            )
             intro_pause = None
         else:
             if not (body or "").strip():
@@ -153,7 +198,7 @@ def _liturgy_readings_tts_section_chunk_specs(
                 intro_lue=intro_lue,
                 ref=ref,
             )
-            intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
+            intro_pause = None
         if pieces:
             specs.append((pieces, intro_pause))
     return specs
@@ -218,7 +263,7 @@ def chunk_text_for_tts(text: str, *, max_chars: int = 1400) -> list[str]:
             final.append(c)
         else:
             final.extend(_split_by_size(c, max_chars=max_chars))
-    return final
+    return coalesce_short_tts_chunks(final, max_chars=max_chars)
 
 
 def _synthesis_tts_section_chunk_specs(
@@ -240,15 +285,21 @@ def _synthesis_tts_section_chunk_specs(
             continue
         if title == CATECHESE_SECTION_TITLE:
             if body:
-                specs.append(([CATECHESE_TTS_INTRO], None))
                 body_chunks = chunk_text_for_tts(body, max_chars=max_chars)
                 if body_chunks:
-                    specs.append((body_chunks, None))
+                    # Ne jamais envoyer l'annonce seule (hallucinations Gemini TTS).
+                    first = f"{CATECHESE_TTS_INTRO} {body_chunks[0]}".strip()
+                    pieces = coalesce_short_tts_chunks(
+                        [first, *body_chunks[1:]],
+                        max_chars=max_chars,
+                    )
+                    if pieces:
+                        specs.append((pieces, None))
             continue
         pieces = _liturgy_section_tts_pieces(title, body, max_chars=max_chars)
         if pieces:
-            intro_pause = _SECTION_INTRO_PAUSE_MS if len(pieces) > 1 else None
-            specs.append((pieces, intro_pause))
+            # Synthèse : annonce collée au corps (même logique anti-hallucination).
+            specs.append((pieces, None))
     return specs or None
 
 
@@ -548,7 +599,8 @@ def _tts_chunked_bytes_from_spoken(
     synth_specs = _synthesis_tts_section_chunk_specs(spoken, max_chars=1400)
     if synth_specs:
         has_catechese = any(
-            pieces and pieces[0] == CATECHESE_TTS_INTRO for pieces, _pause in synth_specs
+            pieces and str(pieces[0]).startswith(CATECHESE_TTS_INTRO)
+            for pieces, _pause in synth_specs
         )
         inter_pause = _CATECHESE_TTS_PAUSE_MS if has_catechese else _LITURGY_SECTION_PAUSE_MS
         return _tts_section_specs_to_wav(

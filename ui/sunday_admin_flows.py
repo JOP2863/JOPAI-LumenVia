@@ -892,6 +892,11 @@ def _run_generate_sunday_flow(
     )
 
     audio_route = "vertex"
+    audio_bytes_norm = b""
+    audio_mime_norm = "audio/wav"
+    audio_ext = "wav"
+    audio_ok = False
+    audio_fail_msg = ""
     _flow_overlay_step(
         _overlay,
         "2/4 — Audio de la synthèse (TTS morcelé)…",
@@ -904,6 +909,8 @@ def _run_generate_sunday_flow(
     )
     with st.spinner("Synthèse audio (Vertex AI)…"):
         try:
+            if not (tts_payload or "").strip():
+                raise RuntimeError("Texte TTS synthèse vide après nettoyage.")
             at0 = time.perf_counter()
             audio_bytes_norm, audio_mime_norm, audio_ext = tts_spoken_audio_bytes(
                 cfg=cfg,
@@ -914,69 +921,64 @@ def _run_generate_sunday_flow(
             )
             perf["audio_vertex_s"] = round(time.perf_counter() - at0, 3)
             audio_route = last_tts_route() or "vertex_tts"
-            audio = type("AudioWrap", (), {})()
-            audio.audio_bytes = audio_bytes_norm
-            audio.mime_type = audio_mime_norm
-            audio.model = audio_route
+            if not audio_bytes_norm:
+                raise RuntimeError("Réponse audio synthèse vide.")
+            audio_ok = True
         except Exception as exc:
+            audio_fail_msg = f"{type(exc).__name__}: {str(exc)[:180]}"
             if debug:
                 st.exception(exc)
-            return _flow_result(
-                ok=False,
-                level="warning",
-                message=(
-                    f"Synthèse texte enregistrée dans `Syntheses/{date_label}/`, "
-                    "mais l'audio synthèse a échoué. Utilise « Compléter les manquants » "
-                    "ou vérifie Vertex TTS / GEMINI_API_KEY."
-                ),
+            st.warning(
+                f"Synthèse texte enregistrée, mais l'audio synthèse a échoué ({audio_fail_msg}). "
+                "Poursuite éventuelle (lectures / PDF) — utilise « Compléter les manquants » pour l’audio."
             )
 
-        if not getattr(audio, "audio_bytes", b""):
-            return _flow_result(
-                ok=False,
-                level="warning",
-                message=(
-                    f"Synthèse texte enregistrée dans `Syntheses/{date_label}/`, "
-                    "mais la réponse audio était vide."
-                ),
-            )
+    if audio_ok:
+        audio_path = f"Audio/{date_str}/{gen_entity_id}.{audio_ext}"
+        uat0 = time.perf_counter()
+        upload_bytes(
+            gcs=gcs,
+            bucket_name=cfg.gcs_bucket_name,
+            path=audio_path,
+            data=audio_bytes_norm,
+            content_type=audio_mime_norm,
+        )
+        perf["upload_audio_s"] = round(time.perf_counter() - uat0, 3)
+        perf["audio_route"] = audio_route
 
-    audio_path = f"Audio/{date_str}/{gen_entity_id}.{audio_ext}"
-    uat0 = time.perf_counter()
-    upload_bytes(
-        gcs=gcs,
-        bucket_name=cfg.gcs_bucket_name,
-        path=audio_path,
-        data=audio_bytes_norm,
-        content_type=audio_mime_norm,
-    )
-    perf["upload_audio_s"] = round(time.perf_counter() - uat0, 3)
-    perf["audio_route"] = audio_route
+        append_immutable_row(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="audio",
+            values_by_col={
+                "entity_id": sha256(f"audio|{gen_entity_id}|{audio_path}".encode("utf-8")).hexdigest()[:24],
+                "gen_entity_id": row_gen["entity_id"],
+                "voice": voice_syn,
+                "format": audio_ext,
+                "gcs_path": audio_path,
+                "kind": "synthese",
+                "duration_tts_s": _sheet_seconds(perf.get("audio_vertex_s")),
+                "duration_upload_s": _sheet_seconds(perf.get("upload_audio_s")),
+                "tts_route": audio_route or "",
+            },
+        )
 
-    append_immutable_row(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table="audio",
-        values_by_col={
-            "entity_id": sha256(f"audio|{gen_entity_id}|{audio_path}".encode("utf-8")).hexdigest()[:24],
-            "gen_entity_id": row_gen["entity_id"],
-            "voice": voice_syn,
-            "format": audio_ext,
-            "gcs_path": audio_path,
-            "kind": "synthese",
-            "duration_tts_s": _sheet_seconds(perf.get("audio_vertex_s")),
-            "duration_upload_s": _sheet_seconds(perf.get("upload_audio_s")),
-            "tts_route": audio_route or "",
-        },
-    )
-
-    persist_sunday_bundle(
-        date_str=date_str,
-        zone=zone_key,
-        synth_text=gen.text,
-        audio_bytes=audio_bytes_norm,
-        audio_mime=audio_mime_norm,
-    )
+        persist_sunday_bundle(
+            date_str=date_str,
+            zone=zone_key,
+            synth_text=gen.text,
+            audio_bytes=audio_bytes_norm,
+            audio_mime=audio_mime_norm,
+        )
+    else:
+        audio_path = ""
+        persist_sunday_bundle(
+            date_str=date_str,
+            zone=zone_key,
+            synth_text=gen.text,
+            audio_bytes=None,
+            audio_mime=None,
+        )
 
     readings_cover_signed: str | None = None
     if generate_readings_audio:
@@ -1091,12 +1093,15 @@ def _run_generate_sunday_flow(
         st.text_area("Synthèse", value=txt, height=320)
 
         try:
-            da0 = time.perf_counter()
-            aud_bytes = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=audio_path)
-            aud_play, aud_mime_play, _ = normalize_audio_bytes(audio_bytes=aud_bytes, mime_type=audio_mime_norm)
-            perf["download_audio_verify_s"] = round(time.perf_counter() - da0, 3)
-            st.subheader("Écouter le résumé")
-            st.audio(aud_play, format=aud_mime_play)
+            if audio_ok and audio_path:
+                da0 = time.perf_counter()
+                aud_bytes = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=audio_path)
+                aud_play, aud_mime_play, _ = normalize_audio_bytes(audio_bytes=aud_bytes, mime_type=audio_mime_norm)
+                perf["download_audio_verify_s"] = round(time.perf_counter() - da0, 3)
+                st.subheader("Écouter le résumé")
+                st.audio(aud_play, format=aud_mime_play)
+            else:
+                st.info("Pas d’audio synthèse à vérifier (échec TTS ou non demandé).")
         except Exception as e:
             st.error(f"Erreur lecture/lecture audio Cloud: {e}")
 
@@ -1180,7 +1185,7 @@ def _run_generate_sunday_flow(
                 public_app_url=_base_pub or None,
                 gcs=gcs,
                 bucket_name=str(cfg.gcs_bucket_name).strip(),
-                gcs_audio_path=audio_path,
+                gcs_audio_path=audio_path or None,
             )
             pdf_b = build_liturgy_sunday_pdf_bytes(
                 image_bytes=img_b,
@@ -1241,11 +1246,20 @@ def _run_generate_sunday_flow(
         st.markdown("**Chronométrage (debug)**")
         st.write(perf)
 
-    parts = [f"Régénération terminée pour {date_label} — texte et audio synthèse publiés."]
+    if audio_ok:
+        parts = [f"Régénération terminée pour {date_label} — texte et audio synthèse publiés."]
+        level = "success"
+    else:
+        parts = [
+            f"Régénération partielle pour {date_label} — texte publié, "
+            f"audio synthèse manquant ({audio_fail_msg or 'erreur TTS'})."
+        ]
+        level = "warning"
     if generate_readings_audio:
         parts.append("Audio des lectures inclus.")
     if generate_pdf:
         parts.append("Fascicule PDF inclus.")
     if retry_fallback_note:
         parts.insert(0, retry_fallback_note)
-    return _flow_result(ok=True, level="success" if not retry_fallback_note else "warning", message=" ".join(parts))
+        level = "warning"
+    return _flow_result(ok=True, level=level, message=" ".join(parts))
