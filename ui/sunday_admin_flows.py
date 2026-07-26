@@ -548,7 +548,8 @@ def _run_generate_sunday_flow(
 ) -> dict[str, str | bool]:
     import app as ap
     t_flow = time.perf_counter()
-    date_label = str(getattr(identity, "date", "") or "")
+    date_str = str(getattr(identity, "date", "") or "").strip()[:10]
+    date_label = date_str
     retry_fallback_note = ""
     _flow_overlay_step(
         _overlay,
