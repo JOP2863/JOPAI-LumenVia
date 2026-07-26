@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import requests
 
+from core.aelf_text_cleanup import strip_aelf_lectionary_rubrics
 from core.config import DEFAULT_AELF_BASE_URL, resolve_aelf_base_url
 
 
@@ -228,5 +229,6 @@ def _clean_aelf_html(s: str) -> str:
     # Pas plus d'une ligne vide consécutive
     s = re.sub(r"\n{3,}", "\n\n", s)
     s = re.sub(r"\n{2,}", "\n\n", s)
-    return s.strip()
+    # Rubriques lectionnaire (OU LECTURE BREVE, OU BIEN, …) — pas de l'Écriture.
+    return strip_aelf_lectionary_rubrics(s)
 

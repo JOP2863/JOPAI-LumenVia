@@ -25,6 +25,7 @@ from reportlab.platypus.doctemplate import BaseDocTemplate, PageTemplate as PdfP
 from reportlab.platypus.frames import Frame
 
 from core.aelf_reading_meta import reading_caption
+from core.aelf_text_cleanup import clean_aelf_text_for_display
 from core.catechese_section_strip import (
     CATECHESE_SECTION_TITLE,
     find_catechese_section_index,
@@ -62,7 +63,7 @@ def _to_para_html_aelf(text: str | None) -> str:
     qui créent un interligne artificiellement énorme si on les rend en <br/>.
     On transforme donc les retours simples en espaces et on garde les paragraphes (lignes vides).
     """
-    raw = (text or "").strip()
+    raw = clean_aelf_text_for_display(text or "").strip()
     if not raw:
         return "<i>—</i>"
     # Stockage “bloc” (sans retours) + robustesse si l'entrée contient encore des \n.
