@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import requests
 
-from core.aelf_text_cleanup import strip_aelf_lectionary_rubrics
+from core.aelf_text_cleanup import strip_aelf_lectionary_rubrics, strip_aelf_lectionary_rubrics_html
 from core.config import DEFAULT_AELF_BASE_URL, resolve_aelf_base_url
 
 
@@ -214,6 +214,8 @@ def _clean_aelf_html(s: str) -> str:
     """
     if not s:
         return ""
+    # Retire d'abord les <p>OU LECTURE BREVE</p> (etc.) — plus fiable que le seul filtre texte.
+    s = strip_aelf_lectionary_rubrics_html(s)
     s = _BR_RE.sub("\n", s)
     # Le contenu AELF est souvent une suite de <p> très courts (1 ligne).
     # On évite donc les doubles sauts de ligne pour ne pas "aérer" excessivement.
@@ -229,6 +231,6 @@ def _clean_aelf_html(s: str) -> str:
     # Pas plus d'une ligne vide consécutive
     s = re.sub(r"\n{3,}", "\n\n", s)
     s = re.sub(r"\n{2,}", "\n\n", s)
-    # Rubriques lectionnaire (OU LECTURE BREVE, OU BIEN, …) — pas de l'Écriture.
+    # Filet texte (rubrique collée après aplatissement RDC, OU BIEN + suite, …).
     return strip_aelf_lectionary_rubrics(s)
 
