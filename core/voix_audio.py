@@ -129,7 +129,7 @@ def resolve_voice(
     scored: list[tuple[int, int, str, str, dict]] = []
 
     for r in rows:
-        if not sheet_row_status_is_live(r.get("Statut")):
+        if not sheet_row_status_is_live(r.get("Statut") or r.get("status")):
             continue
         de = _parse_date_effet(r.get("Date_Effet"))
         if de is not None and de > t:

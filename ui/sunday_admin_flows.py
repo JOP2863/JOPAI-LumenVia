@@ -99,6 +99,25 @@ def _sunday_date_for_voice(identity: object, date_str: str | None = None) -> dat
     return date.today()
 
 
+def _resolve_voice_for_identity(
+    voix_rows: list[dict],
+    *,
+    identity: object,
+    cible: str,
+    exclude_voices: list[str] | None = None,
+) -> dict:
+    """Résolution voix isolée (évite UnboundLocalError dans le flux long)."""
+    sunday_d = _sunday_date_for_voice(identity)
+    return resolve_voice(
+        voix_rows,
+        cible=cible,
+        couleur=getattr(identity, "couleur", None),
+        periode=getattr(identity, "periode", None),
+        today=sunday_d,
+        sunday_date=sunday_d,
+        exclude_voices=exclude_voices,
+    )
+
 def _existing_synthese_voice_for_exclude(
     *,
     gs: object,
@@ -340,7 +359,7 @@ def _run_incremental_sunday_outputs(
                             cible="lectures",
                             couleur=getattr(identity, "couleur", None),
                             periode=getattr(identity, "periode", None),
-                            sunday_date=_sunday_date_for_voice(identity, date_str),
+                            sunday_date=_sunday_date_for_voice(identity),
                             exclude_voices=exclude_read,
                         )
                         readings_tts = compose_readings_tts_text(
@@ -813,12 +832,8 @@ def _run_generate_sunday_flow(
         },
     )
 
-    voice_syn_res = resolve_voice(
-        voix_rows,
-        cible="synthese",
-        couleur=getattr(identity, "couleur", None),
-        periode=getattr(identity, "periode", None),
-        sunday_date=_sunday_date_for_voice(identity, date_str),
+    voice_syn_res = _resolve_voice_for_identity(
+        voix_rows, identity=identity, cible="synthese"
     )
     voice_syn = str(voice_syn_res["voice"])
     perf["voice_synthese"] = voice_syn
@@ -947,12 +962,10 @@ def _run_generate_sunday_flow(
                     t0=t_flow,
                 )
                 with st.spinner("LumenVia génère l’audio des lectures (AELF)…"):
-                    voice_read_res = resolve_voice(
+                    voice_read_res = _resolve_voice_for_identity(
                         voix_rows,
+                        identity=identity,
                         cible="lectures",
-                        couleur=getattr(identity, "couleur", None),
-                        periode=getattr(identity, "periode", None),
-                        sunday_date=_sunday_date_for_voice(identity, date_str),
                         exclude_voices=[voice_syn],
                     )
                     voice_read = str(voice_read_res["voice"])
