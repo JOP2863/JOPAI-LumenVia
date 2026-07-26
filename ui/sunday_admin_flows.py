@@ -24,6 +24,7 @@ from core.local_bundle_cache import persist_sunday_bundle
 from core.liturgy_theme import liturgical_accent_hex
 from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
+from ui.streamlit_caches import service_account_json_fingerprint
 from core.gcs_signed_urls import gcs_signed_url
 from core.config import resolve_gemini_api_key
 from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
@@ -35,7 +36,6 @@ from core.sunday_gemini_tts import (
     tts_spoken_audio_bytes,
     vertex_tts_allowlist_blocked,
 )
-from core.vertex_gemini import VertexGeminiClient
 from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import update_loading_overlay
@@ -342,13 +342,13 @@ def _run_incremental_sunday_outputs(
                         try:
                             templates_ia = ap._load_prompt_templates_cached(
                                 gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
-                                service_account_fingerprint=ap._service_account_fingerprint(
+                                service_account_fingerprint=service_account_json_fingerprint(
                                     getattr(cfg, "gcp_service_account", {}) or {}
                                 ),
                             )
                             voix_r = ap._load_voix_rules_cached(
                                 gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
-                                service_account_fingerprint=ap._service_account_fingerprint(
+                                service_account_fingerprint=service_account_json_fingerprint(
                                     getattr(cfg, "gcp_service_account", {}) or {}
                                 ),
                             )
@@ -604,7 +604,9 @@ def _run_generate_sunday_flow(
     try:
         templates = ap._load_prompt_templates_cached(
             gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
-            service_account_fingerprint=ap._service_account_fingerprint(getattr(cfg, "gcp_service_account", {}) or {}),
+            service_account_fingerprint=service_account_json_fingerprint(
+                getattr(cfg, "gcp_service_account", {}) or {}
+            ),
         )
     except Exception:
         templates = {}
@@ -613,10 +615,17 @@ def _run_generate_sunday_flow(
     try:
         voix_rows = ap._load_voix_rules_cached(
             gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
-            service_account_fingerprint=ap._service_account_fingerprint(getattr(cfg, "gcp_service_account", {}) or {}),
+            service_account_fingerprint=service_account_json_fingerprint(
+                getattr(cfg, "gcp_service_account", {}) or {}
+            ),
         )
     except Exception:
         voix_rows = []
+    if not voix_rows:
+        st.warning(
+            "Table `Voix_Audio` vide ou illisible — fallback voix **Achird** (synthèse et lectures). "
+            "Vérifie l’onglet VOIX / Admin → Test ressources."
+        )
 
     instructions_struct = templates.get("instructions_base_md") or Path("data/instructions_ia.md").read_text(
         encoding="utf-8"

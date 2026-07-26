@@ -394,16 +394,52 @@ def spoken_text_for_tts(body: str, *, liturgy_readings: bool = False) -> str:
 
 _TTS_VERBATIM_TRANSCRIPT_MARKER = "# Transcript"
 
-# Accents francophones variés — rotation déterministe (dimanche + cible), pas toujours le même.
-FRENCH_TTS_ACCENT_POOL: tuple[str, ...] = (
-    "Metropolitan French from France (standard liturgical diction from Paris / Île-de-France)",
-    "Belgian French (Belgium), clear liturgical diction",
-    "Swiss French (Romandy / Suisse romande), clear liturgical diction",
-    "Quebec French (Canada), clear liturgical diction",
-    "West African French (e.g. Senegal or Côte d'Ivoire), clear liturgical diction",
-    "Maghrebi French (North Africa), clear liturgical diction",
-    "Southern France French (Midi), clear liturgical diction",
+# Accents francophones variés — rotation déterministe (dimanche + cible + voix).
+# Paire : consigne director (EN, pour Gemini) + libellé UI (FR).
+FRENCH_TTS_ACCENT_SPECS: tuple[tuple[str, str], ...] = (
+    (
+        "Metropolitan French from France (standard liturgical diction from Paris / Île-de-France)",
+        "France (métropolitain)",
+    ),
+    (
+        "Belgian French (Belgium), clear liturgical diction",
+        "Belgique",
+    ),
+    (
+        "Swiss French (Romandy / Suisse romande), clear liturgical diction",
+        "Suisse romande",
+    ),
+    (
+        "Quebec French (Canada), clear liturgical diction",
+        "Québec",
+    ),
+    (
+        "West African French (e.g. Senegal or Côte d'Ivoire), clear liturgical diction",
+        "Afrique de l’Ouest",
+    ),
+    (
+        "Maghrebi French (North Africa), clear liturgical diction",
+        "Maghreb",
+    ),
+    (
+        "Southern France French (Midi), clear liturgical diction",
+        "Sud de la France (Midi)",
+    ),
 )
+
+FRENCH_TTS_ACCENT_POOL: tuple[str, ...] = tuple(spec[0] for spec in FRENCH_TTS_ACCENT_SPECS)
+
+
+def _tts_french_accent_index(
+    *,
+    sunday_date: date | None = None,
+    cible: str = "synthese",
+    voice_name: str | None = None,
+) -> int:
+    day = (sunday_date or date.today()).isoformat()
+    key = f"{day}|{norm_slug(cible)}|{norm_slug(voice_name)}|accent-fr-v1"
+    h = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
+    return h % len(FRENCH_TTS_ACCENT_SPECS)
 
 
 def pick_tts_french_accent(
@@ -417,10 +453,25 @@ def pick_tts_french_accent(
 
     Même job TTS (tous les morceaux) → même accent ; dimanches / cibles différents → variété.
     """
-    day = (sunday_date or date.today()).isoformat()
-    key = f"{day}|{norm_slug(cible)}|{norm_slug(voice_name)}|accent-fr-v1"
-    h = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
-    return FRENCH_TTS_ACCENT_POOL[h % len(FRENCH_TTS_ACCENT_POOL)]
+    return FRENCH_TTS_ACCENT_SPECS[
+        _tts_french_accent_index(
+            sunday_date=sunday_date, cible=cible, voice_name=voice_name
+        )
+    ][0]
+
+
+def tts_french_accent_label_fr(
+    *,
+    sunday_date: date | None = None,
+    cible: str = "synthese",
+    voice_name: str | None = None,
+) -> str:
+    """Libellé court pour l’UI (ex. « Québec », « France (métropolitain) »)."""
+    return FRENCH_TTS_ACCENT_SPECS[
+        _tts_french_accent_index(
+            sunday_date=sunday_date, cible=cible, voice_name=voice_name
+        )
+    ][1]
 
 
 def strict_verbatim_tts_prompt(

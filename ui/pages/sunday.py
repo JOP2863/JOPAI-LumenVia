@@ -66,17 +66,29 @@ def _show_sunday_admin_flash(date_str: str) -> None:
         st.info(message)
 
 
-def _sunday_identity_audio(data: bytes, mime: str, *, voice_label: str | None = None) -> None:
+def _sunday_identity_audio(
+    data: bytes,
+    mime: str,
+    *,
+    voice_label: str | None = None,
+    accent_label: str | None = None,
+) -> None:
     """Lecteur audio pleine largeur (Streamlit ≥ 1.56 : ``width='stretch'``)."""
     try:
         st.audio(data, format=mime, width="stretch")
     except TypeError:
         st.audio(data, format=mime)
     lab = (voice_label or "").strip()
-    if lab:
+    acc = (accent_label or "").strip()
+    if lab or acc:
+        parts: list[str] = []
+        if lab:
+            parts.append(f"Voix : {html_escape(lab)}")
+        if acc:
+            parts.append(f"Accent : {html_escape(acc)}")
         st.markdown(
             f"<p style=\"text-align:center;margin:0.2rem 0 0.55rem;line-height:1.35;"
-            f"color:#5f4f3a;font-size:0.78rem;opacity:0.9;\">Voix : {html_escape(lab)}</p>",
+            f"color:#5f4f3a;font-size:0.78rem;opacity:0.9;\">{' · '.join(parts)}</p>",
             unsafe_allow_html=True,
         )
 
@@ -92,6 +104,25 @@ def _tts_voice_display_label(voice_name: str | None) -> str | None:
         return str(mapping.get(raw) or raw)
     except Exception:
         return raw
+
+
+def _tts_accent_display_label(
+    *,
+    date_str: str,
+    cible: str,
+    voice_name: str | None,
+) -> str | None:
+    if not (voice_name or "").strip():
+        return None
+    try:
+        from core.sunday_readings_tts import tts_french_accent_label_fr
+
+        d = date.fromisoformat(str(date_str)[:10])
+        return tts_french_accent_label_fr(
+            sunday_date=d, cible=cible, voice_name=voice_name
+        )
+    except Exception:
+        return None
 
 
 def _lookup_sunday_audio_voices(
@@ -587,6 +618,11 @@ def render_sunday() -> None:
                 bundle_readings_audio[0],
                 bundle_readings_audio[1],
                 voice_label=_tts_voice_display_label(bundle_readings_voice),
+                accent_label=_tts_accent_display_label(
+                    date_str=date_str,
+                    cible="lectures",
+                    voice_name=bundle_readings_voice,
+                ),
             )
 
         if has_pdf_fmt or has_text_fmt:
@@ -632,6 +668,11 @@ def render_sunday() -> None:
                 bundle_audio[0],
                 bundle_audio[1],
                 voice_label=_tts_voice_display_label(bundle_synth_voice),
+                accent_label=_tts_accent_display_label(
+                    date_str=date_str,
+                    cible="synthese",
+                    voice_name=bundle_synth_voice,
+                ),
             )
         elif has_readings_fmt or has_pdf_fmt or has_text_fmt:
             st.markdown(

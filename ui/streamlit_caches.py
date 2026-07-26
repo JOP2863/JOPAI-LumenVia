@@ -16,10 +16,28 @@ from core.sheets_db import build_gspread_client, fetch_records
 
 
 def service_account_json_fingerprint(service_account_info: dict | None) -> str:
-    """Clé stable pour @st.cache_data (ne jamais passer le dict brut à cache_data)."""
+    """Clé stable pour @st.cache_data (ne jamais passer le dict SA brut à cache_data)."""
     if not service_account_info:
         return ""
     return json.dumps(service_account_info, sort_keys=True, ensure_ascii=False)
+
+
+def _sa_json_for_adm_sheets_cache(service_account_fingerprint: str) -> str:
+    """
+    ``adm_sheets_fetch_cached`` exige le JSON SA (``json.loads``).
+
+    Les flux dimanche passaient parfois un hash court (``service_account_fingerprint``) :
+    échec silencieux → Voix_Audio vide → fallback TTS Achird pour synthèse ET lectures.
+    """
+    raw = (service_account_fingerprint or "").strip()
+    if raw.startswith("{"):
+        try:
+            json.loads(raw)
+            return raw
+        except Exception:
+            pass
+    cfg = load_config()
+    return service_account_json_fingerprint(cfg.gcp_service_account)
 
 
 @st.cache_data(ttl=90, max_entries=64, show_spinner=False)
@@ -70,12 +88,7 @@ def load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint:
     """
     if not gsheet_id:
         return {}
-    _ = service_account_fingerprint
-
-    sa_json = service_account_fingerprint
-    if not sa_json:
-        cfg = load_config()
-        sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+    sa_json = _sa_json_for_adm_sheets_cache(service_account_fingerprint)
     if not sa_json:
         return {}
     rows = adm_sheets_fetch_cached(gsheet_id, "Paramètres_IA", 5000, sa_json)
@@ -95,11 +108,7 @@ def load_voix_rules_cached(*, gsheet_id: str, service_account_fingerprint: str) 
     """Règles de voix TTS (`Voix_Audio` / VOIX)."""
     if not gsheet_id:
         return []
-    _ = service_account_fingerprint
-    sa_json = service_account_fingerprint
-    if not sa_json:
-        cfg = load_config()
-        sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+    sa_json = _sa_json_for_adm_sheets_cache(service_account_fingerprint)
     if not sa_json:
         return []
     try:
