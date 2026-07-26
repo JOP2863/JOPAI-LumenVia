@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import date
 from hashlib import sha256
 from pathlib import Path
 
@@ -86,6 +87,49 @@ def _sheet_seconds(v: float | int | None) -> str:
     except (TypeError, ValueError):
         return ""
 
+
+def _sunday_date_for_voice(identity: object, date_str: str | None = None) -> date:
+    """Date du dimanche pour la rotation des pools Voix_Audio."""
+    raw = str(getattr(identity, "date", None) or date_str or "").strip()[:10]
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        try:
+            return date.fromisoformat(raw)
+        except Exception:
+            pass
+    return date.today()
+
+
+def _existing_synthese_voice_for_exclude(
+    *,
+    gs: object,
+    spreadsheet_id: str,
+    gen_entity_id: str | None,
+) -> list[str]:
+    """Si une synthèse existe déjà pour ce gen, exclure sa voix des lectures."""
+    eid = str(gen_entity_id or "").strip()
+    if not eid or not spreadsheet_id:
+        return []
+    try:
+        from core.sheets_db import fetch_records
+
+        rows = fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=spreadsheet_id,
+            table="audio",
+            limit=0,
+            use_cache=True,
+        )
+    except Exception:
+        return []
+    for r in rows or []:
+        if str(r.get("gen_entity_id") or "").strip() != eid:
+            continue
+        if str(r.get("kind") or "").strip().lower() not in ("synthese", "synthèse", "synthesis"):
+            continue
+        v = str(r.get("voice") or "").strip()
+        if v:
+            return [v]
+    return []
 
 def _append_pdf_export_row(
     *,
@@ -286,11 +330,18 @@ def _run_incremental_sunday_outputs(
                         except Exception:
                             templates_ia = {}
                             voix_r = []
+                        exclude_read = _existing_synthese_voice_for_exclude(
+                            gs=gs,
+                            spreadsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+                            gen_entity_id=gen_eid,
+                        )
                         voice_read = pick_voice_name(
                             voix_r,
                             cible="lectures",
                             couleur=getattr(identity, "couleur", None),
                             periode=getattr(identity, "periode", None),
+                            sunday_date=_sunday_date_for_voice(identity, date_str),
+                            exclude_voices=exclude_read,
                         )
                         readings_tts = compose_readings_tts_text(
                             body=readings_plain, templates=templates_ia
@@ -766,6 +817,7 @@ def _run_generate_sunday_flow(
         cible="synthese",
         couleur=getattr(identity, "couleur", None),
         periode=getattr(identity, "periode", None),
+        sunday_date=_sunday_date_for_voice(identity, date_str),
     )
     voice_syn = str(voice_syn_res["voice"])
     perf["voice_synthese"] = voice_syn
@@ -899,6 +951,8 @@ def _run_generate_sunday_flow(
                         cible="lectures",
                         couleur=getattr(identity, "couleur", None),
                         periode=getattr(identity, "periode", None),
+                        sunday_date=_sunday_date_for_voice(identity, date_str),
+                        exclude_voices=[voice_syn],
                     )
                     voice_read = str(voice_read_res["voice"])
                     perf["voice_lectures"] = voice_read

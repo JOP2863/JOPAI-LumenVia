@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import unicodedata
 from datetime import date, datetime
 from typing import Any, Iterable, Mapping
@@ -8,6 +9,10 @@ from core.sheets_db import sheet_row_status_is_live
 
 # Aligné sur le seed `Voix_Audio` (table VOIX) — si aucune règle ne matche.
 DEFAULT_GEMINI_TTS_VOICE = "Achird"
+
+# Pools documentés (mêmes voix que le seed table) — référence admin uniquement.
+LECTURES_VOICE_POOL = ("Charon", "Kore", "Vindemiatrix", "Zephyr", "Aoede")
+SYNTHESE_VOICE_POOL = ("Sulafat", "Laomedeia", "Achird", "Sadachbia", "Puck")
 
 
 def _strip_accents(s: str) -> str:
@@ -90,6 +95,15 @@ def _row_version(r: Mapping[str, Any]) -> int:
         return 0
 
 
+def _rotation_index(*, sunday_date: date, cible: str, n: int) -> int:
+    """Index déterministe dans un pool de même score (date du dimanche + cible)."""
+    if n <= 1:
+        return 0
+    key = f"{sunday_date.isoformat()}|{norm_slug(cible)}|lumenvia-voix-v2"
+    h = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
+    return h % n
+
+
 def resolve_voice(
     rows: Iterable[Mapping[str, Any]],
     *,
@@ -97,15 +111,21 @@ def resolve_voice(
     couleur: str | None,
     periode: str | None,
     today: date | None = None,
+    sunday_date: date | None = None,
+    exclude_voices: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """
     Choisit une voix Gemini TTS parmi les règles `Voix_Audio` (VOIX).
+
     Spécificité : +1 si Cible non *, +2 si Couleur non *, +2 si Temps non *.
-    Tie-break : Version desc, puis Date_Effet desc.
+    À score égal (pool table) : rotation déterministe par ``sunday_date`` + cible.
+    ``exclude_voices`` : évite de réutiliser la même voix (ex. lectures ≠ synthèse).
 
     Retourne un dict détaillé pour l'UX (voix retenue, règle gagnante, score, fallback).
     """
     t = today or date.today()
+    rot_day = sunday_date or t
+    exclude = {str(v).strip() for v in (exclude_voices or []) if str(v).strip()}
     scored: list[tuple[int, int, str, str, dict]] = []
 
     for r in rows:
@@ -146,17 +166,37 @@ def resolve_voice(
             "rule": None,
             "score": 0,
             "fallback": True,
+            "rotated": False,
             "reason": "Aucune règle Voix_Audio ne correspond — fallback en dur sur la voix par défaut.",
         }
 
-    scored.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
-    score, _ver, _de, voice, rule = scored[0]
+    max_score = max(x[0] for x in scored)
+    top = [x for x in scored if x[0] == max_score]
+    # Ordre stable pour la rotation (pas « dernière ligne gagnante »).
+    top.sort(key=lambda x: (x[3].casefold(), x[1], x[2]), reverse=False)
+
+    preferred = [x for x in top if x[3] not in exclude]
+    pool = preferred if preferred else top
+    rotated = len(pool) > 1
+    ix = _rotation_index(sunday_date=rot_day, cible=cible, n=len(pool))
+    score, _ver, _de, voice, rule = pool[ix]
+
+    if rotated:
+        reason = (
+            f"Pool de {len(pool)} règle(s) à score {score} — "
+            f"rotation déterministe pour le dimanche {rot_day.isoformat()} ({cible})."
+        )
+    else:
+        reason = "Règle la plus spécifique sélectionnée (score unique au sommet)."
+
     return {
         "voice": voice,
         "rule": rule,
         "score": score,
         "fallback": False,
-        "reason": "Règle la plus spécifique sélectionnée (score, version, date d'effet).",
+        "rotated": rotated,
+        "pool_size": len(pool),
+        "reason": reason,
     }
 
 
@@ -167,8 +207,18 @@ def pick_voice_name(
     couleur: str | None,
     periode: str | None,
     today: date | None = None,
+    sunday_date: date | None = None,
+    exclude_voices: Iterable[str] | None = None,
 ) -> str:
     """Wrapper rétro-compatible : renvoie uniquement le nom de voix retenu."""
     return str(
-        resolve_voice(rows, cible=cible, couleur=couleur, periode=periode, today=today)["voice"]
+        resolve_voice(
+            rows,
+            cible=cible,
+            couleur=couleur,
+            periode=periode,
+            today=today,
+            sunday_date=sunday_date,
+            exclude_voices=exclude_voices,
+        )["voice"]
     )

@@ -194,13 +194,24 @@ def _seed_voix_audio_defaults(*, gc, gsheet_id: str) -> int:
         raise RuntimeError("Voix_Audio: header vide après ensure_database.")
 
     today = date.today().isoformat()
+    # Pools à score égal → rotation hebdomadaire déterministe (voir core/voix_audio.resolve_voice).
+    # Lectures ≠ synthèse : pools disjoints ; exclude_voices côté génération.
     specs: list[tuple[str, str, str, str, str]] = [
-        ("*", "*", "*", "Achird", "Défaut — toutes cibles / tous temps"),
-        ("synthese", "*", "pascal", "Laomedeia", "Synthèse — temps pascal (tonique)"),
-        ("synthese", "*", "careme", "Vindemiatrix", "Synthèse — Carême (douce)"),
-        ("synthese", "violet", "*", "Sulafat", "Synthèse — liturgie violette"),
-        ("synthese", "rouge", "*", "Sadachbia", "Synthèse — liturgie rouge"),
-        ("lectures", "*", "*", "Charon", "Lectures AELF — voix claire / lecteur"),
+        ("lectures", "*", "*", "Charon", "Pool lectures — claire / pédagogique"),
+        ("lectures", "*", "*", "Kore", "Pool lectures — neutre / posée"),
+        ("lectures", "*", "*", "Vindemiatrix", "Pool lectures — douce"),
+        ("lectures", "*", "*", "Zephyr", "Pool lectures — lumineuse"),
+        ("lectures", "*", "*", "Aoede", "Pool lectures — légère"),
+        ("synthese", "*", "*", "Sulafat", "Pool synthèse — douce chaleur"),
+        ("synthese", "*", "*", "Laomedeia", "Pool synthèse — tonique"),
+        ("synthese", "*", "*", "Achird", "Pool synthèse — chaleureuse"),
+        ("synthese", "*", "*", "Sadachbia", "Pool synthèse — vive"),
+        ("synthese", "*", "*", "Puck", "Pool synthèse — espiègle"),
+        # Overrides saisonniers (score plus élevé → pas de rotation dans le pool générique)
+        ("synthese", "*", "pascal", "Laomedeia", "Override — temps pascal"),
+        ("synthese", "*", "careme", "Vindemiatrix", "Override — Carême"),
+        ("synthese", "violet", "*", "Sulafat", "Override — liturgie violette"),
+        ("synthese", "rouge", "*", "Sadachbia", "Override — liturgie rouge"),
     ]
 
     bulk: list[list[str]] = []

@@ -891,8 +891,10 @@ def _render_admin_tts_pronunciation_viewer(*, cfg: object) -> None:
 def _render_admin_voix_audio_section(*, cfg: object, gs: object) -> None:
     """Affichage et édition des règles `Voix_Audio` (VOIX) — sans `st.dataframe`."""
     st.caption(
-        "Règles append-only : **Cible** (`synthese`, `lectures`, `*`), **Couleur**, **Temps liturgique** (`pascal`, `careme`, … ou `*`). "
-        "La règle la plus **spécifique** l'emporte. Catalogue des voix : `data/gemini_tts_voices.json` (à jour avec la doc Google)."
+        "Règles append-only : **Cible** (`synthese`, `lectures`), **Couleur**, **Temps liturgique**. "
+        "À **score égal** (plusieurs voix pour la même cible), rotation **déterministe par dimanche**. "
+        "Les lectures excluent la voix déjà retenue pour la synthèse. "
+        "Catalogue : `data/gemini_tts_voices.json`."
     )
     try:
         voix_all = load_voix_rules_cached(
@@ -965,13 +967,14 @@ def _render_admin_voix_audio_section(*, cfg: object, gs: object) -> None:
                 format_func=lambda x: x or "(non précisé)",
                 key="adm_voix_test_temps",
             )
-        t_date = st.date_input("Date d'effet (simulée)", value=date.today(), key="adm_voix_test_date")
+        t_date = st.date_input("Date du dimanche (rotation)", value=date.today(), key="adm_voix_test_date")
         res_test = resolve_voice(
             voix_actifs,
             cible=t_cible,
             couleur=(t_couleur or None),
             periode=(t_temps or None),
             today=t_date,
+            sunday_date=t_date,
         )
         voice_lab = cat_map.get(res_test["voice"], res_test["voice"])
         if res_test.get("fallback"):
@@ -980,12 +983,12 @@ def _render_admin_voix_audio_section(*, cfg: object, gs: object) -> None:
             )
         else:
             rule_id = (res_test.get("rule") or {}).get("#ID") or ""
+            rot = " · rotation pool" if res_test.get("rotated") else ""
             st.success(
-                f"Voix retenue : **{voice_lab}** — règle `#ID {rule_id}` (score {res_test.get('score')})."
+                f"Voix retenue : **{voice_lab}** — règle `#ID {rule_id}` "
+                f"(score {res_test.get('score')}, pool {res_test.get('pool_size', 1)}{rot})."
             )
-            st.caption(
-                "Spécificité = +1 Cible · +2 Couleur · +2 Temps. Tie-break = Version desc, puis Date_Effet desc."
-            )
+            st.caption(str(res_test.get("reason") or ""))
 
     with st.expander("Ajouter une règle de voix", expanded=False):
         voice_names = gemini_tts_voice_names_ordered()

@@ -42,7 +42,7 @@ _LAST_TTS_ROUTE_SESSION_KEY = "lumenvia_last_tts_route"
 # Pause entre sections liturgiques / sous-sections de synthèse.
 _LITURGY_SECTION_PAUSE_MS = 750
 # Pause entre l'annonce d'une césure et le début de son corps.
-_SECTION_INTRO_PAUSE_MS = 600
+_SECTION_INTRO_PAUSE_MS = 750
 _CATECHESE_TTS_PAUSE_MS = 900
 
 
