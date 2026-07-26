@@ -31,6 +31,7 @@ from core.sheets_db import (
 from core.emailing import (
     EmailTemplate,
     french_day_month_year,
+    inject_weekly_actualite_into_email_body,
     normalize_email_template_text,
     pick_latest_live_email_template,
     render_weekly_email_template,
@@ -678,6 +679,9 @@ def render_emailing_manual_broadcast(
                 "illustration_description": (_urls_send.get("illustration_description") or "").strip(),
                 "url_app": url_app,
                 "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
+                "message_actualite": str(
+                    st.session_state.get("adm_email_message_actualite") or ""
+                ).strip(),
             }
 
             for uid0, urec in recipients[:500]:
@@ -730,7 +734,11 @@ def render_emailing_manual_broadcast(
 
                 body_clean = _maybe_strip_objet_preamble(body=body_clean, subject=rendered2.subject)
                 body_clean = re.sub(r"(?im)^\s*Corps du message\s*:\s*\n*", "", body_clean)
-                rendered2 = EmailTemplate(subject=rendered2.subject, body=body_clean.strip())
+                body_clean = body_clean.strip()
+                msg_actu = str(values2.get("message_actualite") or "")
+                # Texte brut : paragraphe injecté. HTML LV : injecté via values (évite le double).
+                body_txt = inject_weekly_actualite_into_email_body(body_clean, message=msg_actu)
+                rendered2 = EmailTemplate(subject=rendered2.subject, body=body_txt.strip())
 
                 if send_email:
                     try:
@@ -747,7 +755,7 @@ def render_emailing_manual_broadcast(
                             html2 = build_lv_newsletter_email_html(
                                 subject0=rendered2.subject,
                                 values0={k: str(v) for k, v in values2.items()},
-                                intro_text=rendered2.body,
+                                intro_text=body_clean,
                             )
                         else:
                             html2 = email_body_to_minimal_html(html_src) if send_email_as_html else None

@@ -164,6 +164,51 @@ def render_weekly_email_template(tpl: EmailTemplate, *, values: dict[str, str]) 
     return EmailTemplate(subject=rendered.subject, body=fixed_body)
 
 
+WEEKLY_ACTUALITE_LEAD = "À noter cette semaine dans l'actualité de LumenVia : "
+
+# Valeur par défaut du champ admin (persistée aussi dans ETPL ``status_note`` à l’enregistrement).
+DEFAULT_WEEKLY_ACTUALITE_MESSAGE = (
+    "Cette semaine, l’écoute des lectures s’enrichit d’un rappel clair au début de chaque passage "
+    "— lecture ou Évangile — pour mieux se situer dans la Liturgie de la Parole. "
+    "Les voix de synthèse sont désormais francophones et variées : une diversité qui, à sa façon, "
+    "fait aussi entendre la richesse de l’Église."
+)
+
+
+def format_weekly_actualite_paragraph(message: str) -> str:
+    """
+    Paragraphe éditorial optionnel (actualité LumenVia).
+    Préfixe automatique sauf si le message commence déjà par « À noter cette semaine… ».
+    """
+    msg = (message or "").strip()
+    if not msg:
+        return ""
+    low = msg.lower().replace("’", "'")
+    if low.startswith("à noter cette semaine") or low.startswith("a noter cette semaine"):
+        return msg
+    return f"{WEEKLY_ACTUALITE_LEAD}{msg}"
+
+
+def inject_weekly_actualite_into_email_body(body: str, *, message: str) -> str:
+    """Insère le paragraphe d’actualité juste après la ligne « Bonjour… », sinon en tête."""
+    para = format_weekly_actualite_paragraph(message)
+    if not para:
+        return body or ""
+    text = (body or "").replace("\r\n", "\n")
+    lines = text.split("\n")
+    out: list[str] = []
+    inserted = False
+    for ln in lines:
+        out.append(ln)
+        if not inserted and re.match(r"(?i)^\s*bonjour\b", (ln or "").strip()):
+            out.append("")
+            out.append(para)
+            inserted = True
+    if not inserted:
+        out = [para, ""] + out
+    return "\n".join(out).strip()
+
+
 def supported_tags() -> tuple[str, ...]:
     return (
         "prenom",

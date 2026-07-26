@@ -479,6 +479,26 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     parts.append(".jopai-inline .ai{font-style:italic;color:#0b2745;}")
     parts.append("</style></head><body><div class=\"wrap\">")
     parts.append(f"<p><strong>Bonjour {who},</strong></p>")
+    try:
+        from core.emailing import format_weekly_actualite_paragraph
+    except Exception:  # pragma: no cover
+        format_weekly_actualite_paragraph = None  # type: ignore[assignment]
+    actu_raw = ""
+    if format_weekly_actualite_paragraph is not None:
+        actu_raw = format_weekly_actualite_paragraph(
+            str(values0.get("message_actualite") or values0.get("actualite_lumenvia") or "")
+        )
+    if actu_raw:
+        # Plusieurs lignes → <br> ; blocs séparés par ligne vide → <p> distincts.
+        for block in re.split(r"\n\s*\n", actu_raw):
+            block = (block or "").strip()
+            if not block:
+                continue
+            parts.append(
+                "<p style=\"margin:0 0 12px 0;\">"
+                + html_escape(block).replace("\n", "<br>")
+                + "</p>"
+            )
     parts.append(intro_html)
     if footer_html:
         parts.append("<div class=\"hr\"></div>")

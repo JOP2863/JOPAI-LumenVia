@@ -79,6 +79,9 @@ def render_admin_emailing() -> None:
         pick_latest_live_email_template,
         email_template_row_is_live,
         resolve_email_nom_du_dimanche,
+        inject_weekly_actualite_into_email_body,
+        WEEKLY_ACTUALITE_LEAD,
+        DEFAULT_WEEKLY_ACTUALITE_MESSAGE,
     )
 
     try:
@@ -107,8 +110,8 @@ def render_admin_emailing() -> None:
             f"(`{template_key}`). Objet : {_subj[:72]}{'…' if len(_subj) > 72 else ''}"
         )
         st.caption(
-            "La colonne **`concat`** est un historique figé à l’enregistrement : seules **`subject`** et **`body`** "
-            "font foi pour l’aperçu et l’envoi."
+            "La colonne **`concat`** est un historique figé à l’enregistrement : **`subject`**, **`body`** "
+            "et le message d’actualité (`status_note`) font foi pour l’aperçu et l’envoi."
         )
     elif rows:
         st.warning(
@@ -141,12 +144,31 @@ def render_admin_emailing() -> None:
             height=320,
             key="adm_email_tpl_body",
         )
-        note = st.text_input("Note (optionnel)", value="", key="adm_email_tpl_note")
 
     with st.expander("Balises supportées", expanded=False):
         st.code("\n".join([f"{{{{{t}}}}}" for t in supported_tags()]), language="text")
 
+    # Message d’actualité : défaut code → sinon dernière valeur ETPL (status_note) → session.
+    _actu_from_sheet = str((current or {}).get("status_note") or "").strip()
+    _actu_default = _actu_from_sheet or DEFAULT_WEEKLY_ACTUALITE_MESSAGE
+    if "adm_email_message_actualite" not in st.session_state:
+        st.session_state["adm_email_message_actualite"] = _actu_default
+
     st.divider()
+    st.text_area(
+        "Message d’actualité pour les destinataires (optionnel)",
+        height=120,
+        key="adm_email_message_actualite",
+        placeholder="Ex. : ouverture des inscriptions au parcours…",
+        help=(
+            f"Injecté juste après le bonjour lors de l’aperçu et de l’envoi. "
+            f"Préfixe automatique : « {WEEKLY_ACTUALITE_LEAD.strip()} ». "
+            "Enregistré avec le template (colonne `status_note` ETPL) — "
+            "retrouvé à la prochaine ouverture de la page Emailing. "
+            "Laisser vide pour ne rien ajouter au prochain envoi."
+        ),
+    )
+    note = str(st.session_state.get("adm_email_message_actualite") or "").strip()
     with st.expander("Dimanche de référence (aperçu + envoi manuel)", expanded=False):
         # Dimanche cible (par défaut : prochain dimanche)
         try:
@@ -173,6 +195,7 @@ def render_admin_emailing() -> None:
         url_illu = _urls["url_illustration"]
 
         # Valeurs exemple (issues d'un dimanche réel)
+        msg_actu = str(st.session_state.get("adm_email_message_actualite") or "").strip()
         values = {
             "prenom": "Jean",
             "nom": "Dupont",
@@ -191,10 +214,28 @@ def render_admin_emailing() -> None:
             "illustration_description": (_urls.get("illustration_description") or "").strip(),
             "url_app": url_app,
             "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
+            "message_actualite": msg_actu,
         }
         rendered = render_weekly_email_template(EmailTemplate(subject=subject, body=body), values=values)
+        preview_body = inject_weekly_actualite_into_email_body(
+            rendered.body or "", message=msg_actu
+        )
         st.markdown(f"**Objet :** {rendered.subject}")
-        st.code((rendered.body or "")[:4000] or "—")
+        st.code((preview_body or "")[:4000] or "—")
+
+        if msg_actu:
+            try:
+                from core.emailing_newsletter_html import build_lv_newsletter_email_html
+
+                html_prev = build_lv_newsletter_email_html(
+                    subject0=rendered.subject,
+                    values0={k: str(v) for k, v in values.items()},
+                    intro_text=rendered.body or "",
+                )
+                with st.expander("Aperçu HTML (avec message d’actualité)", expanded=False):
+                    st.components.v1.html(html_prev, height=520, scrolling=True)
+            except Exception:
+                pass
 
     st.caption(
         "Astuce : pour rendre les CTA cliquables, mets directement des URLs dans le corps, par ex. "
@@ -222,11 +263,20 @@ def render_admin_emailing() -> None:
             prev = pick_latest_live_email_template(rows2, template_key=template_key, channel="email", language_in=lang_fr)
             body_n = body.strip()
             subj_n = subject.strip()
+            note_n = note.strip()
 
             # Immuabilité : si le contenu n’a pas bougé, on n’écrit pas une nouvelle version.
-            unchanged = prev and str(prev.get("subject") or "").strip() == subj_n and str(prev.get("body") or "").strip() == body_n
+            unchanged = (
+                prev
+                and str(prev.get("subject") or "").strip() == subj_n
+                and str(prev.get("body") or "").strip() == body_n
+                and str(prev.get("status_note") or "").strip() == note_n
+            )
             if unchanged:
-                st.info("Aucune modification détectée (objet + corps inchangés) — pas de nouvelle ligne.")
+                st.info(
+                    "Aucune modification détectée (objet + corps + message d’actualité inchangés) "
+                    "— pas de nouvelle ligne."
+                )
             else:
                 # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
                 # (append seul laisse l’historique encore « Actif » — inactiver d’abord les lignes courantes).
@@ -299,7 +349,7 @@ def render_admin_emailing() -> None:
                         "body": body_n,
                         "version": next_tpl_ver,
                         "status": SHEETS_ROW_STATUS_ACTIVE,
-                        "status_note": note.strip(),
+                        "status_note": note_n,
                     },
                     version=next_tpl_ver,
                 )
