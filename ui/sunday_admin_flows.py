@@ -62,17 +62,23 @@ def _vertex_finish_truncated(finish_reason: object) -> bool:
 
 
 def _synthesis_min_words(target_words: int) -> int:
-    """Seuil minimal pour publier une synthèse (65 % de la cible principale, hors passerelle)."""
-    return max(80, int(int(target_words) * 0.65))
+    """Seuil minimal pour publier une synthèse (50 % de la cible principale, hors passerelle)."""
+    return max(60, int(int(target_words) * 0.50))
 
 
 def _synthesis_generation_usable(*, candidate: dict, text: str, min_words: int) -> bool:
-    if _vertex_finish_truncated(candidate.get("finishReason")):
+    """
+    Une synthèse est publiable dès qu'il y a assez de texte utile.
+
+    Ne plus rejeter systématiquement ``MAX_TOKENS`` / ``citationMetadata`` : Gemini 2.5
+    consomme souvent le budget en « thinking » et remonte MAX_TOKENS même avec un corps
+    déjà exploitable ; les métadonnées de citation apparaissent aussi en faux positifs.
+    """
+    words = len((text or "").split())
+    if words < 50:
         return False
-    cites = bool((candidate.get("citationMetadata") or {}).get("citations"))
-    if cites:
-        return False
-    return len((text or "").split()) >= int(min_words)
+    floor = max(50, int(int(min_words) * 0.55))
+    return words >= floor
 
 
 def _flow_result(*, ok: bool, level: str, message: str) -> dict[str, str | bool]:
@@ -666,17 +672,18 @@ def _run_generate_sunday_flow(
     with st.spinner("Génération IA (Gemini)…"):
         t0 = time.perf_counter()
         try:
-            # Français densifié (citations, listes) : ~3 tokens/mot ; plancher 4096 pour éviter MAX_TOKENS.
-            max_out = min(8192, max(4096, int(total_words_budget * 3.0)))
+            # Budget large : Gemini 2.5 peut consommer une part en « thinking ».
+            max_out = min(8192, max(8192, int(total_words_budget * 3.0)))
             gen = vx.generate_text_auto(
                 preferred_models=[
-                    "gemini-2.5-flash",
                     "gemini-2.0-flash",
-                    "gemini-pro-latest",
+                    "gemini-2.5-flash",
                     "gemini-flash-latest",
+                    "gemini-pro-latest",
                 ],
                 prompt=prompt,
                 max_output_tokens=max_out,
+                thinking_budget=0,
             )
         except Exception as exc:
             if debug:
@@ -699,13 +706,10 @@ def _run_generate_sunday_flow(
     min_words = _synthesis_min_words(int(target_words))
     hard_truncated = _vertex_finish_truncated(fr)
     too_short = words_out < min_words
-    # Relance surtout si troncature/citations ; « trop court » seul avec STOP = on publie quand même si ≥ 50 % cible.
-    soft_short_ok = (
-        (not hard_truncated)
-        and (not has_citations)
-        and words_out >= max(60, int(int(target_words) * 0.5))
-    )
-    needs_retry = hard_truncated or has_citations or (too_short and not soft_short_ok)
+    # Relance si vraiment trop court, ou troncature avec peu de texte, ou citations + texte fragile.
+    needs_retry = (not _synthesis_generation_usable(candidate=cand0, text=gen.text or "", min_words=min_words)) or (
+        hard_truncated and too_short
+    ) or (has_citations and too_short)
     if needs_retry:
         _flow_overlay_step(
             _overlay,
@@ -727,6 +731,7 @@ def _run_generate_sunday_flow(
                 preferred_models=["gemini-2.0-flash", "gemini-2.5-flash"],
                 prompt=hardened,
                 max_output_tokens=8192,
+                thinking_budget=0,
             )
             perf["vertex_text_retry_s"] = round(time.perf_counter() - t0b, 3)
             cand0b = ((gen2.raw or {}).get("candidates") or [{}])[0]
@@ -734,27 +739,35 @@ def _run_generate_sunday_flow(
                 cand0b = {}
             fr2 = str(cand0b.get("finishReason") or "").strip().upper()
             words2 = len((gen2.text or "").split())
-            cites2 = bool((cand0b.get("citationMetadata") or {}).get("citations"))
             retry_ok = _synthesis_generation_usable(candidate=cand0b, text=gen2.text or "", min_words=min_words)
-            if retry_ok:
+            if retry_ok and words2 >= words_out:
                 gen = gen2
                 cand0 = cand0b
             elif _synthesis_generation_usable(candidate=cand0, text=gen.text or "", min_words=min_words):
                 retry_fallback_note = (
                     "Relance Vertex non concluante — la première synthèse a été conservée et publiée."
                 )
+            elif words_out >= 50 or words2 >= 50:
+                # Dernier recours : publier le meilleur des deux plutôt que d'échouer à vide.
+                if words2 > words_out:
+                    gen = gen2
+                    cand0 = cand0b
+                retry_fallback_note = (
+                    "Synthèse partielle conservée (signal Vertex MAX_TOKENS/citations) — "
+                    "tu peux régénérer plus tard si besoin."
+                )
             else:
                 detail = (
-                    f"Relance : finishReason={fr2 or '—'}, {words2} mots"
+                    f"Relance : finishReason={fr2 or '—'}, {words2} mots (1er essai {words_out} mots)"
                     if debug
-                    else "Réduis le % de longueur ou réessaie dans quelques minutes."
+                    else "Réessaie dans quelques minutes, ou baisse temporairement la passerelle catéchèse."
                 )
                 return _flow_result(
                     ok=False,
                     level="error",
                     message=(
                         "Synthèse incomplète malgré une relance automatique "
-                        "(MAX_TOKENS, texte trop court ou citations). " + detail
+                        "(texte trop court). " + detail
                     ),
                 )
         except Exception as exc:

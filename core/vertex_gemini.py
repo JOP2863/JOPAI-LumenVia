@@ -138,16 +138,43 @@ class VertexGeminiClient:
         preferred_models: list[str],
         prompt: str,
         max_output_tokens: int = 2048,
+        thinking_budget: int | None = 0,
     ) -> VertexTextResult:
-        raw, used_location, used_model = self._generate_auto(
-            preferred_models=preferred_models,
-            contents=[{"role": "user", "parts": [{"text": prompt}]}],
-            generation_config={
-                "temperature": 0.3,
-                "topP": 0.9,
-                "maxOutputTokens": int(max_output_tokens),
-            },
-        )
+        generation_config: dict[str, Any] = {
+            "temperature": 0.3,
+            "topP": 0.9,
+            "maxOutputTokens": int(max_output_tokens),
+        }
+        # Gemini 2.5 : sans plafond thinking, le budget tokens part en raisonnement → MAX_TOKENS fréquent.
+        if thinking_budget is not None:
+            generation_config["thinkingConfig"] = {"thinkingBudget": int(thinking_budget)}
+        try:
+            raw, used_location, used_model = self._generate_auto(
+                preferred_models=preferred_models,
+                contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                generation_config=generation_config,
+            )
+        except RuntimeError as ex:
+            # Certains modèles / régions rejettent thinkingConfig → retenter sans.
+            if thinking_budget is not None and "thinking" in str(ex).lower():
+                generation_config.pop("thinkingConfig", None)
+                raw, used_location, used_model = self._generate_auto(
+                    preferred_models=preferred_models,
+                    contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                    generation_config=generation_config,
+                )
+            else:
+                # Autre 400 lié à thinkingConfig (message variable) : un essai sans le champ.
+                msg = str(ex).lower()
+                if thinking_budget is not None and ("400" in msg or "invalid" in msg):
+                    generation_config.pop("thinkingConfig", None)
+                    raw, used_location, used_model = self._generate_auto(
+                        preferred_models=preferred_models,
+                        contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                        generation_config=generation_config,
+                    )
+                else:
+                    raise
         text = _extract_text(raw)
         return VertexTextResult(model=f"{used_location}:{used_model}", text=text, raw=raw)
 
