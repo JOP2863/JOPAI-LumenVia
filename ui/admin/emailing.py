@@ -82,6 +82,7 @@ def render_admin_emailing() -> None:
         inject_weekly_actualite_into_email_body,
         WEEKLY_ACTUALITE_LEAD,
         DEFAULT_WEEKLY_ACTUALITE_MESSAGE,
+        strip_redundant_cette_semaine_lead,
     )
 
     try:
@@ -149,10 +150,17 @@ def render_admin_emailing() -> None:
         st.code("\n".join([f"{{{{{t}}}}}" for t in supported_tags()]), language="text")
 
     # Message d’actualité : défaut code → sinon dernière valeur ETPL (status_note) → session.
-    _actu_from_sheet = str((current or {}).get("status_note") or "").strip()
+    _actu_from_sheet = strip_redundant_cette_semaine_lead(
+        str((current or {}).get("status_note") or "")
+    )
     _actu_default = _actu_from_sheet or DEFAULT_WEEKLY_ACTUALITE_MESSAGE
     if "adm_email_message_actualite" not in st.session_state:
         st.session_state["adm_email_message_actualite"] = _actu_default
+    else:
+        _cur_actu = str(st.session_state.get("adm_email_message_actualite") or "")
+        _cleaned = strip_redundant_cette_semaine_lead(_cur_actu)
+        if _cleaned != _cur_actu.strip():
+            st.session_state["adm_email_message_actualite"] = _cleaned or _actu_default
 
     st.divider()
     st.text_area(

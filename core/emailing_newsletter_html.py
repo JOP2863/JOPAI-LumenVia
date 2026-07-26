@@ -495,7 +495,7 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             if not block:
                 continue
             parts.append(
-                "<p style=\"margin:0 0 12px 0;\">"
+                "<p style=\"margin:0 0 12px 0;font-style:italic;\">"
                 + html_escape(block).replace("\n", "<br>")
                 + "</p>"
             )

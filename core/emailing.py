@@ -167,12 +167,20 @@ def render_weekly_email_template(tpl: EmailTemplate, *, values: dict[str, str]) 
 WEEKLY_ACTUALITE_LEAD = "À noter cette semaine dans l'actualité de LumenVia : "
 
 # Valeur par défaut du champ admin (persistée aussi dans ETPL ``status_note`` à l’enregistrement).
+# Ne pas commencer par « Cette semaine » : le préfixe WEEKLY_ACTUALITE_LEAD l’indique déjà.
 DEFAULT_WEEKLY_ACTUALITE_MESSAGE = (
-    "Cette semaine, l’écoute des lectures s’enrichit d’un rappel clair au début de chaque passage "
+    "L’écoute des lectures s’enrichit d’un rappel clair au début de chaque passage "
     "— lecture ou Évangile — pour mieux se situer dans la Liturgie de la Parole. "
     "Les voix de synthèse sont désormais francophones et variées : une diversité qui, à sa façon, "
     "fait aussi entendre la richesse de l’Église."
 )
+
+_CETTE_SEMAINE_LEAD_RE = re.compile(r"(?is)^cette\s+semaine\s*[,:\-–—]?\s*")
+
+
+def strip_redundant_cette_semaine_lead(message: str) -> str:
+    """Retire un « Cette semaine, » en tête (déjà présent dans ``WEEKLY_ACTUALITE_LEAD``)."""
+    return _CETTE_SEMAINE_LEAD_RE.sub("", (message or "").strip()).strip()
 
 
 def format_weekly_actualite_paragraph(message: str) -> str:
@@ -186,6 +194,9 @@ def format_weekly_actualite_paragraph(message: str) -> str:
     low = msg.lower().replace("’", "'")
     if low.startswith("à noter cette semaine") or low.startswith("a noter cette semaine"):
         return msg
+    msg = strip_redundant_cette_semaine_lead(msg)
+    if not msg:
+        return ""
     return f"{WEEKLY_ACTUALITE_LEAD}{msg}"
 
 
