@@ -1196,6 +1196,7 @@ def append_immutable_rows_bulk(
     header = _prepare_worksheet_header_for_append(ws, table=table)
     if not header:
         raise RuntimeError(f"Table '{table}' non initialisée (header vide).")
+    rows_payload: list[list[Any]] = []
     for values_by_col in values_by_col_list:
         row = make_row(values_by_col, status=status, version=version)
         row = dict(row)

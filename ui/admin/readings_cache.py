@@ -12,15 +12,13 @@ from core.aelf import fetch_aelf_day, is_aelf_not_found_error
 from core.config import load_config
 from core.readings_cache_loader import readings_cache_row_from_aelf_texts
 from core.sheets_db import (
-    BASE_COLUMNS,
-    TableSpec,
     append_immutable_rows_bulk,
     build_gspread_client,
     ensure_table,
     fetch_records,
+    get_table_spec,
     sheet_row_status_is_live,
     utc_now_iso,
-    with_concat,
 )
 from ui.components import loading_overlay
 
@@ -108,28 +106,7 @@ def render_admin_readings_cache() -> None:
             ensure_table(
                 gspread_client=gs,
                 spreadsheet_id=cfg.gsheet_id,
-                table=TableSpec(
-                    name="readings_cache",
-                    columns=with_concat(
-                        [
-                            *BASE_COLUMNS,
-                            "date",
-                            "zone",
-                            "periode",
-                            "semaine",
-                            "annee",
-                            "couleur",
-                            "fete",
-                            "jour_liturgique_nom",
-                            "premiere_lecture",
-                            "psaume",
-                            "deuxieme_lecture",
-                            "evangile",
-                            "source",
-                            "error",
-                        ]
-                    ),
-                ),
+                table=get_table_spec("readings_cache"),
             )
 
             existing = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=6000)
