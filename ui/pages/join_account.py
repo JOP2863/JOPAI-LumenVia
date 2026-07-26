@@ -236,98 +236,94 @@ def render_join() -> None:
                 return rows_sorted0[0]
 
             if mode == "login":
-                email_login = st.text_input("Email", key="acct_email_login").strip().lower()
-                password_login = st.text_input("Mot de passe", type="password", key="acct_password_login")
-            else:
-                # Pré-remplissage (avant instanciation des widgets) via on_change sur l'e-mail.
-                def _prefill_acct_profile_from_existing() -> None:
-                    em0 = str(st.session_state.get("acct_email_signup") or "").strip().lower()
-                    if not em0:
-                        return
-                    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em0):
-                        return
-                    ex0 = _latest_user_record(users, em0)
-                    if not ex0:
-                        return
-                    # Ne pré-remplit que si l'utilisateur n'a rien saisi
-                    st.session_state.setdefault("acct_first_name", str(ex0.get("first_name") or "").strip())
-                    st.session_state.setdefault("acct_last_name", str(ex0.get("last_name") or "").strip())
-                    st.session_state.setdefault("acct_phone_e164", str(ex0.get("phone_e164") or "").strip())
+                with st.form("acct_login_form", clear_on_submit=False):
+                    st.text_input(
+                        "Email ou identifiant",
+                        key="acct_email_login",
+                        autocomplete="username",
+                        help="Identifiant admin ou adresse e-mail du compte.",
+                    )
+                    st.text_input(
+                        "Mot de passe",
+                        type="password",
+                        key="acct_password_login",
+                        autocomplete="current-password",
+                    )
+                    # Jamais `disabled=` ici : l’autofill navigateur remplit l’UI sans mettre à jour
+                    # Streamlit → bouton grisé + curseur « interdit » + besoin de 2 clics.
+                    login_submitted = st.form_submit_button(
+                        "Se connecter",
+                        type="primary",
+                        use_container_width=True,
+                    )
 
-                email_signup = st.text_input(
-                    "Email",
-                    key="acct_email_signup",
-                    on_change=_prefill_acct_profile_from_existing,
-                ).strip().lower()
-                password_signup = st.text_input("Mot de passe", type="password", key="acct_password_signup")
-                c1, c2 = st.columns([1, 1], gap="small")
-                with c1:
-                    first_name_su = st.text_input("Prénom", key="acct_first_name").strip()
-                with c2:
-                    last_name_su = st.text_input("Nom", key="acct_last_name").strip()
-                phone_e164_su = st.text_input(
-                    "Téléphone (optionnel, format international)",
-                    key="acct_phone_e164",
-                    placeholder="+33612345678",
-                ).strip()
-                want_opt_in_su = st.checkbox(
-                    "Je souhaite recevoir les e-mails du vendredi (opt-in)",
-                    value=True,
-                    key="acct_optin",
-                )
+                email_login = str(st.session_state.get("acct_email_login") or "").strip().lower()
+                password_login = str(st.session_state.get("acct_password_login") or "")
 
-                is_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_signup)) if email_signup else False
-                if email_signup.strip() and not is_email_ok:
-                    st.error("Merci d’indiquer une adresse e-mail valide (ex. nom@domaine.fr).")
-                is_phone_ok = True
-                if phone_e164_su:
-                    is_phone_ok = bool(re.match(r"^\+\d{8,15}$", phone_e164_su))
-                    if not is_phone_ok:
-                        st.error("Téléphone invalide. Utilise le format E.164, ex. +33612345678.")
-
-            if mode == "login":
-                if st.button("Se connecter", type="primary", disabled=not (email_login and password_login), use_container_width=True, key="acct_login_btn"):
-                    ov = loading_overlay("LumenVia vérifie tes identifiants…")
-                    try:
-                        adm_login, adm_pwd = admin_login_and_password()
-                        if email_login.strip().lower() == adm_login and password_login == adm_pwd:
-                            admin_canon = f"{adm_login}@admin.lumenvia"
-                            st.session_state.auth_user_entity_id = sha256(admin_canon.encode("utf-8")).hexdigest()[:24]
-                            st.session_state.auth_email_lc = adm_login
-                            st.session_state.admin_authenticated = True
-                            st.success("Connecté (administrateur).")
-                            st.rerun()
-                        rec = _latest_user_record(users, email_login)
-                        if not rec or not rec.get("password_salt_b64") or not rec.get("password_hash_b64"):
-                            st.error("Compte introuvable ou mot de passe non défini. Clique sur « Créer / activer un compte ».")
-                            if email_login.strip():
-                                if st.button("Créer / activer avec cet email", key="acct_go_signup_from_login"):
-                                    st.session_state["acct_mode"] = "signup"
-                                    st.session_state["acct_email_signup"] = email_login.strip().lower()
+                if login_submitted:
+                    if not email_login or not password_login:
+                        st.error("Saisis ton identifiant (ou e-mail) et ton mot de passe.")
+                    else:
+                        ov = loading_overlay("LumenVia vérifie tes identifiants…")
+                        try:
+                            adm_login, adm_pwd = admin_login_and_password()
+                            if email_login == adm_login and password_login == adm_pwd:
+                                admin_canon = f"{adm_login}@admin.lumenvia"
+                                st.session_state.auth_user_entity_id = sha256(
+                                    admin_canon.encode("utf-8")
+                                ).hexdigest()[:24]
+                                st.session_state.auth_email_lc = adm_login
+                                st.session_state.admin_authenticated = True
+                                st.success("Connecté (administrateur).")
+                                st.rerun()
+                            rec = _latest_user_record(users, email_login)
+                            if not rec or not rec.get("password_salt_b64") or not rec.get("password_hash_b64"):
+                                st.error(
+                                    "Compte introuvable ou mot de passe non défini. "
+                                    "Clique sur « Créer / activer un compte »."
+                                )
+                                st.session_state["_acct_login_unknown_email"] = email_login
+                            else:
+                                st.session_state.pop("_acct_login_unknown_email", None)
+                                ok = verify_password(
+                                    password_login,
+                                    salt_b64=str(rec.get("password_salt_b64")),
+                                    hash_b64=str(rec.get("password_hash_b64")),
+                                )
+                                if not ok:
+                                    st.error("Mot de passe incorrect.")
+                                else:
+                                    st.session_state.auth_user_entity_id = sha256(
+                                        email_login.encode("utf-8")
+                                    ).hexdigest()[:24]
+                                    st.session_state.auth_email_lc = email_login
+                                    st.session_state.pop("admin_authenticated", None)
+                                    st.success("Connecté.")
                                     st.rerun()
-                            return
-                        ok = verify_password(
-                            password_login,
-                            salt_b64=str(rec.get("password_salt_b64")),
-                            hash_b64=str(rec.get("password_hash_b64")),
-                        )
-                        if not ok:
-                            st.error("Mot de passe incorrect.")
-                            return
-                        st.session_state.auth_user_entity_id = sha256(email_login.encode("utf-8")).hexdigest()[:24]
-                        st.session_state.auth_email_lc = email_login
-                        st.session_state.pop("admin_authenticated", None)
-                        st.success("Connecté.")
-                        st.rerun()
-                    finally:
-                        ov.empty()
+                        finally:
+                            ov.empty()
 
-                # Réinitialisation mot de passe (envoi e-mail)
+                unknown_em = str(st.session_state.get("_acct_login_unknown_email") or "").strip()
+                if unknown_em:
+                    if st.button("Créer / activer avec cet email", key="acct_go_signup_from_login"):
+                        st.session_state["acct_mode"] = "signup"
+                        st.session_state["acct_email_signup"] = unknown_em
+                        st.session_state.pop("_acct_login_unknown_email", None)
+                        st.rerun()
+
+                # Réinitialisation mot de passe (envoi e-mail) — hors formulaire de connexion
                 st.caption("Réinitialisation : tu recevras un lien valable **2 heures**.")
-                if st.button("Réinitialiser le mot de passe", type="secondary", disabled=not bool(email_login.strip()), key="acct_pwd_reset_btn"):
+                if st.button(
+                    "Réinitialiser le mot de passe",
+                    type="secondary",
+                    key="acct_pwd_reset_btn",
+                    use_container_width=True,
+                ):
                     em0 = email_login.strip().lower()
-                    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em0):
-                        st.error("Merci d’indiquer un e-mail valide.")
+                    if not em0:
+                        st.error("Indique d’abord ton e-mail dans le champ ci-dessus.")
+                    elif not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em0):
+                        st.error("Merci d’indiquer un e-mail valide (la réinitialisation nécessite une adresse).")
                     else:
                         ov = loading_overlay("Envoi de l’e-mail de réinitialisation…")
                         try:
@@ -398,6 +394,52 @@ def render_join() -> None:
                             ov.empty()
 
             else:
+                # Pré-remplissage (avant instanciation des widgets) via on_change sur l'e-mail.
+                def _prefill_acct_profile_from_existing() -> None:
+                    em0 = str(st.session_state.get("acct_email_signup") or "").strip().lower()
+                    if not em0:
+                        return
+                    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em0):
+                        return
+                    ex0 = _latest_user_record(users, em0)
+                    if not ex0:
+                        return
+                    # Ne pré-remplit que si l'utilisateur n'a rien saisi
+                    st.session_state.setdefault("acct_first_name", str(ex0.get("first_name") or "").strip())
+                    st.session_state.setdefault("acct_last_name", str(ex0.get("last_name") or "").strip())
+                    st.session_state.setdefault("acct_phone_e164", str(ex0.get("phone_e164") or "").strip())
+
+                email_signup = st.text_input(
+                    "Email",
+                    key="acct_email_signup",
+                    on_change=_prefill_acct_profile_from_existing,
+                ).strip().lower()
+                password_signup = st.text_input("Mot de passe", type="password", key="acct_password_signup")
+                c1, c2 = st.columns([1, 1], gap="small")
+                with c1:
+                    first_name_su = st.text_input("Prénom", key="acct_first_name").strip()
+                with c2:
+                    last_name_su = st.text_input("Nom", key="acct_last_name").strip()
+                phone_e164_su = st.text_input(
+                    "Téléphone (optionnel, format international)",
+                    key="acct_phone_e164",
+                    placeholder="+33612345678",
+                ).strip()
+                want_opt_in_su = st.checkbox(
+                    "Je souhaite recevoir les e-mails du vendredi (opt-in)",
+                    value=True,
+                    key="acct_optin",
+                )
+
+                is_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_signup)) if email_signup else False
+                if email_signup.strip() and not is_email_ok:
+                    st.error("Merci d’indiquer une adresse e-mail valide (ex. nom@domaine.fr).")
+                is_phone_ok = True
+                if phone_e164_su:
+                    is_phone_ok = bool(re.match(r"^\+\d{8,15}$", phone_e164_su))
+                    if not is_phone_ok:
+                        st.error("Téléphone invalide. Utilise le format E.164, ex. +33612345678.")
+
                 existing = _latest_user_record(users, email_signup) if (email_signup and is_email_ok) else None
                 has_pwd = bool(
                     existing
