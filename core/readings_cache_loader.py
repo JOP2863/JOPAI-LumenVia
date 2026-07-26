@@ -27,16 +27,21 @@ def _cache_date_key(raw: object) -> str:
 
 
 def _normalize_cached_text(s: str | None) -> str:
-    raw = (s or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    """Aplatit les blancs pour RDC ; retire aussi les rubriques AELF (filet de sécurité)."""
+    from core.aelf_text_cleanup import strip_aelf_lectionary_rubrics
+
+    raw = strip_aelf_lectionary_rubrics((s or "").replace("\r\n", "\n").replace("\r", "\n"))
     if not raw:
         return ""
-    return re.sub(r"\s+", " ", raw).strip()
+    # Une fois aplati, une rubrique en fin de lecture colle à la dernière phrase.
+    return strip_aelf_lectionary_rubrics(re.sub(r"\s+", " ", raw).strip())
 
 
 def _normalize_cached_multiline(s: str | None) -> str | None:
-    raw = (s or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    return raw or None
+    from core.aelf_text_cleanup import strip_aelf_lectionary_rubrics
 
+    raw = strip_aelf_lectionary_rubrics((s or "").replace("\r\n", "\n").replace("\r", "\n").strip())
+    return raw or None
 
 def _row_has_readings(row: dict) -> bool:
     for k in ("premiere_lecture", "psaume", "deuxieme_lecture", "evangile"):

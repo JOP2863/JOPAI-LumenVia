@@ -5,15 +5,29 @@ from __future__ import annotations
 import re
 
 # Rubriques du lectionnaire injectées dans ``contenu`` HTML (API AELF), pas de l'Écriture.
-# Souvent en fin de lecture (sans variante jointe), parfois suivies d'une forme courte.
-_AELF_LECTIONARY_RUBRIC_LINE_RE = re.compile(
-    r"(?iu)^\s*(?:"
+_AELF_RUBRIC_CORE = (
+    r"(?:"
     r"OU\s+LECTURE\s+BR[EÈ]VE\.?"
     r"|OU\s+BIEN\.?"
     r"|OU\s+AU\s+CHOIX\.?"
     r"|Ou\s+bien\s*,?\s*lecture\s+br[eè]ve\s*:?"
-    r"|ANN[EÉ]E\s+[ABC]\b.*"  # ex. « ANNÉE A 2026 » (rare)
-    r")\s*$"
+    r"|ANN[EÉ]E\s+[ABC]\b[^\n]*"
+    r")"
+)
+
+# Ligne entière = rubrique seule.
+_AELF_LECTIONARY_RUBRIC_LINE_RE = re.compile(
+    rf"(?iu)^\s*{_AELF_RUBRIC_CORE}\s*$"
+)
+
+# Après aplatissement RDC (``\\s+`` → espace), la rubrique colle à la fin de la phrase.
+_AELF_RUBRIC_TRAILING_INLINE_RE = re.compile(
+    rf"(?iu)\s+{_AELF_RUBRIC_CORE}\s*$"
+)
+
+# Délimiteur au milieu d'un texte aplati (« … Seigneur. OU BIEN forme courte »).
+_AELF_RUBRIC_MID_CUT_RE = re.compile(
+    rf"(?iu)\s+(?:OU\s+LECTURE\s+BR[EÈ]VE|OU\s+BIEN|OU\s+AU\s+CHOIX)\.?(?:\s+|$)"
 )
 
 
@@ -21,13 +35,14 @@ def strip_aelf_lectionary_rubrics(text: str) -> str:
     """
     Retire les rubriques AELF (« OU LECTURE BREVE », « OU BIEN », …).
 
-    Si une telle ligne apparaît, on coupe à partir d'elle (la variante courte
-    éventuelle qui suit n'est pas conservée — LumenVia ne lit qu'une forme).
-    Ne touche pas aux paragraphes scripturaires du type « Ou encore : … ».
+    - Ligne entière isolée → coupe à partir de cette ligne (variante courte éventuelle exclue).
+    - Même marqueur collé en fin de phrase (après aplatissement RDC) → suffixe retiré.
+    - Ne touche pas aux paragraphes scripturaires « Ou encore : … ».
     """
     s = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     if not s.strip():
         return ""
+
     lines = s.split("\n")
     kept: list[str] = []
     for ln in lines:
@@ -35,7 +50,16 @@ def strip_aelf_lectionary_rubrics(text: str) -> str:
             break
         kept.append(ln)
     out = "\n".join(kept)
-    out = re.sub(r"\n{3,}", "\n\n", out)
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+
+    # Suffixe collé (ex. « … Parole de Dieu. OU LECTURE BREVE »).
+    out = _AELF_RUBRIC_TRAILING_INLINE_RE.sub("", out).strip()
+
+    # Variante jointe sur la même ligne après aplatissement.
+    m = _AELF_RUBRIC_MID_CUT_RE.search(out)
+    if m:
+        out = out[: m.start()].rstrip()
+
     return out.strip()
 
 
