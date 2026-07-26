@@ -94,6 +94,64 @@ def _tts_voice_display_label(voice_name: str | None) -> str | None:
         return raw
 
 
+def _lookup_sunday_audio_voices(
+    *,
+    gs: object,
+    cfg: object,
+    date_str: str,
+    zone: str,
+) -> tuple[str | None, str | None]:
+    """Voix synthèse / lectures depuis la table ``audio`` (sans télécharger les fichiers)."""
+    try:
+        from core.sunday_existing_outputs import latest_generation_row_for_sunday, sheet_day_key
+        from core.weekly_email_urls import is_readings_audio_gcs_path
+        from core.sheets_db import fetch_records
+
+        latest = latest_generation_row_for_sunday(
+            gs=gs, cfg=cfg, date_str=date_str, zone=zone
+        )
+        if not latest:
+            return None, None
+        gen_eid = str(latest.get("entity_id") or "").strip()
+        if not gen_eid:
+            return None, None
+        audios = fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="audio",
+            limit=0,
+            use_cache=True,
+        )
+        syn_v: str | None = None
+        read_v: str | None = None
+        day = sheet_day_key(date_str)
+        for a in audios or []:
+            if str(a.get("gen_entity_id") or "").strip() != gen_eid:
+                continue
+            path = str(a.get("gcs_path") or "").strip()
+            voice = str(a.get("voice") or "").strip() or None
+            if not voice:
+                continue
+            if is_readings_audio_gcs_path(path):
+                if read_v is None:
+                    read_v = voice
+            else:
+                if syn_v is None:
+                    syn_v = voice
+        if read_v is None:
+            prefix = f"AudioLectures/{day}/"
+            for a in audios or []:
+                path = str(a.get("gcs_path") or "").replace("\\", "/")
+                if prefix in path:
+                    voice = str(a.get("voice") or "").strip() or None
+                    if voice:
+                        read_v = voice
+                        break
+        return syn_v, read_v
+    except Exception:
+        return None, None
+
+
 def render_sunday() -> None:
     import app as ap
     st.title("La Lumière du Dimanche")
@@ -389,34 +447,60 @@ def render_sunday() -> None:
     bundle_readings_gcs_path: str | None = None
     bundle_readings_voice: str | None = None
     bundle_from_disk = False
+    gs_top = None
     if cfg.gcp_service_account and cfg.gsheet_id and cfg.gcs_bucket_name:
         try:
             gs_top = build_gspread_client(cfg.gcp_service_account)
             if gcs_top is None:
                 gcs_top = build_gcs_client(cfg.gcp_service_account)
-            bundle_audio, bundle_synth_text, bundle_audio_gcs_path, bundle_synth_voice = (
-                ap._fetch_existing_sunday_bundle(
-                    gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
-                )
-            )
-            bundle_readings_audio, bundle_readings_gcs_path, bundle_readings_voice = (
-                ap._fetch_existing_readings_audio(
-                    gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
-                )
-            )
-            if bundle_audio or (bundle_synth_text or "").strip():
-                persist_sunday_bundle(
-                    date_str=date_str,
-                    zone=zone,
-                    synth_text=bundle_synth_text,
-                    audio_bytes=bundle_audio[0] if bundle_audio else None,
-                    audio_mime=bundle_audio[1] if bundle_audio else None,
-                )
         except Exception:
-            bundle_audio, bundle_synth_text, bundle_audio_gcs_path = None, None, None
-            bundle_synth_voice = None
-            bundle_readings_audio, bundle_readings_gcs_path = None, None
-            bundle_readings_voice = None
+            gs_top = None
+
+        # Synthèse et lectures : chargements indépendants (un échec ne doit pas effacer l’autre).
+        if gs_top is not None and gcs_top is not None:
+            try:
+                syn_pack = ap._fetch_existing_sunday_bundle(
+                    gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
+                )
+                # Compat : anciens builds renvoyaient 3 valeurs (sans voix).
+                if syn_pack and len(syn_pack) >= 4:
+                    bundle_audio, bundle_synth_text, bundle_audio_gcs_path, bundle_synth_voice = syn_pack[:4]
+                elif syn_pack and len(syn_pack) == 3:
+                    bundle_audio, bundle_synth_text, bundle_audio_gcs_path = syn_pack
+                    bundle_synth_voice = None
+            except Exception:
+                bundle_audio, bundle_synth_text, bundle_audio_gcs_path, bundle_synth_voice = (
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            try:
+                read_pack = ap._fetch_existing_readings_audio(
+                    gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
+                )
+                if read_pack and len(read_pack) >= 3:
+                    bundle_readings_audio, bundle_readings_gcs_path, bundle_readings_voice = read_pack[:3]
+                elif read_pack and len(read_pack) == 2:
+                    bundle_readings_audio, bundle_readings_gcs_path = read_pack
+                    bundle_readings_voice = None
+            except Exception:
+                bundle_readings_audio, bundle_readings_gcs_path, bundle_readings_voice = (
+                    None,
+                    None,
+                    None,
+                )
+            if bundle_audio or (bundle_synth_text or "").strip():
+                try:
+                    persist_sunday_bundle(
+                        date_str=date_str,
+                        zone=zone,
+                        synth_text=bundle_synth_text,
+                        audio_bytes=bundle_audio[0] if bundle_audio else None,
+                        audio_mime=bundle_audio[1] if bundle_audio else None,
+                    )
+                except Exception:
+                    pass
 
     if not bundle_audio and not (bundle_synth_text or "").strip():
         disk_bundle = load_sunday_bundle(date_str, zone)
@@ -425,6 +509,16 @@ def render_sunday() -> None:
             bundle_from_disk = True
             if aud_b and aud_mime:
                 bundle_audio = (aud_b, aud_mime)
+
+    # Voix : filet si absente (cache disque, ancien build, etc.).
+    if gs_top is not None and (not bundle_synth_voice or not bundle_readings_voice):
+        syn_v, read_v = _lookup_sunday_audio_voices(
+            gs=gs_top, cfg=cfg, date_str=date_str, zone=zone
+        )
+        if not bundle_synth_voice:
+            bundle_synth_voice = syn_v
+        if not bundle_readings_voice:
+            bundle_readings_voice = read_v
 
     is_admin_sunday = bool(st.session_state.get("admin_authenticated"))
 
