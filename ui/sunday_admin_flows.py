@@ -567,9 +567,17 @@ def _run_generate_sunday_flow(
 ) -> dict[str, str | bool]:
     import app as ap
     t_flow = time.perf_counter()
+    # Copies locales immédiates (évite tout UnboundLocalError / ombre de paramètre).
+    zone_key = str(zone or "france").strip() or "france"
     date_str = str(getattr(identity, "date", "") or "").strip()[:10]
     date_label = date_str
     retry_fallback_note = ""
+    max_out = 8192
+    gen = None
+    audio = None
+    audio_ext = "wav"
+    audio_bytes_norm = b""
+    audio_mime_norm = "audio/wav"
     _flow_overlay_step(
         _overlay,
         "1/4 — Préparation et synthèse écrite (Vertex)…",
@@ -658,9 +666,8 @@ def _run_generate_sunday_flow(
     with st.spinner("Génération IA (Gemini)…"):
         t0 = time.perf_counter()
         try:
-            # Évite les synthèses tronquées : 2048 tokens est souvent trop court pour une synthèse “longue”.
-            # Heuristique simple (français) : ~2.2 tokens / mot avec marge.
-            max_out = min(8192, max(2048, int(total_words_budget * 2.2)))
+            # Français densifié (citations, listes) : ~3 tokens/mot ; plancher 4096 pour éviter MAX_TOKENS.
+            max_out = min(8192, max(4096, int(total_words_budget * 3.0)))
             gen = vx.generate_text_auto(
                 preferred_models=[
                     "gemini-2.5-flash",
@@ -671,9 +678,9 @@ def _run_generate_sunday_flow(
                 prompt=prompt,
                 max_output_tokens=max_out,
             )
-        except Exception as e:
+        except Exception as exc:
             if debug:
-                st.exception(e)
+                st.exception(exc)
             return _flow_result(
                 ok=False,
                 level="error",
@@ -692,7 +699,13 @@ def _run_generate_sunday_flow(
     min_words = _synthesis_min_words(int(target_words))
     hard_truncated = _vertex_finish_truncated(fr)
     too_short = words_out < min_words
-    needs_retry = hard_truncated or too_short or has_citations
+    # Relance surtout si troncature/citations ; « trop court » seul avec STOP = on publie quand même si ≥ 50 % cible.
+    soft_short_ok = (
+        (not hard_truncated)
+        and (not has_citations)
+        and words_out >= max(60, int(int(target_words) * 0.5))
+    )
+    needs_retry = hard_truncated or has_citations or (too_short and not soft_short_ok)
     if needs_retry:
         _flow_overlay_step(
             _overlay,
@@ -744,21 +757,24 @@ def _run_generate_sunday_flow(
                         "(MAX_TOKENS, texte trop court ou citations). " + detail
                     ),
                 )
-        except Exception as e:
+        except Exception as exc:
             if _synthesis_generation_usable(candidate=cand0, text=gen.text or "", min_words=min_words):
                 retry_fallback_note = (
                     "Relance Vertex impossible (quota/erreur) — la première synthèse a été conservée."
                 )
                 if debug:
-                    st.exception(e)
+                    st.exception(exc)
             else:
                 if debug:
-                    st.exception(e)
+                    st.exception(exc)
                 return _flow_result(
                     ok=False,
                     level="error",
                     message="Relance automatique impossible (quota/erreur Vertex). Réessaie dans quelques minutes.",
                 )
+
+    if gen is None or not str(getattr(gen, "text", "") or "").strip():
+        return _flow_result(ok=False, level="error", message="Réponse IA vide — aucun fichier publié.")
 
     if debug:
         usage = (gen.raw or {}).get("usageMetadata") or {}
@@ -790,15 +806,12 @@ def _run_generate_sunday_flow(
                 "Augmenter encore `maxOutputTokens` ou réduire le % demandé."
             )
 
-    if not gen.text.strip():
-        return _flow_result(ok=False, level="error", message="Réponse IA vide — aucun fichier publié.")
-
     gcs = build_gcs_client(cfg.gcp_service_account)
     gs = build_gspread_client(cfg.gcp_service_account)
 
-    gen_entity_id = sha256(f"{identity.date}|{zone}|{source_hash}".encode("utf-8")).hexdigest()[:24]
+    gen_entity_id = sha256(f"{date_str}|{zone_key}|{source_hash}".encode("utf-8")).hexdigest()[:24]
 
-    text_path = f"Syntheses/{identity.date}/{gen_entity_id}.txt"
+    text_path = f"Syntheses/{date_str}/{gen_entity_id}.txt"
     _flow_overlay_step(
         _overlay,
         "2/4 — Enregistrement texte + audio synthèse…",
@@ -810,27 +823,37 @@ def _run_generate_sunday_flow(
     upload_text(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=text_path, text=gen.text)
     perf["upload_text_s"] = round(time.perf_counter() - ut0, 3)
 
-    row_gen = append_immutable_row(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table="generations",
-        values_by_col={
-            "entity_id": gen_entity_id,
-            "date": identity.date,
-            "zone": zone,
-            "cycle": identity.annee or "",
-            "season": identity.periode or "",
-            "length": int(target_words),
-            "prompt_version": "v1",
-            "model": gen.model,
-            "source_hash": source_hash,
-            "text_gcs_path": text_path,
-            "duration_text_s": _sheet_seconds(perf.get("vertex_text_s")),
-            "duration_text_retry_s": _sheet_seconds(perf.get("vertex_text_retry_s") or 0),
-            "duration_upload_text_s": _sheet_seconds(perf.get("upload_text_s")),
-            "text_words": len((gen.text or "").split()),
-        },
-    )
+    try:
+        row_gen = append_immutable_row(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="generations",
+            values_by_col={
+                "entity_id": gen_entity_id,
+                "date": date_str,
+                "zone": zone_key,
+                "cycle": getattr(identity, "annee", None) or "",
+                "season": getattr(identity, "periode", None) or "",
+                "length": int(target_words),
+                "prompt_version": "v1",
+                "model": getattr(gen, "model", "") or "",
+                "source_hash": source_hash,
+                "text_gcs_path": text_path,
+                "duration_text_s": _sheet_seconds(perf.get("vertex_text_s")),
+                "duration_text_retry_s": _sheet_seconds(perf.get("vertex_text_retry_s") or 0),
+                "duration_upload_text_s": _sheet_seconds(perf.get("upload_text_s")),
+                "text_words": len((gen.text or "").split()),
+            },
+        )
+    except Exception as exc:
+        return _flow_result(
+            ok=False,
+            level="error",
+            message=(
+                f"Synthèse générée mais enregistrement Sheets (generations) impossible "
+                f"({type(exc).__name__}). Vérifie l’onglet GEN / quotas Sheets."
+            ),
+        )
 
     voice_syn_res = _resolve_voice_for_identity(
         voix_rows, identity=identity, cible="synthese"
@@ -882,9 +905,9 @@ def _run_generate_sunday_flow(
             audio.audio_bytes = audio_bytes_norm
             audio.mime_type = audio_mime_norm
             audio.model = audio_route
-        except Exception as e:
+        except Exception as exc:
             if debug:
-                st.exception(e)
+                st.exception(exc)
             return _flow_result(
                 ok=False,
                 level="warning",
@@ -905,7 +928,7 @@ def _run_generate_sunday_flow(
                 ),
             )
 
-    audio_path = f"Audio/{identity.date}/{gen_entity_id}.{audio_ext}"
+    audio_path = f"Audio/{date_str}/{gen_entity_id}.{audio_ext}"
     uat0 = time.perf_counter()
     upload_bytes(
         gcs=gcs,
@@ -935,8 +958,8 @@ def _run_generate_sunday_flow(
     )
 
     persist_sunday_bundle(
-        date_str=str(identity.date),
-        zone=zone,
+        date_str=date_str,
+        zone=zone_key,
         synth_text=gen.text,
         audio_bytes=audio_bytes_norm,
         audio_mime=audio_mime_norm,
@@ -945,7 +968,7 @@ def _run_generate_sunday_flow(
     readings_cover_signed: str | None = None
     if generate_readings_audio:
         texts = _resolve_texts_for_readings_tts(
-            texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone
+            texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone_key
         )
         readings_plain = plain_readings_for_tts(texts)
         if readings_plain.strip():
@@ -1081,7 +1104,6 @@ def _run_generate_sunday_flow(
                 t0=t_flow,
             )
             tpdf0 = time.perf_counter()
-            date_str = str(identity.date)
             img_b = ap._fetch_liturgy_illustration_full_bytes(gcs=gcs, cfg=cfg, date_str=date_str)
             back_cover_b = None
             try:
@@ -1129,7 +1151,7 @@ def _run_generate_sunday_flow(
                         gspread_client=gs,
                         spreadsheet_id=str(cfg.gsheet_id).strip(),
                         date_str=date_str,
-                        zone=zone,
+                        zone=zone_key,
                     )
                 except Exception:
                     ilus_desc_pdf = ""
@@ -1179,7 +1201,7 @@ def _run_generate_sunday_flow(
                 gs=gs,
                 cfg=cfg,
                 date_str=date_str,
-                zone=zone,
+                zone=zone_key,
                 gen_entity_id=gen_entity_id,
                 gcs_path=fasc_path,
                 duration_build_s=round(time.perf_counter() - tpdf0, 3),
