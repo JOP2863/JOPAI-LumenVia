@@ -24,8 +24,8 @@ def fetch_existing_readings_audio(
     cfg: object,
     date_str: str,
     zone: str,
-) -> tuple[tuple[bytes, str] | None, str | None]:
-    """Dernier audio « lectures seules ''AudioLectures/'' pour la dernière génération du jour."""
+) -> tuple[tuple[bytes, str] | None, str | None, str | None]:
+    """Dernier audio « lectures seules ''AudioLectures/'' : (bytes, mime), path GCS, voix."""
     try:
         day = sheet_day_key(date_str)
         # limit=0 : parcourir tout l’onglet — fetch_records ne fait que tronquer la liste déjà chargée par gspread.
@@ -36,11 +36,11 @@ def fetch_existing_readings_audio(
             if sheet_day_key(g.get("date")) == day and str(g.get("zone", "")).strip() == zone
         ]
         if not gens_day:
-            return None, None
+            return None, None, None
         latest = sorted(gens_day, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
         gen_eid = str(latest.get("entity_id") or "").strip()
         if not gen_eid:
-            return None, None
+            return None, None, None
 
         audios = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0, use_cache=True)
         aud_rows = [
@@ -58,17 +58,18 @@ def fetch_existing_readings_audio(
                 and prefix in str(a.get("gcs_path") or "").replace("\\", "/")
             ]
         if not aud_rows:
-            return None, None
+            return None, None, None
         aud = sorted(aud_rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
         path = str(aud.get("gcs_path") or "").strip()
         if not path:
-            return None, None
+            return None, None, None
+        voice = str(aud.get("voice") or "").strip() or None
         raw = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
         mime_guess = "audio/wav" if path.lower().endswith(".wav") else "audio/mpeg"
         b, mime, _ = normalize_audio_bytes(audio_bytes=raw, mime_type=mime_guess)
-        return (b, mime), path
+        return (b, mime), path, voice
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def latest_generation_row_for_sunday(*, gs: object, cfg: object, date_str: str, zone: str) -> dict | None:
@@ -191,8 +192,8 @@ def fetch_existing_sunday_bundle(
     cfg: object,
     date_str: str,
     zone: str,
-) -> tuple[tuple[bytes, str] | None, str | None, str | None]:
-    """Dernière génération du jour : (audio bytes, mime) + texte synthèse GCS + path audio."""
+) -> tuple[tuple[bytes, str] | None, str | None, str | None, str | None]:
+    """Dernière génération du jour : (audio bytes, mime) + texte synthèse GCS + path audio + voix."""
     try:
         day = sheet_day_key(date_str)
         gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0, use_cache=True)
@@ -202,11 +203,11 @@ def fetch_existing_sunday_bundle(
             if sheet_day_key(g.get("date")) == day and str(g.get("zone", "")).strip() == zone
         ]
         if not gens_day:
-            return None, None, None
+            return None, None, None, None
         latest = sorted(gens_day, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
         gen_eid = str(latest.get("entity_id") or "").strip()
         if not gen_eid:
-            return None, None, None
+            return None, None, None, None
 
         syn_text: str | None = None
         tp = str(latest.get("text_gcs_path") or "").strip()
@@ -226,17 +227,18 @@ def fetch_existing_sunday_bundle(
             and not _is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))
         ]
         if not aud_rows:
-            return None, syn_text, None
+            return None, syn_text, None, None
         aud = sorted(aud_rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
         path = str(aud.get("gcs_path") or "").strip()
         if not path:
-            return None, syn_text, None
+            return None, syn_text, None, None
+        voice = str(aud.get("voice") or "").strip() or None
         raw = download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
         mime_guess = "audio/wav" if path.lower().endswith(".wav") else "audio/mpeg"
         b, mime, _ = normalize_audio_bytes(audio_bytes=raw, mime_type=mime_guess)
-        return (b, mime), syn_text, path
+        return (b, mime), syn_text, path, voice
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
 
 def fetch_liturgy_illustration_display_bytes(*, gcs: object, cfg: object, date_str: str) -> bytes | None:

@@ -32,10 +32,11 @@ class GeminiTtsApiClient:
         text: str,
         voice_name: str = "Kore",
         max_retries: int = 6,
+        french_accent: str | None = None,
     ) -> GeminiTtsResult:
         from core.sunday_readings_tts import spoken_text_for_tts, strict_verbatim_tts_prompt
 
-        text = strict_verbatim_tts_prompt(spoken_text_for_tts(text))
+        text = strict_verbatim_tts_prompt(spoken_text_for_tts(text), french_accent=french_accent)
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={self.api_key}"

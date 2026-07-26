@@ -379,6 +379,7 @@ def _run_incremental_sunday_outputs(
                             voice_name=voice_read,
                             vertex_client=vx_read,
                             gemini_api_key=resolve_gemini_api_key(),
+                            sunday_date=_sunday_date_for_voice(identity),
                         )
                         duration_readings_tts_s = round(time.perf_counter() - rt0, 3)
                         readings_tts_route = last_tts_route()
@@ -918,6 +919,8 @@ def _run_generate_sunday_flow(
                 voice_name=voice_syn,
                 vertex_client=vx,
                 gemini_api_key=resolve_gemini_api_key(),
+                sunday_date=_sunday_date_for_voice(identity),
+                cible="synthese",
             )
             perf["audio_vertex_s"] = round(time.perf_counter() - at0, 3)
             audio_route = last_tts_route() or "vertex_tts"
@@ -1028,6 +1031,7 @@ def _run_generate_sunday_flow(
                         voice_name=voice_read,
                         vertex_client=vx,
                         gemini_api_key=resolve_gemini_api_key(),
+                        sunday_date=_sunday_date_for_voice(identity),
                     )
                     perf["readings_tts_s"] = round(time.perf_counter() - rt0, 3)
                     readings_tts_route = last_tts_route()

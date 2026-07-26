@@ -66,12 +66,32 @@ def _show_sunday_admin_flash(date_str: str) -> None:
         st.info(message)
 
 
-def _sunday_identity_audio(data: bytes, mime: str) -> None:
+def _sunday_identity_audio(data: bytes, mime: str, *, voice_label: str | None = None) -> None:
     """Lecteur audio pleine largeur (Streamlit ≥ 1.56 : ``width='stretch'``)."""
     try:
         st.audio(data, format=mime, width="stretch")
     except TypeError:
         st.audio(data, format=mime)
+    lab = (voice_label or "").strip()
+    if lab:
+        st.markdown(
+            f"<p style=\"text-align:center;margin:0.2rem 0 0.55rem;line-height:1.35;"
+            f"color:#5f4f3a;font-size:0.78rem;opacity:0.9;\">Voix : {html_escape(lab)}</p>",
+            unsafe_allow_html=True,
+        )
+
+
+def _tts_voice_display_label(voice_name: str | None) -> str | None:
+    raw = (voice_name or "").strip()
+    if not raw:
+        return None
+    try:
+        from core.gemini_tts_catalog import load_gemini_tts_voice_catalog
+
+        mapping, _ = load_gemini_tts_voice_catalog()
+        return str(mapping.get(raw) or raw)
+    except Exception:
+        return raw
 
 
 def render_sunday() -> None:
@@ -364,19 +384,25 @@ def render_sunday() -> None:
     bundle_audio: tuple[bytes, str] | None = None
     bundle_synth_text: str | None = None
     bundle_audio_gcs_path: str | None = None
+    bundle_synth_voice: str | None = None
     bundle_readings_audio: tuple[bytes, str] | None = None
     bundle_readings_gcs_path: str | None = None
+    bundle_readings_voice: str | None = None
     bundle_from_disk = False
     if cfg.gcp_service_account and cfg.gsheet_id and cfg.gcs_bucket_name:
         try:
             gs_top = build_gspread_client(cfg.gcp_service_account)
             if gcs_top is None:
                 gcs_top = build_gcs_client(cfg.gcp_service_account)
-            bundle_audio, bundle_synth_text, bundle_audio_gcs_path = ap._fetch_existing_sunday_bundle(
-                gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
+            bundle_audio, bundle_synth_text, bundle_audio_gcs_path, bundle_synth_voice = (
+                ap._fetch_existing_sunday_bundle(
+                    gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
+                )
             )
-            bundle_readings_audio, bundle_readings_gcs_path = ap._fetch_existing_readings_audio(
-                gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
+            bundle_readings_audio, bundle_readings_gcs_path, bundle_readings_voice = (
+                ap._fetch_existing_readings_audio(
+                    gs=gs_top, gcs=gcs_top, cfg=cfg, date_str=date_str, zone=zone
+                )
             )
             if bundle_audio or (bundle_synth_text or "").strip():
                 persist_sunday_bundle(
@@ -388,7 +414,9 @@ def render_sunday() -> None:
                 )
         except Exception:
             bundle_audio, bundle_synth_text, bundle_audio_gcs_path = None, None, None
+            bundle_synth_voice = None
             bundle_readings_audio, bundle_readings_gcs_path = None, None
+            bundle_readings_voice = None
 
     if not bundle_audio and not (bundle_synth_text or "").strip():
         disk_bundle = load_sunday_bundle(date_str, zone)
@@ -461,7 +489,11 @@ def render_sunday() -> None:
                 "font-size:0.95rem;\"><strong>Écouter les lectures (intégrales)</strong></p>",
                 unsafe_allow_html=True,
             )
-            _sunday_identity_audio(bundle_readings_audio[0], bundle_readings_audio[1])
+            _sunday_identity_audio(
+                bundle_readings_audio[0],
+                bundle_readings_audio[1],
+                voice_label=_tts_voice_display_label(bundle_readings_voice),
+            )
 
         if has_pdf_fmt or has_text_fmt:
             col_pdf, col_texte = st.columns(2, gap="medium")
@@ -502,7 +534,11 @@ def render_sunday() -> None:
                     "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
                     unsafe_allow_html=True,
                 )
-            _sunday_identity_audio(bundle_audio[0], bundle_audio[1])
+            _sunday_identity_audio(
+                bundle_audio[0],
+                bundle_audio[1],
+                voice_label=_tts_voice_display_label(bundle_synth_voice),
+            )
         elif has_readings_fmt or has_pdf_fmt or has_text_fmt:
             st.markdown(
                 "<p style=\"text-align:center;margin:0.65rem 0 0.25rem;line-height:1.4;color:#5f4f3a;"

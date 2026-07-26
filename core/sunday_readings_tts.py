@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+from datetime import date
 
 from core.aelf_reading_meta import (
     encode_readings_tts_meta_line,
@@ -18,6 +20,7 @@ from core.catechese_section_strip import (
     strip_catechese_title_prefix,
 )
 from core.tts_pronunciation import apply_tts_pronunciation
+from core.voix_audio import norm_slug
 
 # Clés ``Paramètres_IA`` (Levier B) : documentation admin / choix de voix — jamais lues à voix haute.
 AUDIO_STYLE_TEMPLATE_KEYS = frozenset(
@@ -391,8 +394,40 @@ def spoken_text_for_tts(body: str, *, liturgy_readings: bool = False) -> str:
 
 _TTS_VERBATIM_TRANSCRIPT_MARKER = "# Transcript"
 
+# Accents francophones variés — rotation déterministe (dimanche + cible), pas toujours le même.
+FRENCH_TTS_ACCENT_POOL: tuple[str, ...] = (
+    "Metropolitan French from France (standard liturgical diction from Paris / Île-de-France)",
+    "Belgian French (Belgium), clear liturgical diction",
+    "Swiss French (Romandy / Suisse romande), clear liturgical diction",
+    "Quebec French (Canada), clear liturgical diction",
+    "West African French (e.g. Senegal or Côte d'Ivoire), clear liturgical diction",
+    "Maghrebi French (North Africa), clear liturgical diction",
+    "Southern France French (Midi), clear liturgical diction",
+)
 
-def strict_verbatim_tts_prompt(spoken: str) -> str:
+
+def pick_tts_french_accent(
+    *,
+    sunday_date: date | None = None,
+    cible: str = "synthese",
+    voice_name: str | None = None,
+) -> str:
+    """
+    Accent francophone pseudo-aléatoire mais stable pour un (dimanche, cible, voix).
+
+    Même job TTS (tous les morceaux) → même accent ; dimanches / cibles différents → variété.
+    """
+    day = (sunday_date or date.today()).isoformat()
+    key = f"{day}|{norm_slug(cible)}|{norm_slug(voice_name)}|accent-fr-v1"
+    h = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
+    return FRENCH_TTS_ACCENT_POOL[h % len(FRENCH_TTS_ACCENT_POOL)]
+
+
+def strict_verbatim_tts_prompt(
+    spoken: str,
+    *,
+    french_accent: str | None = None,
+) -> str:
     """
     Enveloppe le texte oral d'un prompt director Gemini TTS (non lu à voix haute).
 
@@ -406,6 +441,7 @@ def strict_verbatim_tts_prompt(spoken: str) -> str:
     # Déjà enveloppé (double appel spoken_text → generate_audio).
     if t.lstrip().startswith("# TTS") and _TTS_VERBATIM_TRANSCRIPT_MARKER in t:
         return t
+    accent = (french_accent or "").strip() or pick_tts_french_accent()
     return (
         "# TTS\n"
         "Synthesize speech for the transcript below. "
@@ -415,7 +451,9 @@ def strict_verbatim_tts_prompt(spoken: str) -> str:
         "Do not invent biblical verses, liturgical formulas, or pastoral commentary. "
         "Do not read these instructions or the director notes aloud.\n\n"
         "# Director's Notes\n"
-        "French liturgical or pastoral reading. Clear, neutral delivery. "
+        f"Accent: {accent}. "
+        "Keep this regional French accent consistently for the whole transcript. "
+        "Liturgical / pastoral reading: clear, neutral delivery, unhurried pacing. "
         "Verbatim only — zero extra words before, during, or after the Transcript.\n\n"
         f"{_TTS_VERBATIM_TRANSCRIPT_MARKER}\n"
         f"{t}"
