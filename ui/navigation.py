@@ -408,26 +408,40 @@ div[class*="st-key-nav_feedback_beside_logout"] button[kind="secondary"] span {{
                         st.rerun()
 
     if uid:
-        b1, b2, b3 = st.columns([3.35, 1.45, 1.95], gap="small")
-        with b1:
-            st.caption(f"🟢 Connecté · {email or 'session active'}")
-        with b2:
-            if st.button(
-                "Donner\nVotre avis",
-                key="nav_feedback_beside_logout",
-                type="secondary",
-                use_container_width=True,
-            ):
-                st.session_state.route = "feedback"
-                st.rerun()
-        with b3:
-            if st.button("Déconnexion", key="auth_logout_nav", use_container_width=True):
-                for k in ("auth_user_entity_id", "auth_email_lc"):
-                    if k in st.session_state:
-                        del st.session_state[k]
-                st.session_state.pop("admin_authenticated", None)
-                st.session_state.pop("admin_phone_preview", None)
-                st.rerun()
+        if compact_nav:
+            # Avis déjà dans le Menu — pas de doublon à côté de Déconnexion
+            b1, b3 = st.columns([3.5, 1.5], gap="small")
+            with b1:
+                st.caption(f"🟢 Connecté · {email or 'session active'}")
+            with b3:
+                if st.button("Déconnexion", key="auth_logout_nav", use_container_width=True):
+                    for k in ("auth_user_entity_id", "auth_email_lc"):
+                        if k in st.session_state:
+                            del st.session_state[k]
+                    st.session_state.pop("admin_authenticated", None)
+                    st.session_state.pop("admin_phone_preview", None)
+                    st.rerun()
+        else:
+            b1, b2, b3 = st.columns([3.35, 1.45, 1.95], gap="small")
+            with b1:
+                st.caption(f"🟢 Connecté · {email or 'session active'}")
+            with b2:
+                if st.button(
+                    "Donner\nVotre avis",
+                    key="nav_feedback_beside_logout",
+                    type="secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state.route = "feedback"
+                    st.rerun()
+            with b3:
+                if st.button("Déconnexion", key="auth_logout_nav", use_container_width=True):
+                    for k in ("auth_user_entity_id", "auth_email_lc"):
+                        if k in st.session_state:
+                            del st.session_state[k]
+                    st.session_state.pop("admin_authenticated", None)
+                    st.session_state.pop("admin_phone_preview", None)
+                    st.rerun()
 
     if is_admin:
         _inject_admin_active_tile_css()

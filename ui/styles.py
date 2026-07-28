@@ -242,13 +242,13 @@ section[data-testid="stMain"] .block-container {
 }
 
 /*
-  Navigation (top_nav) : colonne Menu + 4 tuiles Rubriques.
-  ≥1025px : boutons Rubriques visibles, colonne Menu masquée.
-  ≤1024px : uniquement « Menu ⌵ » — secours `lv_nav_five_cols` (clé Stable Streamlit) si :has ne matche pas.
+  Navigation (top_nav) :
+  ≥1025px : tuiles publiques `lv_nav_web_one_row` ; éventuel fallback `lv_nav_five_cols` (Menu masqué).
+  ≤1024px / téléphone UA : `st.popover` Menu — scroll + z-index au-dessus du footer fixe.
 */
 @media (min-width: 1025px) {
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:first-child {
+  /* Ancien layout : colonne « Menu » (1re) masquée — ne pas cibler lv_nav_web_one_row. */
+  div[class*="st-key-lv_nav_five_cols"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {
     display: none !important;
   }
   /* Tuiles Menu + grille Administration (bureau) : intercolonnes un peu plus serrées qu’avec gap Streamlit seul */
@@ -259,36 +259,8 @@ section[data-testid="stMain"] .block-container {
 }
 
 @media (max-width: 1024px) {
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child) {
-    flex-direction: column !important;
-    align-items: stretch !important;
-  }
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:first-child {
-    width: 100% !important;
-    max-width: 100% !important;
-    flex: 1 1 auto !important;
-  }
-  div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(5):last-child)
-    > div[data-testid="column"]:not(:first-child) {
-    display: none !important;
-  }
-  div[data-testid="stPopoverBody"] button[kind="secondary"],
-  [data-testid="stPopoverContent"] button[kind="secondary"],
-  [data-baseweb="popover"] button[kind="secondary"] {
-    width: 100% !important;
-    min-height: 55px !important;
-    font-size: 1rem !important;
-  }
-  /* Barre grille admin (bureau) : hors-champ réel téléphone/tablette ; aperçu mobile via tuile Simulateur */
-  div[class*="st-key-lv_admin_desktop_shell"],
-  div[data-testid="stVerticalBlock"][class*="st-key-lv_admin_desktop_shell"] {
-    display: none !important;
-  }
-}
-
-/* Fallback ciblé — ancêtre avec clé projet (couvre mobiles où le bloc à 5 colonnes n’est pas le « dernier enfant ») */
-@media (max-width: 1024px) {
+  /* Ancien fallback Menu + 4 tuiles uniquement (clé lv_nav_five_cols) — ne pas casser
+     la rangée web `lv_nav_web_one_row` (5 tuiles publiques). */
   div[class*="st-key-lv_nav_five_cols"] div[data-testid="stHorizontalBlock"] {
     flex-direction: column !important;
     align-items: stretch !important;
@@ -301,6 +273,49 @@ section[data-testid="stMain"] .block-container {
   div[class*="st-key-lv_nav_five_cols"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:first-child) {
     display: none !important;
   }
+  /* Barre grille admin (bureau) : hors-champ réel téléphone/tablette ; aperçu mobile via tuile Simulateur */
+  div[class*="st-key-lv_admin_desktop_shell"],
+  div[data-testid="stVerticalBlock"][class*="st-key-lv_admin_desktop_shell"] {
+    display: none !important;
+  }
+}
+
+/*
+  Menu mobile (st.popover) : le footer fixe (z-index très haut) recouvrait le bas du panneau,
+  et max-height 70vh sans marge footer laissait les dernières entrées inaccessibles
+  (souvent sans barre de défilement si le contenu « tenait » dans 70vh tout en passant sous le footer).
+*/
+[data-testid="stPopover"],
+[data-testid="stPopoverBody"],
+[data-testid="stPopoverContent"],
+[data-baseweb="popover"] {
+  z-index: 2147483646 !important;
+}
+[data-testid="stPopoverBody"],
+[data-testid="stPopoverContent"] {
+  /* vh d’abord, puis dvh (viewport dynamique) si supporté */
+  max-height: min(70vh, calc(100vh - 7.75rem - env(safe-area-inset-bottom, 0px))) !important;
+  max-height: min(70dvh, calc(100dvh - 7.75rem - env(safe-area-inset-bottom, 0px))) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+  padding-bottom: max(0.85rem, env(safe-area-inset-bottom, 0px)) !important;
+  box-sizing: border-box !important;
+}
+/* Hauteur compacte des entrées Menu — spécificité > règle globale 64px */
+[data-testid="stPopoverBody"] button[kind="secondary"],
+[data-testid="stPopoverContent"] button[kind="secondary"],
+[data-baseweb="popover"] button[kind="secondary"] {
+  width: 100% !important;
+  min-height: 48px !important;
+  font-size: 0.95rem !important;
+  padding: 0.4rem 0.55rem !important;
+}
+/* Footer sous le popover ouvert (évite de capturer les taps / masquer le scroll) */
+body:has([data-testid="stPopoverBody"]) .lv-footer-stack,
+html:has([data-testid="stPopoverBody"]) .lv-footer-stack {
+  z-index: 1 !important;
 }
 
 /* 2. Bouton Primaire (Le bouton "Générer") */
@@ -709,16 +724,24 @@ label[data-testid="stWidgetLabel"] {
   background-color: var(--liturgie-gold) !important;
 }
 
-/* Étape identité visuelle : navigation compacte sur petit écran */
+/* Étape identité visuelle : navigation compacte sur petit écran (hors Menu popover) */
 @media (max-width: 520px) {
   button[kind="secondary"] {
     min-height: 56px !important;
-    font-size: 0.74rem !important;
+    font-size: 0.85rem !important;
     padding: 0.35rem 0.25rem !important;
   }
   button[kind="secondary"] p {
     word-break: keep-all !important;
     overflow-wrap: normal !important;
+  }
+  /* Menu : densité stable (ne pas rétrécir à 0.74rem — paradoxe zoom / « plus de lignes ») */
+  [data-testid="stPopoverBody"] button[kind="secondary"],
+  [data-testid="stPopoverContent"] button[kind="secondary"],
+  [data-baseweb="popover"] button[kind="secondary"] {
+    min-height: 48px !important;
+    font-size: 0.95rem !important;
+    padding: 0.4rem 0.55rem !important;
   }
 }
 

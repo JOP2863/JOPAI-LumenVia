@@ -62,6 +62,15 @@ section[data-testid="stMain"] [data-testid="stMarkdownContainer"] p,
 section[data-testid="stMain"] [data-testid="stMarkdownContainer"] li {{
   font-size: {prose_rem} !important;
 }}
+/* Ne pas agrandir le Menu popover (entrées admin / captions) — sinon le panneau
+   déborde sous le footer sans scroll utilisable, et « Grand » révèle paradoxalement plus d’items. */
+[data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"] li,
+[data-testid="stPopoverContent"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stPopoverContent"] [data-testid="stMarkdownContainer"] li {{
+  font-size: 0.9rem !important;
+  line-height: 1.35 !important;
+}}
 </style>
         """.strip(),
         unsafe_allow_html=True,
