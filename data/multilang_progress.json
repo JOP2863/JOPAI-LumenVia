@@ -9,9 +9,12 @@
     "pref_langue_users",
     "rule_full_mass_only",
     "rule_no_house_translation",
+    "spike_de",
     "spike_en",
+    "spike_es",
+    "spike_it",
     "validate_aelf_fr"
   ],
   "current_step_id": "sunday_pref_langue",
-  "notes": "Licence Universalis : checklist faite (data/universalis_license_checklist.json). Gate prod fermée — e-mail/TTS/PDF bloqués sans accord écrit. Adapter Lab OK. Prochaine : contact éditeur ou affichage EN admin-only."
+  "notes": "Evangelizo Reader Feed (feed.evangelizo.org) validé pour DE/SP/IT/AM — adapter core/evangelizo.py. Fausse piste Gemini REST levangileauquotidien.org/api/v1 exclue. Universalis EN : gate prod fermée sans accord écrit. Prochaine : checklist ToS Evangelizo + contact Universalis, puis pref_langue hors Lab."
 }

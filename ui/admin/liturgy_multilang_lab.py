@@ -444,6 +444,70 @@ def render_admin_liturgy_multilang_lab() -> None:
             finally:
                 overlay.empty()
 
+    with st.expander("Adapter Evangelizo DE/ES/IT/EN-AM (Reader Feed)", expanded=False):
+        st.caption(
+            "XML officiel `feed.evangelizo.org/v2/reader.php` → `AelfTexts` via `core/evangelizo.py`. "
+            "Codes Reader : DE, SP (ES), IT, AM (EN). Horizon ≈ 30 j. "
+            "Les URLs REST `levangileauquotidien.org/api/v1/...` sont un faux positif LLM (HTML SPA)."
+        )
+        e_lang = st.selectbox(
+            "Langue Reader",
+            options=["DE", "SP", "IT", "AM"],
+            format_func=lambda x: {
+                "DE": "DE — allemand",
+                "SP": "SP — espagnol (produit ES)",
+                "IT": "IT — italien",
+                "AM": "AM — anglais US (produit EN)",
+            }.get(x, x),
+            key="lab_ev_lang",
+        )
+        e_date = st.date_input(
+            "Date Evangelizo",
+            value=date.today(),
+            key="lab_ev_date",
+        )
+        if st.button("Tester l’adapter Evangelizo", key="lab_ev_run"):
+            from core.evangelizo import fetch_evangelizo_mass, is_full_mass as ev_full
+
+            overlay = loading_overlay("Evangelizo…")
+            try:
+                ident, texts, payload = fetch_evangelizo_mass(
+                    e_date.isoformat(),
+                    evangelizo_lang=str(e_lang),
+                )
+                st.success(
+                    f"{ident.jour_liturgique_nom or ident.date} · "
+                    f"messe complète = {'oui' if ev_full(texts) else 'non'}"
+                )
+                st.markdown(
+                    f"- L1 : {len(texts.premiere_lecture or '')} car. · ref `{texts.premiere_lecture_ref or '—'}`\n"
+                    f"- Ps : {len(texts.psaume or '')} car. · ref `{texts.psaume_ref or '—'}`\n"
+                    f"- L2 : {len(texts.deuxieme_lecture or '')} car. · ref `{texts.deuxieme_lecture_ref or '—'}`\n"
+                    f"- Év : {len(texts.evangile or '')} car. · ref `{texts.evangile_ref or '—'}`"
+                )
+                sample = {
+                    "date": ident.date,
+                    "zone": ident.zone,
+                    "fete": ident.fete,
+                    "evangelizo_lang": e_lang,
+                    "premiere_lecture_ref": texts.premiere_lecture_ref,
+                    "psaume_ref": texts.psaume_ref,
+                    "deuxieme_lecture_ref": texts.deuxieme_lecture_ref,
+                    "evangile_ref": texts.evangile_ref,
+                    "excerpt_gospel": (texts.evangile or "")[:400],
+                    "payload_keys": sorted(payload.keys()),
+                }
+                st.text_area(
+                    "JSON adapter Evangelizo (copier)",
+                    value=json.dumps(sample, ensure_ascii=False, indent=2),
+                    height=180,
+                    key="lab_ev_json",
+                )
+            except Exception as ex:
+                st.error(f"{type(ex).__name__}: {ex}")
+            finally:
+                overlay.empty()
+
     run = st.button("Lancer la sonde (semaine × sources)", type="primary", key="lab_ml_run")
 
     prog_slot = st.empty()

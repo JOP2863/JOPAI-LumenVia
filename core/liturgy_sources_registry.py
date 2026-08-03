@@ -63,6 +63,69 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         ),
     ),
     LiturgySourceSpec(
+        id="evangelizo_de",
+        label="Evangelizo — Reader Feed DE",
+        lang="DE",
+        status="candidate",
+        provides_full_mass_texts=True,
+        endpoint_template=(
+            "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=DE"
+        ),
+        notes=(
+            "Adapter : core/evangelizo.py (XML → AelfTexts). "
+            "Probe 2026-08 : L1+Ps+L2+Év OK (dimanche). Horizon Reader ≈ 30 j. "
+            "Pas l’URL REST Gemini levangileauquotidien.org/api/v1/… (shell HTML SPA)."
+        ),
+        license_note=(
+            "L’Évangile au Quotidien / Evangelizo — Reader destiné à l’affichage web ; "
+            "ToS / redistribution e-mail/TTS/PDF à confirmer avant prod."
+        ),
+    ),
+    LiturgySourceSpec(
+        id="evangelizo_en_am",
+        label="Evangelizo — Reader Feed EN (AM)",
+        lang="EN",
+        status="candidate",
+        provides_full_mass_texts=True,
+        endpoint_template=(
+            "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=AM"
+        ),
+        notes=(
+            "Code Reader = AM (pas EN). Alternative / complément à Universalis. "
+            "Adapter : core/evangelizo.py. Horizon ≈ 30 j."
+        ),
+        license_note="Idem Evangelizo — valider ToS avant prod / e-mail / TTS.",
+    ),
+    LiturgySourceSpec(
+        id="evangelizo_es_sp",
+        label="Evangelizo — Reader Feed ES (SP)",
+        lang="ES",
+        status="candidate",
+        provides_full_mass_texts=True,
+        endpoint_template=(
+            "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=SP"
+        ),
+        notes=(
+            "Code Reader = SP (pas ES). Probe 2026-08 : messe complète OK. "
+            "Adapter : core/evangelizo.py. Horizon ≈ 30 j."
+        ),
+        license_note="Idem Evangelizo — valider ToS avant prod / e-mail / TTS.",
+    ),
+    LiturgySourceSpec(
+        id="evangelizo_it",
+        label="Evangelizo — Reader Feed IT",
+        lang="IT",
+        status="candidate",
+        provides_full_mass_texts=True,
+        endpoint_template=(
+            "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=IT"
+        ),
+        notes=(
+            "Probe 2026-08 : messe complète OK. Adapter : core/evangelizo.py. Horizon ≈ 30 j."
+        ),
+        license_note="Idem Evangelizo — valider ToS avant prod / e-mail / TTS.",
+    ),
+    LiturgySourceSpec(
         id="usccb_readings",
         label="USCCB — lectures (NABRE)",
         lang="EN",
@@ -79,7 +142,7 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://www.katholisch.de/api/liturgy/readings/{date}",
-        notes="Lab 2026-08 : HTTP 404 (page Wartungsarbeiten). Endpoint inventé — à remplacer si API réelle trouvée.",
+        notes="Lab 2026-08 : HTTP 404. Remplacé comme piste par evangelizo_de (Reader réel).",
         license_note="Droits épiscopat DE à confirmer.",
     ),
     LiturgySourceSpec(
@@ -99,7 +162,7 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://comunita.it/api/liturgia/{date}",
-        notes="Lab 2026-08 : HTTP 404. Chercher source CEI / autre API IT messe complète.",
+        notes="Lab 2026-08 : HTTP 404. Remplacé comme piste par evangelizo_it.",
         license_note="CEI / droits IT à confirmer.",
     ),
     LiturgySourceSpec(
@@ -109,8 +172,22 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://www.conferenciaepiscopal.es/api/liturgia/{date}",
-        notes="Lab 2026-08 : HTTP 404. Chercher API CEE / autre source ES messe complète.",
+        notes="Lab 2026-08 : HTTP 404. Remplacé comme piste par evangelizo_es_sp (lang=SP).",
         license_note="CEE — droits à confirmer.",
+    ),
+    LiturgySourceSpec(
+        id="gemini_fake_evangelizo_rest",
+        label="(exclu) REST Gemini levangileauquotidien.org/api/v1",
+        lang="FR",
+        status="excluded",
+        provides_full_mass_texts=False,
+        endpoint_template="https://levangileauquotidien.org/api/v1/fr/reading/{date}",
+        notes=(
+            "Suggestion LLM non vérifiée : HTTP 200 mais Content-Type text/html (SPA Angular), "
+            "pas de JSON. Idem /en|/de|/es|/it. Ciudad Redonda /api/v1/evangelio/{date} → 404. "
+            "api.evangelizo.org → 401 (auth). Utiliser feed.evangelizo.org/v2/reader.php."
+        ),
+        license_note="N/A — endpoint inexistant.",
     ),
     LiturgySourceSpec(
         id="evangeli_net_es",

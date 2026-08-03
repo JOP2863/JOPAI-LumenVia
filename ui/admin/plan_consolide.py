@@ -285,9 +285,11 @@ div[class*="wrap_active"] button {
         <strong>FR</strong> : AELF production. <strong>EN</strong> : adapter Universalis (<code>core/universalis.py</code>) —
         checklist licence livrée (<code>data/universalis_license_checklist.json</code>) : attribution + copyright obligatoires ;
         <em>e-mail / TTS / PDF / prod bloqués</em> sans accord écrit éditeur ; fetch serveur à confirmer.
-        DE/ES/IT : endpoints lab en 404 → exclus jusqu’à vraie API.
+        <strong>DE / ES / IT (+ EN-AM)</strong> : Reader Evangelizo réel (<code>feed.evangelizo.org</code>,
+        adapter <code>core/evangelizo.py</code>) — candidats Lab ; ToS à valider avant prod.
+        Fausse piste LLM : <code>levangileauquotidien.org/api/v1/…</code> (HTML SPA) et Ciudad Redonda API (404) → exclus.
         Lab : <code>?route=admin_liturgy_lab</code> ; suivi : <code>admin_multilang_roadmap</code>.
-        Reste : mail de contact Universalis, puis brancher <code>pref_langue</code> EN si autorisé.
+        Reste : contact Universalis + checklist licence Evangelizo, puis <code>pref_langue</code> si autorisé.
       </td>
     </tr>
     <tr>

@@ -346,6 +346,102 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
                 final_url=url,
             )
 
+    if spec.id.startswith("evangelizo_"):
+        from core.evangelizo import (
+            SOURCE_ID_TO_EVANGELIZO_LANG,
+            EvangelizoError,
+            EvangelizoHorizonError,
+            fetch_evangelizo_mass,
+            is_full_mass as evangelizo_is_full_mass,
+        )
+
+        e_lang = SOURCE_ID_TO_EVANGELIZO_LANG.get(spec.id)
+        if not e_lang:
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=False,
+                error=f"Source Evangelizo non mappée : {spec.id}",
+                raw_kind="evangelizo",
+                url=url,
+            )
+        t0 = time.perf_counter()
+        try:
+            _ident, texts, payload = fetch_evangelizo_mass(date_iso, evangelizo_lang=e_lang)
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            full, blocks, chars, excerpt = _heuristic_full_mass_from_aelf(texts)
+            if evangelizo_is_full_mass(texts):
+                full = True
+                blocks = {
+                    **blocks,
+                    "lecture_1": True,
+                    "psaume": True,
+                    "evangile": True,
+                    "lecture_2": bool(str(texts.deuxieme_lecture or "").strip()),
+                }
+            keys = ", ".join(sorted(str(k) for k in payload.keys() if payload.get(k)))
+            title = str(payload.get("liturgic_t") or "")[:120]
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=True,
+                http_status=200,
+                full_mass_heuristic=full,
+                blocks_found=blocks,
+                chars_total=chars,
+                excerpt=((title + " · " if title else "") + excerpt)[:400],
+                raw_kind="evangelizo_xml",
+                url=url,
+                elapsed_ms=elapsed,
+                content_type="application/xml (Reader Feed)",
+                content_length=chars,
+                final_url=url,
+                top_keys=keys,
+                body_sha_prefix=_body_prefix_fingerprint(excerpt),
+            )
+        except EvangelizoHorizonError as ex:
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=False,
+                http_status=200,
+                error=str(ex)[:240],
+                raw_kind="evangelizo_horizon",
+                url=url,
+                elapsed_ms=elapsed,
+                final_url=url,
+            )
+        except EvangelizoError as ex:
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=False,
+                error=str(ex)[:240],
+                raw_kind="evangelizo",
+                url=url,
+                elapsed_ms=elapsed,
+                final_url=url,
+            )
+        except Exception as ex:
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=False,
+                error=f"{type(ex).__name__}: {ex}"[:240],
+                raw_kind="evangelizo",
+                url=url,
+                elapsed_ms=elapsed,
+                final_url=url,
+            )
+
     t0 = time.perf_counter()
     try:
         r = requests.get(

@@ -66,23 +66,27 @@ MULTILANG_PHASES: tuple[tuple[str, tuple[MultilangStep, ...]], ...] = (
             MultilangStep(
                 "spike_de",
                 "Valider au moins une API DE (textes complets + licence)",
+                "Evangelizo Reader lang=DE — ToS encore à checklist",
             ),
             MultilangStep(
                 "spike_en",
                 "Valider au moins une API EN (Universalis / USCCB / autre)",
+                "Universalis + Evangelizo AM",
             ),
             MultilangStep(
                 "spike_es",
                 "Valider au moins une API ES messe complète",
+                "Evangelizo Reader lang=SP (pas ES)",
             ),
             MultilangStep(
                 "spike_it",
                 "Valider au moins une API IT messe complète",
+                "Evangelizo Reader lang=IT",
             ),
             MultilangStep(
                 "license_checklist",
                 "Checklist licence / ToS par source retenue (web, e-mail, TTS, PDF)",
-                "Universalis : data/universalis_license_checklist.json",
+                "Universalis fait ; Evangelizo ToS à faire",
             ),
         ),
     ),
@@ -407,7 +411,8 @@ def render_admin_multilang_roadmap() -> None:
 | `pref_langue` + LGP + chemins GCS `{LANG}/` | Consommation réelle hors FR |
 | AELF FR + adapter Universalis EN | Accord écrit éditeur puis prod EN |
 | Checklist licence Universalis | Contact éditeur (e-mail/TTS/PDF) |
-| Lab + export JSON | Sources DE/ES/IT réelles |
+| Adapter Evangelizo DE/ES(SP)/IT/EN(AM) | Checklist ToS Evangelizo + prod |
+| Lab + export JSON | Sonde semaine sur `evangelizo_*` |
         """.strip()
     )
 
