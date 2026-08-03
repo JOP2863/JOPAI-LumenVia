@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,16 +27,84 @@ class LiturgyProbeResult:
     chars_total: int = 0
     excerpt: str = ""
     error: str = ""
-    raw_kind: str = ""  # json | jsonp | html | text | aelf
+    raw_kind: str = ""  # json | jsonp | html | text | aelf | excluded
+    # --- debug API ---
+    url: str = ""
+    elapsed_ms: int | None = None
+    content_type: str = ""
+    content_length: int | None = None
+    final_url: str = ""
+    redirect_count: int = 0
+    encoding: str = ""
+    server: str = ""
+    cache_control: str = ""
+    top_keys: str = ""
+    """Clés JSON de premier niveau (ou chemin utile), séparées par virgule."""
+    headers_debug: str = ""
+    """Sous-ensemble d’en-têtes HTTP utiles (texte compact)."""
+    body_sha_prefix: str = ""
+    """Préfixe court d’empreinte pour comparer les réponses (pas un hash crypto affiché entier)."""
 
 
 def _strip_jsonp(raw: str) -> str:
     s = (raw or "").strip()
-    # universalis-style: /**/callback({...});
     m = re.search(r"\{[\s\S]*\}\s*;?\s*$", s)
     if m:
         return m.group(0).rstrip().rstrip(";")
     return s
+
+
+def _top_keys_from_payload(payload: Any, *, limit: int = 24) -> str:
+    try:
+        if isinstance(payload, dict):
+            keys = list(payload.keys())[:limit]
+            return ", ".join(str(k) for k in keys)
+        if isinstance(payload, list) and payload:
+            first = payload[0]
+            if isinstance(first, dict):
+                keys = list(first.keys())[:limit]
+                return f"[0].{{{', '.join(str(k) for k in keys)}}}"
+            return f"list[{len(payload)}]"
+    except Exception:
+        pass
+    return ""
+
+
+def _headers_debug(headers: Any) -> str:
+    if headers is None:
+        return ""
+    interesting = (
+        "content-type",
+        "content-length",
+        "server",
+        "cache-control",
+        "content-encoding",
+        "x-request-id",
+        "x-powered-by",
+        "access-control-allow-origin",
+        "location",
+        "date",
+    )
+    parts: list[str] = []
+    try:
+        # Case-insensitive lookup
+        lower_map = {str(k).lower(): str(v) for k, v in headers.items()}
+        for name in interesting:
+            val = lower_map.get(name)
+            if val:
+                parts.append(f"{name}={val[:120]}")
+    except Exception:
+        return ""
+    return " | ".join(parts)
+
+
+def _body_prefix_fingerprint(raw: str) -> str:
+    s = (raw or "")[:800]
+    if not s:
+        return ""
+    # Empreinte légère non crypto : longueur + quelques codes
+    mix = sum(ord(c) for c in s[::17]) % 9973
+    return f"len={len(raw or '')};p={mix:04d}"
 
 
 def _heuristic_full_mass_from_obj(obj: Any) -> tuple[bool, dict[str, bool], int, str]:
@@ -47,7 +116,6 @@ def _heuristic_full_mass_from_obj(obj: Any) -> tuple[bool, dict[str, bool], int,
     def _has(*needles: str) -> bool:
         return any(n in low for n in needles)
 
-    # Signaux grossiers par langue / fournisseur
     has_l1 = _has(
         "premiere_lecture",
         "première lecture",
@@ -61,9 +129,15 @@ def _heuristic_full_mass_from_obj(obj: Any) -> tuple[bool, dict[str, bool], int,
     )
     has_ps = _has("psaume", "psalm", "antwortpsalm", "salmo", "salmo responsorial")
     has_ev = _has("evangile", "gospel", "evangelium", "vangelo", "evangelio")
-    has_l2 = _has("deuxieme_lecture", "deuxième lecture", "second reading", "zweite lesung", "seconda lettura")
+    has_l2 = _has(
+        "deuxieme_lecture",
+        "deuxième lecture",
+        "second reading",
+        "zweite lesung",
+        "seconda lettura",
+        "segunda lectura",
+    )
 
-    # Contenu texte : refuser les payloads trop courts (calendrier / refs seules)
     substantial = text_len >= 800
     blocks = {
         "lecture_1": has_l1,
@@ -107,6 +181,8 @@ def _heuristic_full_mass_from_aelf(texts: Any) -> tuple[bool, dict[str, bool], i
 def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: float = 18.0) -> LiturgyProbeResult:
     """Sonde une source pour une date ISO. AELF via client métier ; autres via HTTP brut."""
     date_iso = str(date_iso or "").strip()[:10]
+    url = format_endpoint(spec, date_iso=date_iso)
+
     if spec.status == "excluded":
         return LiturgyProbeResult(
             source_id=spec.id,
@@ -115,11 +191,14 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
             ok=False,
             error="Source exclue (règle : textes complets uniquement / pas calendrier seul).",
             raw_kind="excluded",
+            url=url,
         )
 
     if spec.id == "aelf_france":
+        t0 = time.perf_counter()
         try:
             _ident, texts = fetch_aelf_day(date_iso, zone="france")
+            elapsed = int((time.perf_counter() - t0) * 1000)
             full, blocks, chars, excerpt = _heuristic_full_mass_from_aelf(texts)
             return LiturgyProbeResult(
                 source_id=spec.id,
@@ -132,8 +211,16 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
                 chars_total=chars,
                 excerpt=excerpt,
                 raw_kind="aelf",
+                url=url,
+                elapsed_ms=elapsed,
+                content_type="application/json (via client AELF)",
+                content_length=chars,
+                final_url=url,
+                top_keys="informations, messes → lectures (client métier)",
+                body_sha_prefix=_body_prefix_fingerprint(excerpt),
             )
         except Exception as ex:
+            elapsed = int((time.perf_counter() - t0) * 1000)
             if is_aelf_not_found_error(ex):
                 return LiturgyProbeResult(
                     source_id=spec.id,
@@ -143,6 +230,9 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
                     http_status=404,
                     error="AELF 404 — date non publiée",
                     raw_kind="aelf",
+                    url=url,
+                    elapsed_ms=elapsed,
+                    final_url=url,
                 )
             return LiturgyProbeResult(
                 source_id=spec.id,
@@ -151,32 +241,67 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
                 ok=False,
                 error=f"{type(ex).__name__}: {ex}"[:240],
                 raw_kind="aelf",
+                url=url,
+                elapsed_ms=elapsed,
+                final_url=url,
             )
 
-    url = format_endpoint(spec, date_iso=date_iso)
+    t0 = time.perf_counter()
     try:
         r = requests.get(
             url,
             timeout=timeout_s,
-            headers={"User-Agent": "JOPAI-LumenVia-LiturgyLab/0.1", "Accept": "application/json, text/*, */*"},
+            headers={
+                "User-Agent": "JOPAI-LumenVia-LiturgyLab/0.1",
+                "Accept": "application/json, text/*, */*",
+            },
+            allow_redirects=True,
         )
+        elapsed = int((time.perf_counter() - t0) * 1000)
         status = int(r.status_code)
         raw = r.text or ""
+        ctype = (r.headers.get("content-type") or "").strip()
+        server = (r.headers.get("server") or "").strip()
+        cache = (r.headers.get("cache-control") or "").strip()
+        encoding = str(getattr(r, "encoding", "") or "")
+        final_url = str(r.url or url)
+        redirect_count = max(0, len(getattr(r, "history", None) or []))
+        try:
+            clen_hdr = r.headers.get("content-length")
+            content_length = int(clen_hdr) if clen_hdr else len(raw.encode(encoding or "utf-8", errors="replace"))
+        except Exception:
+            content_length = len(raw)
+
+        common_kw = dict(
+            source_id=spec.id,
+            lang=spec.lang,
+            date=date_iso,
+            url=url,
+            elapsed_ms=elapsed,
+            content_type=ctype,
+            content_length=content_length,
+            final_url=final_url,
+            redirect_count=redirect_count,
+            encoding=encoding,
+            server=server,
+            cache_control=cache,
+            headers_debug=_headers_debug(r.headers),
+            body_sha_prefix=_body_prefix_fingerprint(raw),
+        )
+
         if status >= 400:
             return LiturgyProbeResult(
-                source_id=spec.id,
-                lang=spec.lang,
-                date=date_iso,
                 ok=False,
                 http_status=status,
                 error=f"HTTP {status}",
-                excerpt=raw[:200],
+                excerpt=raw[:240],
                 raw_kind="http",
+                **common_kw,
             )
+
         kind = "text"
         payload: Any = raw
-        ctype = (r.headers.get("content-type") or "").lower()
-        if "json" in ctype or raw.strip().startswith("{") or raw.strip().startswith("["):
+        if "json" in ctype.lower() or raw.strip().startswith("{") or raw.strip().startswith("["):
             try:
                 payload = r.json()
                 kind = "json"
@@ -197,9 +322,6 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
 
         full, blocks, chars, excerpt = _heuristic_full_mass_from_obj(payload)
         return LiturgyProbeResult(
-            source_id=spec.id,
-            lang=spec.lang,
-            date=date_iso,
             ok=True,
             http_status=status,
             full_mass_heuristic=full,
@@ -207,8 +329,11 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
             chars_total=chars,
             excerpt=excerpt,
             raw_kind=kind,
+            top_keys=_top_keys_from_payload(payload),
+            **common_kw,
         )
     except Exception as ex:
+        elapsed = int((time.perf_counter() - t0) * 1000)
         return LiturgyProbeResult(
             source_id=spec.id,
             lang=spec.lang,
@@ -216,4 +341,7 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
             ok=False,
             error=f"{type(ex).__name__}: {ex}"[:240],
             raw_kind="http",
+            url=url,
+            elapsed_ms=elapsed,
+            final_url=url,
         )

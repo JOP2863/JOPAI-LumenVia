@@ -1,8 +1,117 @@
-"""Admin — Plan consolidé (HTML statique)."""
+"""Admin — Plan consolidé (HTML + tri colonnes asc/desc)."""
 
 from __future__ import annotations
 
+import html as html_lib
+import re
+import unicodedata
+from typing import Literal
+
 import streamlit as st
+
+SortCol = Literal["theme", "status", "notes", ""]
+SortDir = Literal["asc", "desc"]
+
+_COL_LABELS: dict[str, str] = {
+    "theme": "Thème",
+    "status": "Statut",
+    "notes": "Reste à faire / notes",
+}
+
+# Ordre métier des statuts (clés déjà « folded » sans accents)
+_STATUS_RANK: dict[str, int] = {
+    "livre": 10,
+    "livre v1": 11,
+    "livre v2": 12,
+    "livre base": 13,
+    "en donnees": 20,
+    "regle": 21,
+    "en cours": 30,
+    "iteratif": 31,
+    "a finaliser": 40,
+    "a faire": 50,
+    "a cadrer": 51,
+}
+
+
+def _strip_tags(fragment: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", fragment or "")
+    text = html_lib.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _fold(s: str) -> str:
+    n = unicodedata.normalize("NFKD", s or "")
+    return "".join(c for c in n if not unicodedata.combining(c)).casefold()
+
+
+def _status_sort_key(label: str) -> tuple[int, str]:
+    folded = _fold(label)
+    rank = _STATUS_RANK.get(folded)
+    if rank is None:
+        for k, v in _STATUS_RANK.items():
+            if folded.startswith(k):
+                rank = v
+                break
+    if rank is None:
+        rank = 99
+    return (rank, folded)
+
+
+def _parse_plan_rows(tbody_html: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for i, tr in enumerate(re.findall(r"<tr\b.*?</tr>", tbody_html, flags=re.I | re.S)):
+        cells = re.findall(r"<td\b[^>]*>(.*?)</td>", tr, flags=re.I | re.S)
+        if len(cells) < 3:
+            continue
+        theme_txt = _strip_tags(cells[0])
+        status_txt = _strip_tags(cells[1])
+        notes_txt = _strip_tags(cells[2])
+        rows.append(
+            {
+                "tr": tr,
+                "theme": theme_txt,
+                "status": status_txt,
+                "notes": notes_txt,
+                "ord": str(i).zfill(4),
+            }
+        )
+    return rows
+
+
+def _sort_rows(rows: list[dict[str, str]], *, col: SortCol, direction: SortDir) -> list[dict[str, str]]:
+    if not col:
+        return list(rows)
+    reverse = direction == "desc"
+
+    def key_fn(r: dict[str, str]):
+        if col == "status":
+            return _status_sort_key(r["status"])
+        if col == "notes":
+            return _fold(r["notes"])
+        return _fold(r["theme"])
+
+    return sorted(rows, key=key_fn, reverse=reverse)
+
+
+def _toggle_sort(col: SortCol) -> None:
+    cur = str(st.session_state.get("plan_sort_col") or "")
+    direction = str(st.session_state.get("plan_sort_dir") or "asc")
+    if cur == col:
+        st.session_state.plan_sort_dir = "desc" if direction == "asc" else "asc"
+    else:
+        st.session_state.plan_sort_col = col
+        st.session_state.plan_sort_dir = "asc"
+
+
+def _header_label(col: SortCol) -> str:
+    base = _COL_LABELS.get(col or "", col or "")
+    cur = str(st.session_state.get("plan_sort_col") or "")
+    if cur != col:
+        return f"{base} ⇅"
+    direction = str(st.session_state.get("plan_sort_dir") or "asc")
+    return f"{base} {'▲' if direction == 'asc' else '▼'}"
 
 
 def render_admin_plan_consolide() -> None:
@@ -12,6 +121,41 @@ def render_admin_plan_consolide() -> None:
         "Synthèse du protocole (`.cursor/rules/lumenvia.mdc`), de l’état du code et des chantiers — "
         "y compris les écarts repérés par rapport à ce qui est déjà documenté (cahier, règles, écran admin)."
     )
+
+    if "plan_sort_col" not in st.session_state:
+        st.session_state.plan_sort_col = ""
+    if "plan_sort_dir" not in st.session_state:
+        st.session_state.plan_sort_dir = "asc"
+
+    sc1, sc2, sc3, sc4 = st.columns([2.2, 1.15, 3.0, 1.1], gap="small")
+    with sc1:
+        if st.button(_header_label("theme"), key="plan_sort_theme", use_container_width=True):
+            _toggle_sort("theme")
+            st.rerun()
+    with sc2:
+        if st.button(_header_label("status"), key="plan_sort_status", use_container_width=True):
+            _toggle_sort("status")
+            st.rerun()
+    with sc3:
+        if st.button(_header_label("notes"), key="plan_sort_notes", use_container_width=True):
+            _toggle_sort("notes")
+            st.rerun()
+    with sc4:
+        if st.button("Ordre d’origine", key="plan_sort_reset", use_container_width=True):
+            st.session_state.plan_sort_col = ""
+            st.session_state.plan_sort_dir = "asc"
+            st.rerun()
+
+    cur_col = str(st.session_state.get("plan_sort_col") or "")
+    cur_dir = str(st.session_state.get("plan_sort_dir") or "asc")
+    if cur_col in _COL_LABELS:
+        st.caption(
+            f"Tri actif : **{_COL_LABELS[cur_col]}** — "
+            f"{'ascendant ▲' if cur_dir == 'asc' else 'descendant ▼'} "
+            "(recliquer la même colonne inverse l’ordre)."
+        )
+    else:
+        st.caption("Clique une colonne pour trier (asc / desc).")
 
     plan_html = """
 <style>
@@ -308,4 +452,19 @@ def render_admin_plan_consolide() -> None:
 </dl>
 </div>
 """
+    m = re.search(r"(<tbody>)(.*?)(</tbody>)", plan_html, flags=re.I | re.S)
+    if m:
+        sort_col = str(st.session_state.get("plan_sort_col") or "")
+        sort_dir = str(st.session_state.get("plan_sort_dir") or "asc")
+        if sort_dir not in ("asc", "desc"):
+            sort_dir = "asc"
+        rows = _parse_plan_rows(m.group(2))
+        ordered = _sort_rows(
+            rows,
+            col=sort_col if sort_col in ("theme", "status", "notes") else "",  # type: ignore[arg-type]
+            direction=sort_dir,  # type: ignore[arg-type]
+        )
+        new_tbody = "\n".join(r["tr"] for r in ordered)
+        plan_html = plan_html[: m.start(2)] + "\n" + new_tbody + "\n" + plan_html[m.end(2) :]
+
     st.markdown(plan_html, unsafe_allow_html=True)
