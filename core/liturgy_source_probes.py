@@ -126,9 +126,27 @@ def _heuristic_full_mass_from_obj(obj: Any) -> tuple[bool, dict[str, bool], int,
         "primera lectura",
         "reading1",
         "lectures",
+        "mass_r1",
+        '"mass_r1"',
     )
-    has_ps = _has("psaume", "psalm", "antwortpsalm", "salmo", "salmo responsorial")
-    has_ev = _has("evangile", "gospel", "evangelium", "vangelo", "evangelio")
+    has_ps = _has(
+        "psaume",
+        "psalm",
+        "antwortpsalm",
+        "salmo",
+        "salmo responsorial",
+        "mass_ps",
+        '"mass_ps"',
+    )
+    has_ev = _has(
+        "evangile",
+        "gospel",
+        "evangelium",
+        "vangelo",
+        "evangelio",
+        "mass_g",
+        '"mass_g"',
+    )
     has_l2 = _has(
         "deuxieme_lecture",
         "deuxième lecture",
@@ -136,6 +154,8 @@ def _heuristic_full_mass_from_obj(obj: Any) -> tuple[bool, dict[str, bool], int,
         "zweite lesung",
         "seconda lettura",
         "segunda lectura",
+        "mass_r2",
+        '"mass_r2"',
     )
 
     substantial = text_len >= 800

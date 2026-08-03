@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import html
-from datetime import date, timedelta
+import json
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.liturgy_source_probes import LiturgyProbeResult, probe_liturgy_source
 from core.liturgy_sources_registry import (
@@ -84,6 +88,7 @@ def _result_row(r: LiturgyProbeResult, *, label: str, status: str) -> dict[str, 
         "body_fp": r.body_sha_prefix,
         "erreur": (r.error or "")[:240],
         "extrait": (r.excerpt or "")[:280],
+        "blocks": dict(blocks),
     }
 
 
@@ -91,7 +96,6 @@ def _html_table(headers: list[str], rows: list[list[str]], *, table_id: str) -> 
     thead = "".join(f"<th>{_esc(h)}</th>" for h in headers)
     body_parts: list[str] = []
     for cells in rows:
-        # cells may already contain HTML (e.g. yn_cell) — marked with \x00html\x00 prefix
         tds: list[str] = []
         for c in cells:
             if isinstance(c, str) and c.startswith("\x00html\x00"):
@@ -111,10 +115,72 @@ def _html_table(headers: list[str], rows: list[list[str]], *, table_id: str) -> 
 """.strip()
 
 
+def _plain_cell(c: object) -> str:
+    if isinstance(c, str) and c.startswith("\x00html\x00"):
+        raw = c[len("\x00html\x00") :]
+        return re_strip_tags(raw)
+    return "" if c is None else str(c)
+
+
+def re_strip_tags(fragment: str) -> str:
+    import re
+
+    return re.sub(r"<[^>]+>", "", fragment or "").strip()
+
+
+def _tsv(headers: list[str], rows: list[list[Any]]) -> str:
+    lines = ["\t".join(headers)]
+    for row in rows:
+        lines.append("\t".join(_plain_cell(c).replace("\t", " ").replace("\n", " ") for c in row))
+    return "\n".join(lines) + "\n"
+
+
+def _copy_button(text: str, *, label: str, key: str) -> None:
+    """Bouton HTML qui copie ``text`` dans le presse-papiers (UTF-8)."""
+    b64 = base64.b64encode((text or "").encode("utf-8")).decode("ascii")
+    safe_label = html.escape(label)
+    components.html(
+        f"""
+<div style="font-family: Lora, Georgia, serif;">
+  <button id="btn_{key}" style="
+    background: rgba(212,175,55,0.22);
+    color: #342E29;
+    border: 1px solid rgba(212,175,55,0.65);
+    padding: 0.35rem 0.75rem;
+    cursor: pointer;
+    font-weight: 600;
+  ">{safe_label}</button>
+  <span id="ok_{key}" style="margin-left:0.5rem;color:#1b5e20;font-size:0.85rem;"></span>
+</div>
+<script>
+(() => {{
+  const btn = document.getElementById("btn_{key}");
+  const ok = document.getElementById("ok_{key}");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {{
+    try {{
+      const bin = atob("{b64}");
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const text = new TextDecoder("utf-8").decode(bytes);
+      await navigator.clipboard.writeText(text);
+      ok.textContent = "copié";
+      setTimeout(() => {{ ok.textContent = ""; }}, 1600);
+    }} catch (e) {{
+      ok.textContent = "échec copie — utilise la zone JSON";
+      ok.style.color = "#bf360c";
+    }}
+  }});
+}})();
+</script>
+        """.strip(),
+        height=46,
+    )
+
+
 def _lab_css() -> str:
     return """
 <style>
-/* Pastilles multiselect : éviter F blanc hors fond or (letter-spacing / primary leak) */
 div[class*="st-key-lab_ml_"] [data-baseweb="tag"],
 div[class*="st-key-lab_ml_"] span[kind],
 div[data-baseweb="select"] [data-baseweb="tag"] {
@@ -134,7 +200,7 @@ div[data-baseweb="select"] [data-baseweb="tag"] span {
 .lv-lab-scroll {
   overflow-x: auto;
   max-width: 100%;
-  margin: 0.6rem 0 1.1rem 0;
+  margin: 0.35rem 0 0.9rem 0;
   border: 1px solid rgba(212, 175, 55, 0.35);
   background: rgba(255,255,255,0.72);
 }
@@ -168,8 +234,76 @@ div[data-baseweb="select"] [data-baseweb="tag"] span {
   margin: 0.35rem 0 0.15rem 0;
   font-size: 0.92rem;
 }
+.lv-lab-block-title {
+  font-family: Lora, Georgia, serif;
+  font-weight: 600;
+  margin: 0.75rem 0 0.25rem 0;
+  color: #342E29;
+}
 </style>
 """.strip()
+
+
+def _render_copyable_table(
+    *,
+    title: str,
+    headers: list[str],
+    rows: list[list[Any]],
+    table_id: str,
+    copy_key: str,
+) -> None:
+    st.markdown(f'<p class="lv-lab-block-title">{_esc(title)}</p>', unsafe_allow_html=True)
+    _copy_button(_tsv(headers, rows), label="Copier ce tableau (TSV)", key=copy_key)
+    st.markdown(
+        '<div class="lv-lab-wrap">' + _html_table(headers, rows, table_id=table_id) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _build_export_payload(
+    *,
+    meta: dict[str, Any],
+    results: list[dict[str, Any]],
+    synth_rows: list[list[Any]],
+    url_rows: list[list[str]],
+) -> dict[str, Any]:
+    return {
+        "schema": "lumenvia.liturgy_lab.v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "lang_priority": list(LANG_PRIORITY),
+        "rule": "no_house_translation_full_mass_texts_only",
+        "meta": meta,
+        "registry": [
+            {
+                "id": s.id,
+                "label": s.label,
+                "lang": s.lang,
+                "status": s.status,
+                "provides_full_mass_texts": s.provides_full_mass_texts,
+                "endpoint_template": s.endpoint_template,
+                "notes": s.notes,
+                "license_note": s.license_note,
+            }
+            for s in LITURGY_SOURCES
+        ],
+        "results": results,
+        "synthesis": [
+            {
+                "langue": r[0],
+                "source_id": r[1],
+                "source": r[2],
+                "jours": r[3],
+                "http_ok": r[4],
+                "messe_ok": r[5],
+                "chars_median": r[6],
+                "ms_median": r[7],
+            }
+            for r in synth_rows
+        ],
+        "example_urls": [
+            {"source_id": r[0], "langue": r[1], "statut": r[2], "url": r[3]} for r in url_rows
+        ],
+    }
 
 
 def render_admin_liturgy_multilang_lab() -> None:
@@ -181,30 +315,29 @@ def render_admin_liturgy_multilang_lab() -> None:
         "« messe complète » = heuristique L1+Ps+Év + payload substantiel."
     )
 
+    reg_headers = ["id", "label", "langue", "statut", "full_mass prouvé", "endpoint", "notes", "licence"]
+    reg_rows: list[list[str]] = []
+    for s in LITURGY_SOURCES:
+        reg_rows.append(
+            [
+                s.id,
+                s.label,
+                s.lang,
+                s.status,
+                _yn(s.provides_full_mass_texts),
+                s.endpoint_template,
+                s.notes,
+                s.license_note,
+            ]
+        )
+
     with st.expander("Registre des sources", expanded=False):
-        reg_rows: list[list[str]] = []
-        for s in LITURGY_SOURCES:
-            reg_rows.append(
-                [
-                    s.id,
-                    s.label,
-                    s.lang,
-                    s.status,
-                    _yn(s.provides_full_mass_texts),
-                    s.endpoint_template,
-                    s.notes,
-                    s.license_note,
-                ]
-            )
-        st.markdown(
-            '<div class="lv-lab-wrap">'
-            + _html_table(
-                ["id", "label", "langue", "statut", "full_mass prouvé", "endpoint", "notes", "licence"],
-                reg_rows,
-                table_id="lab_reg",
-            )
-            + "</div>",
-            unsafe_allow_html=True,
+        _render_copyable_table(
+            title="Registre",
+            headers=reg_headers,
+            rows=reg_rows,
+            table_id="lab_reg",
+            copy_key="copy_reg",
         )
 
     include_excluded = st.checkbox(
@@ -219,7 +352,6 @@ def render_admin_liturgy_multilang_lab() -> None:
 
     def _fmt_source(sid: str) -> str:
         s = by_id[sid]
-        # Préfixe « langue » évite le bug pastille Streamlit (1ʳᵉ lettre blanche hors fond or)
         return f"[{s.lang}] {s.label} — {s.status}"
 
     selected_ids = st.multiselect(
@@ -294,6 +426,7 @@ def render_admin_liturgy_multilang_lab() -> None:
             st.session_state["lab_ml_last_meta"] = {
                 "week": [d.isoformat() for d in week],
                 "sources": [s.id for s in specs],
+                "anchor": anchor.isoformat(),
             }
             prog_label.markdown(
                 f'<p class="lv-lab-prog-label">Terminé : {done} / {total} appels.</p>',
@@ -308,7 +441,7 @@ def render_admin_liturgy_multilang_lab() -> None:
         return
 
     meta = st.session_state.get("lab_ml_last_meta") or {}
-    st.subheader("Résultats (détail — HTML copiable)")
+    st.subheader("Résultats")
     st.caption(
         f"Semaine : {', '.join(meta.get('week') or [])} · "
         f"Sources : {', '.join(meta.get('sources') or [])}"
@@ -344,7 +477,7 @@ def render_admin_liturgy_multilang_lab() -> None:
         "erreur",
         "extrait",
     ]
-    detail_rows: list[list[str]] = []
+    detail_rows: list[list[Any]] = []
     for row in results:
         detail_rows.append(
             [
@@ -379,13 +512,13 @@ def render_admin_liturgy_multilang_lab() -> None:
             ]
         )
 
-    st.markdown(
-        '<div class="lv-lab-wrap">' + _html_table(detail_headers, detail_rows, table_id="lab_detail") + "</div>",
-        unsafe_allow_html=True,
+    _render_copyable_table(
+        title="Détail des sondes",
+        headers=detail_headers,
+        rows=detail_rows,
+        table_id="lab_detail",
+        copy_key="copy_detail",
     )
-
-    # Synthèse par source
-    from collections import defaultdict
 
     agg: dict[tuple[str, str, str], dict[str, Any]] = defaultdict(
         lambda: {"jours": 0, "http_ok": 0, "messe_ok": 0, "chars": [], "ms": []}
@@ -406,37 +539,25 @@ def render_admin_liturgy_multilang_lab() -> None:
         except Exception:
             pass
 
-    st.subheader("Synthèse par source (semaine)")
-    synth_rows: list[list[str]] = []
+    synth_rows: list[list[Any]] = []
     for (lg, sid, label), a in sorted(agg.items()):
         chars = sorted(a["chars"])
         ms = sorted(a["ms"])
         med_chars = chars[len(chars) // 2] if chars else ""
         med_ms = ms[len(ms) // 2] if ms else ""
-        synth_rows.append(
-            [
-                lg,
-                sid,
-                label,
-                a["jours"],
-                a["http_ok"],
-                a["messe_ok"],
-                med_chars,
-                med_ms,
-            ]
-        )
-    st.markdown(
-        '<div class="lv-lab-wrap">'
-        + _html_table(
-            ["langue", "source_id", "source", "jours", "http_ok", "messe_ok", "chars_médian", "ms_médian"],
-            [[str(c) for c in r] for r in synth_rows],
-            table_id="lab_synth",
-        )
-        + "</div>",
-        unsafe_allow_html=True,
+        synth_rows.append([lg, sid, label, a["jours"], a["http_ok"], a["messe_ok"], med_chars, med_ms])
+
+    _render_copyable_table(
+        title="Synthèse par source (semaine)",
+        headers=["langue", "source_id", "source", "jours", "http_ok", "messe_ok", "chars_médian", "ms_médian"],
+        rows=synth_rows,
+        table_id="lab_synth",
+        copy_key="copy_synth",
     )
 
-    only_prod = [s for s in LITURGY_SOURCES if s.id in {r.get("source_id") for r in results} and s.provides_full_mass_texts]
+    only_prod = [
+        s for s in LITURGY_SOURCES if s.id in {r.get("source_id") for r in results} and s.provides_full_mass_texts
+    ]
     if only_prod:
         st.success(
             "Sources déjà marquées « textes complets prouvés » : " + ", ".join(s.label for s in only_prod)
@@ -447,17 +568,46 @@ def render_admin_liturgy_multilang_lab() -> None:
             "hors AELF — valider manuellement avant adapters."
         )
 
-    with st.expander("URLs d’exemple (1er jour de la semaine)", expanded=True):
-        d0 = (meta.get("week") or [week[0].isoformat()])[0]
-        url_rows: list[list[str]] = []
-        for sid in meta.get("sources") or []:
-            spec = by_id.get(sid) or next((s for s in LITURGY_SOURCES if s.id == sid), None)
-            if not spec:
-                continue
-            url_rows.append([spec.id, spec.lang, spec.status, format_endpoint(spec, date_iso=d0)])
-        st.markdown(
-            '<div class="lv-lab-wrap">'
-            + _html_table(["source_id", "langue", "statut", "url"], url_rows, table_id="lab_urls")
-            + "</div>",
-            unsafe_allow_html=True,
+    d0 = (meta.get("week") or [week[0].isoformat()])[0]
+    url_rows: list[list[str]] = []
+    for sid in meta.get("sources") or []:
+        spec = by_id.get(sid) or next((s for s in LITURGY_SOURCES if s.id == sid), None)
+        if not spec:
+            continue
+        url_rows.append([spec.id, spec.lang, spec.status, format_endpoint(spec, date_iso=d0)])
+
+    _render_copyable_table(
+        title="URLs d’exemple (1er jour)",
+        headers=["source_id", "langue", "statut", "url"],
+        rows=url_rows,
+        table_id="lab_urls",
+        copy_key="copy_urls",
+    )
+
+    export = _build_export_payload(meta=meta, results=results, synth_rows=synth_rows, url_rows=url_rows)
+    export_json = json.dumps(export, ensure_ascii=False, indent=2)
+    st.session_state["lab_ml_last_export_json"] = export_json
+
+    st.subheader("Export JSON (pour coller dans le chat)")
+    st.caption(
+        "Contient registre + meta + résultats détaillés + synthèse + URLs. "
+        "C’est le format préféré pour l’analyse."
+    )
+    b1, b2 = st.columns([1, 1])
+    with b1:
+        _copy_button(export_json, label="Copier le JSON complet", key="copy_json_full")
+    with b2:
+        st.download_button(
+            "Télécharger lab_probe.json",
+            data=export_json.encode("utf-8"),
+            file_name=f"lumenvia_liturgy_lab_{d0}.json",
+            mime="application/json",
+            key="lab_ml_dl_json",
+            use_container_width=True,
         )
+    st.text_area(
+        "JSON (Ctrl+A puis Ctrl+C si le bouton presse-papiers est bloqué)",
+        value=export_json,
+        height=220,
+        key="lab_ml_json_area",
+    )

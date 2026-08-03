@@ -126,90 +126,74 @@ def render_admin_plan_consolide() -> None:
     st.markdown(
         """
 <style>
-div[class*="st-key-plan_sort_"] button {
-  min-height: 44px !important;
+div[class*="st-key-plan_ico_"] button {
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
   letter-spacing: normal !important;
   text-transform: none !important;
-  font-weight: 600 !important;
-  background: rgba(212, 175, 55, 0.18) !important;
+  font-size: 0.95rem !important;
+  font-weight: 700 !important;
+  background: rgba(212, 175, 55, 0.14) !important;
   color: #342E29 !important;
-  border: 1px solid rgba(212, 175, 55, 0.55) !important;
+  border: 1px solid rgba(212, 175, 55, 0.45) !important;
 }
-div[class*="st-key-plan_sort_"] button p,
-div[class*="st-key-plan_sort_"] button span {
+div[class*="st-key-plan_ico_"] button p,
+div[class*="st-key-plan_ico_"] button span {
   color: #342E29 !important;
-  white-space: normal !important;
+  line-height: 1 !important;
 }
-div[class*="st-key-plan_sort_bar"] {
-  margin: 0.4rem 0 0.75rem 0;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid rgba(212, 175, 55, 0.45);
-  background: rgba(255, 255, 255, 0.85);
+div[class*="wrap_active"] button {
+  background: rgba(212, 175, 55, 0.42) !important;
+  border-color: #D4AF37 !important;
 }
 </style>
         """.strip(),
         unsafe_allow_html=True,
     )
 
-    with st.container(key="plan_sort_bar"):
-        st.markdown("**Tri du tableau**")
-        opt_map = {
-            "Ordre d’origine": "",
-            "Thème": "theme",
-            "Statut": "status",
-            "Reste à faire / notes": "notes",
-        }
-        inv = {v: k for k, v in opt_map.items()}
-        if "plan_sort_select_col" not in st.session_state:
-            st.session_state.plan_sort_select_col = inv.get(
-                str(st.session_state.get("plan_sort_col") or ""),
-                "Ordre d’origine",
-            )
-        if "plan_sort_select_dir" not in st.session_state:
-            st.session_state.plan_sort_select_dir = (
-                "Descendant ▼"
-                if str(st.session_state.get("plan_sort_dir") or "") == "desc"
-                else "Ascendant ▲"
-            )
+    def _set_sort(col: SortCol, direction: SortDir) -> None:
+        st.session_state.plan_sort_col = col
+        st.session_state.plan_sort_dir = direction
+        st.rerun()
 
-        c_a, c_b, c_c = st.columns([2.2, 1.6, 1.2])
-        with c_a:
-            pick = st.selectbox(
-                "Colonne",
-                options=list(opt_map.keys()),
-                key="plan_sort_select_col",
-            )
-        with c_b:
-            dir_pick = st.radio(
-                "Sens",
-                options=["Ascendant ▲", "Descendant ▼"],
-                horizontal=True,
-                key="plan_sort_select_dir",
-                disabled=opt_map.get(str(pick), "") == "",
-            )
-        with c_c:
-            st.write("")
-            if st.button("Réinitialiser", key="plan_sort_reset", use_container_width=True):
-                st.session_state.plan_sort_col = ""
-                st.session_state.plan_sort_dir = "asc"
-                st.session_state.plan_sort_select_col = "Ordre d’origine"
-                st.session_state.plan_sort_select_dir = "Ascendant ▲"
-                st.rerun()
-
-        st.session_state.plan_sort_col = opt_map.get(str(pick), "")
-        st.session_state.plan_sort_dir = (
-            "desc" if str(dir_pick).startswith("Descendant") and st.session_state.plan_sort_col else "asc"
+    def _ico_btn(col: SortCol, direction: SortDir, *, key: str) -> None:
+        active = (
+            str(st.session_state.get("plan_sort_col") or "") == col
+            and str(st.session_state.get("plan_sort_dir") or "") == direction
         )
+        label = "▲" if direction == "asc" else "▼"
+        # Conteneur clé pour le CSS « actif »
+        wrap_key = f"{key}_wrap_active" if active else f"{key}_wrap"
+        with st.container(key=wrap_key):
+            if st.button(label, key=key, use_container_width=True, help=f"Trier {_COL_LABELS[col]} ({'asc' if direction == 'asc' else 'desc'})"):
+                _set_sort(col, direction)
 
-        show_col = str(st.session_state.get("plan_sort_col") or "")
-        show_dir = str(st.session_state.get("plan_sort_dir") or "asc")
-        if show_col in _COL_LABELS:
-            st.caption(
-                f"Indicateurs aussi dans l’en-tête HTML du tableau · tri actif : "
-                f"**{_COL_LABELS[show_col]}** ({'ascendant ▲' if show_dir == 'asc' else 'descendant ▼'})."
-            )
-        else:
-            st.caption("En-têtes du tableau : ↕ = non trié · ▲/▼ = tri actif.")
+    # Une seule ligne d’icônes alignée sur les 3 colonnes du tableau (pas de barre select/radio)
+    hc1, hc2, hc3, hc4 = st.columns([2.2, 1.15, 3.0, 0.7], gap="small")
+    with hc1:
+        a1, a2 = st.columns(2, gap="small")
+        with a1:
+            _ico_btn("theme", "asc", key="plan_ico_theme_asc")
+        with a2:
+            _ico_btn("theme", "desc", key="plan_ico_theme_desc")
+    with hc2:
+        b1, b2 = st.columns(2, gap="small")
+        with b1:
+            _ico_btn("status", "asc", key="plan_ico_status_asc")
+        with b2:
+            _ico_btn("status", "desc", key="plan_ico_status_desc")
+    with hc3:
+        c1, c2 = st.columns(2, gap="small")
+        with c1:
+            _ico_btn("notes", "asc", key="plan_ico_notes_asc")
+        with c2:
+            _ico_btn("notes", "desc", key="plan_ico_notes_desc")
+    with hc4:
+        if st.button("✕", key="plan_ico_reset", use_container_width=True, help="Ordre d’origine"):
+            st.session_state.plan_sort_col = ""
+            st.session_state.plan_sort_dir = "asc"
+            st.rerun()
 
     thead_html = (
         "<tr>"
