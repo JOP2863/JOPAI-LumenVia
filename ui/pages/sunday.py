@@ -17,7 +17,11 @@ from core.liturgy_day import coerce_liturgy_pref_langue, supported_liturgy_langs
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
-from core.readings_cache_loader import load_aelf_from_readings_cache, readings_cache_row_from_aelf_texts
+from core.readings_cache_loader import (
+    load_liturgy_from_readings_cache,
+    rdc_zone_for_pref_langue,
+    readings_cache_row_from_texts,
+)
 from core.sheets_db import append_immutable_row, build_gspread_client, utc_now_iso
 from core.storage import download_bytes, upload_bytes, upload_text
 from core.local_aelf_cache import load_aelf_snapshot, persist_aelf_snapshot
@@ -388,56 +392,58 @@ def render_sunday() -> None:
         except Exception:
             pdf_bytes_for_user = None
 
-    # Lectures : FR → RDC puis AELF ; DE/EN/ES/IT → Evangelizo (facade liturgy_day).
+    # Lectures : RDC (toutes langues) → API (AELF / Evangelizo) → snapshot disque.
     offline = False
     cached_at = ""
     liturgy_source_id = "aelf_france"
+    rdc_zone = rdc_zone_for_pref_langue(pref_langue)
     with st.spinner("Récupération des lectures…"):
         identity = None
         texts = None
-        # 1) Cache Sheets RDC — FR uniquement (schéma zone=france, pas de colonne langue).
-        if pref_langue == "FR" and cfg.gcp_service_account and cfg.gsheet_id:
+        # 1) Cache Sheets RDC — FR=france, hors FR=evangelizo_* (même page admin).
+        if cfg.gcp_service_account and cfg.gsheet_id:
             try:
                 gs = build_gspread_client(cfg.gcp_service_account)
-                cached_rdc = load_aelf_from_readings_cache(
+                cached_rdc = load_liturgy_from_readings_cache(
                     gs=gs,
                     spreadsheet_id=cfg.gsheet_id,
                     date_str=date_str,
-                    zone=zone,
+                    pref_langue=pref_langue,
                 )
                 if cached_rdc:
                     identity, texts = cached_rdc
-                    liturgy_source_id = "aelf_france"
+                    liturgy_source_id = (
+                        "aelf_france" if pref_langue == "FR" else f"evangelizo_rdc_{pref_langue}"
+                    )
             except Exception:
                 pass
 
-        # 2) Facade multi-langues (AELF / Evangelizo) + snapshot disque.
+        # 2) Facade multi-langues (AELF / Evangelizo) + snapshot disque + écriture RDC.
         if identity is None or texts is None:
             try:
                 identity, texts, liturgy_source_id = ap.cached_liturgy_day(
                     date_str, pref_langue=pref_langue
                 )
-                snap_zone = str(getattr(identity, "zone", None) or zone)
+                snap_zone = str(getattr(identity, "zone", None) or rdc_zone)
                 persist_aelf_snapshot(date_str, snap_zone, identity, texts)
-                # Écrit RDC uniquement pour FR (source AELF).
-                if (
-                    pref_langue == "FR"
-                    and liturgy_source_id == "aelf_france"
-                    and cfg.gcp_service_account
-                    and cfg.gsheet_id
-                ):
+                if cfg.gcp_service_account and cfg.gsheet_id:
                     try:
                         gs2 = build_gspread_client(cfg.gcp_service_account)
-                        row = readings_cache_row_from_aelf_texts(
+                        z_write = str(getattr(identity, "zone", None) or rdc_zone)
+                        row = readings_cache_row_from_texts(
                             ds=date_str[:10],
-                            zone=zone,
+                            zone=z_write,
                             identity=identity,
                             texts=texts,
+                            source=(
+                                "aelf_api"
+                                if liturgy_source_id == "aelf_france"
+                                else f"{liturgy_source_id}_live"
+                            ),
                         )
                         row["entity_id"] = sha256(
-                            f"read|{date_str[:10]}|{zone}|{utc_now_iso()}".encode("utf-8")
+                            f"read|{date_str[:10]}|{z_write}|{utc_now_iso()}".encode("utf-8")
                         ).hexdigest()[:24]
-                        row["source"] = "aelf_api"
                         append_immutable_row(
                             gspread_client=gs2,
                             spreadsheet_id=cfg.gsheet_id,
@@ -447,7 +453,7 @@ def render_sunday() -> None:
                     except Exception:
                         pass
             except Exception as aelf_err:
-                snap_zone = zone if pref_langue == "FR" else f"evangelizo_{pref_langue.lower()}"
+                snap_zone = rdc_zone
                 snap = load_aelf_snapshot(date_str, snap_zone)
                 if not snap and pref_langue != "FR":
                     snap = load_aelf_snapshot(date_str, zone)
@@ -472,8 +478,8 @@ def render_sunday() -> None:
                         msg += (
                             "\n\n**Note :** le calendrier peut indiquer une synthèse, un audio ou un PDF déjà publiés "
                             "pour ce dimanche — cela ne remplace pas les lectures liturgiques. "
-                            "En administration, ouvre **Cache lectures** et précharge le mois concerné "
-                            "(table `readings_cache` / **RDC**) pour le français."
+                            "En administration, ouvre **Cache lectures** et précharge le mois / les langues concernés "
+                            "(table `readings_cache` / **RDC**)."
                         )
                     st.error(msg)
                     if st.session_state.get("admin_authenticated"):

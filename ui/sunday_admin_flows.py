@@ -36,7 +36,7 @@ from ui.streamlit_caches import service_account_json_fingerprint
 from core.gcs_signed_urls import gcs_signed_url
 from core.config import resolve_gemini_api_key
 from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
-from core.readings_cache_loader import load_aelf_from_readings_cache
+from core.readings_cache_loader import load_liturgy_from_readings_cache
 from core.sunday_gemini_tts import (
     last_tts_route,
     mark_vertex_tts_allowlist_blocked,
@@ -223,12 +223,24 @@ def _resolve_texts_for_readings_tts(
     zone: str,
     pref_langue: str = DEFAULT_PREF_LANGUE,
 ) -> object:
-    """Recharge les textes si le corps TTS est vide (RDC FR ou facade liturgy_day)."""
+    """Recharge les textes si le corps TTS est vide (RDC toutes langues, puis facade)."""
     readings_plain = plain_readings_for_tts(texts)
     if readings_plain.strip():
         return texts
     lg = coerce_liturgy_pref_langue(pref_langue)
     date_str = str(getattr(identity, "date", "") or "")
+    sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    if sid:
+        loaded = load_liturgy_from_readings_cache(
+            gs=gs,
+            spreadsheet_id=sid,
+            date_str=date_str,
+            pref_langue=lg,
+        )
+        if loaded:
+            _id, cache_texts = loaded
+            if plain_readings_for_tts(cache_texts).strip():
+                return cache_texts
     if lg != "FR":
         try:
             from ui.streamlit_caches import cached_liturgy_day
@@ -238,20 +250,6 @@ def _resolve_texts_for_readings_tts(
                 return cache_texts
         except Exception:
             pass
-        return texts
-    sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
-    if not sid:
-        return texts
-    loaded = load_aelf_from_readings_cache(
-        gs=gs,
-        spreadsheet_id=sid,
-        date_str=date_str,
-        zone=zone,
-    )
-    if loaded:
-        _id, cache_texts = loaded
-        if plain_readings_for_tts(cache_texts).strip():
-            return cache_texts
     return texts
 
 

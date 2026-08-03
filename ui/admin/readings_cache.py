@@ -1,4 +1,4 @@
-"""Admin — Préchargement du cache lectures AELF vers Sheets."""
+"""Admin — Préchargement du cache lectures (AELF FR + Evangelizo DE/EN/ES/IT) vers Sheets."""
 
 from __future__ import annotations
 
@@ -8,13 +8,17 @@ from hashlib import sha256
 
 import streamlit as st
 
-from core.aelf import fetch_aelf_day, is_aelf_not_found_error
+from core.aelf import is_aelf_not_found_error
 from core.aelf_text_cleanup import (
     aelf_text_still_has_lectionary_rubric,
     strip_aelf_lectionary_rubrics,
 )
 from core.config import load_config
-from core.readings_cache_loader import readings_cache_row_from_aelf_texts
+from core.liturgy_day import coerce_liturgy_pref_langue, fetch_liturgy_day, supported_liturgy_langs
+from core.readings_cache_loader import (
+    rdc_zone_for_pref_langue,
+    readings_cache_row_from_texts,
+)
 from core.sheets_db import (
     append_immutable_rows_bulk,
     build_gspread_client,
@@ -37,6 +41,14 @@ _READING_BODY_COLS = (
     "deuxieme_lecture",
     "evangile",
 )
+
+_LANG_LABELS = {
+    "FR": "FR — AELF (france)",
+    "DE": "DE — Evangelizo",
+    "EN": "EN — Evangelizo (AM)",
+    "ES": "ES — Evangelizo (SP)",
+    "IT": "IT — Evangelizo",
+}
 
 
 def _scrub_readings_row_rubrics(row: dict[str, str]) -> tuple[dict[str, str], int]:
@@ -76,7 +88,6 @@ def _scrub_rdc_rubrics_in_place(*, gs: object, spreadsheet_id: str) -> int:
     updates: list[dict] = []
     for r_i, row_vals in enumerate(values[1:], start=2):
         changed = False
-        # Pad row to header length
         cells = list(row_vals) + [""] * max(0, len(header) - len(row_vals))
         for name in body_cols:
             j = col_idx[name]
@@ -90,7 +101,6 @@ def _scrub_rdc_rubrics_in_place(*, gs: object, spreadsheet_id: str) -> int:
                 continue
             cells[j] = cleaned
             changed = True
-            # A1 notation
             from gspread.utils import rowcol_to_a1
 
             updates.append({"range": rowcol_to_a1(r_i, j + 1), "values": [[cleaned]]})
@@ -103,15 +113,23 @@ def _scrub_rdc_rubrics_in_place(*, gs: object, spreadsheet_id: str) -> int:
 
     if not updates:
         return 0
-    # Batch par paquets pour éviter les 429.
     chunk = 80
     for i in range(0, len(updates), chunk):
         ws.batch_update(updates[i : i + chunk], value_input_option="RAW")
     return len(updates)
 
 
-def _readings_cache_row_from_aelf(*, ds: str, zone: str, identity, texts) -> dict[str, str]:
-    row = readings_cache_row_from_aelf_texts(ds=ds, zone=zone, identity=identity, texts=texts)
+def _readings_cache_row(
+    *,
+    ds: str,
+    zone: str,
+    identity,
+    texts,
+    source: str,
+) -> dict[str, str]:
+    row = readings_cache_row_from_texts(
+        ds=ds, zone=zone, identity=identity, texts=texts, source=source
+    )
     row, _n = _scrub_readings_row_rubrics(row)
     row["entity_id"] = sha256(f"read|{ds}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
     return row
@@ -130,8 +148,8 @@ def _readings_row_is_usable(r: dict, *, zone: str, year: int) -> bool:
     return any(str(r.get(k) or "").strip() for k in ("premiere_lecture", "psaume", "evangile"))
 
 
-def _readings_row_is_aelf_unavailable(r: dict, *, zone: str, year: int) -> bool:
-    """Date déjà tentée : l'API AELF renvoie 404 (calendrier pas encore publié)."""
+def _readings_row_is_source_unavailable(r: dict, *, zone: str, year: int) -> bool:
+    """Date déjà tentée : source absente (ex. AELF 404)."""
     if str(r.get("zone") or "").strip() != zone:
         return False
     if not sheet_row_status_is_live(r.get("status")):
@@ -139,24 +157,39 @@ def _readings_row_is_aelf_unavailable(r: dict, *, zone: str, year: int) -> bool:
     ds = str(r.get("date") or "").strip()
     if not ds.startswith(str(year)):
         return False
-    return is_aelf_not_found_error(Exception(str(r.get("error") or "")))
+    err = str(r.get("error") or "")
+    return bool(err.strip()) and (
+        is_aelf_not_found_error(Exception(err)) or "404" in err or "horizon" in err.lower()
+    )
 
 
 def render_admin_readings_cache() -> None:
-    st.title("Cache lectures (AELF → Sheets)")
+    st.title("Cache lectures (Sheets)")
     st.caption(
-        "Cette page permet de précharger les lectures liturgiques (AELF) dans la table `readings_cache`, "
-        "sans doublons. Utile pour accélérer l’usage et stabiliser le rendu (web/PDF)."
+        "Précharge les lectures dans `readings_cache` (RDC) **sans doublons**, "
+        "comme pour le français : **FR = AELF** (`zone=france`) · "
+        "**DE / EN / ES / IT = Evangelizo** (`zone=evangelizo_*`). "
+        "La page Dimanche lit d’abord ce cache, puis l’API."
     )
     st.caption(
-        "Nettoyage auto : rubriques lectionnaire AELF (`OU LECTURE BREVE`, `OU BIEN`, …) retirées à l’écriture."
+        "Nettoyage auto (FR) : rubriques lectionnaire AELF (`OU LECTURE BREVE`, …) retirées à l’écriture."
     )
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
         st.error("Configure `gcp_service_account` et `gsheet_id` dans `.streamlit/secrets.toml`.")
         return
 
-    zone = "france"
+    langs = st.multiselect(
+        "Langues à précharger",
+        options=list(supported_liturgy_langs()),
+        default=["FR"],
+        format_func=lambda lg: _LANG_LABELS.get(lg, lg),
+        key="adm_readings_cache_langs",
+    )
+    if not langs:
+        st.warning("Choisis au moins une langue.")
+        return
+
     today = date.today()
     year = st.number_input("Année", min_value=2020, max_value=2100, value=int(today.year), step=1)
     month = st.selectbox(
@@ -182,6 +215,10 @@ def render_admin_readings_cache() -> None:
 
     targets = _sundays_in_year(year) if month == "all" else _sundays_in_month(year, int(month))
     st.metric("Dimanches à vérifier", len(targets))
+    st.caption(
+        "Zones RDC : "
+        + " · ".join(f"{lg}→`{rdc_zone_for_pref_langue(lg)}`" for lg in langs)
+    )
 
     if st.button(
         "Purger `OU LECTURE BREVE` dans RDC (lignes existantes)",
@@ -210,82 +247,87 @@ def render_admin_readings_cache() -> None:
                 table=get_table_spec("readings_cache"),
             )
 
-            existing = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=6000)
-            existing_dates = {
-                str(r.get("date") or "").strip()
-                for r in existing
-                if _readings_row_is_usable(r, zone=zone, year=int(year))
-            }
-            unavailable_dates = {
-                str(r.get("date") or "").strip()
-                for r in existing
-                if _readings_row_is_aelf_unavailable(r, zone=zone, year=int(year))
-            }
-
-            to_fetch = [
-                d
-                for d in targets
-                if d.isoformat() not in existing_dates and d.isoformat() not in unavailable_dates
-            ]
-            target_iso = {d.isoformat() for d in targets}
-            st.write(
-                f"Déjà en base (lectures OK) : **{len(existing_dates & target_iso)}** · "
-                f"Indisponibles AELF (404) : **{len(unavailable_dates & target_iso)}** · "
-                f"À récupérer : **{len(to_fetch)}** dimanche(s)."
+            existing = fetch_records(
+                gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="readings_cache", limit=6000
             )
-            if unavailable_dates & {d.isoformat() for d in targets}:
-                st.caption(
-                    "Les dates en 404 ne sont pas re-tentées tant que l'API AELF ne les publie pas "
-                    "(ex. fin d'année liturgique pas encore en ligne)."
-                )
-            if not to_fetch:
-                st.success("Rien à faire : tout est déjà en base pour cette sélection.")
-                return
-
+            target_iso = {d.isoformat() for d in targets}
             rows: list[dict[str, str]] = []
             ok_count = 0
             err_count = 0
             unavailable_count = 0
+            skipped_ok = 0
             errors_preview: list[str] = []
 
-            for d in to_fetch:
-                ds = d.isoformat()
-                try:
-                    identity, texts = fetch_aelf_day(ds, zone=zone)
-                    row = _readings_cache_row_from_aelf(ds=ds, zone=zone, identity=identity, texts=texts)
-                    dirty = [
-                        k
-                        for k in _READING_BODY_COLS
-                        if aelf_text_still_has_lectionary_rubric(row.get(k))
-                    ]
-                    if dirty:
-                        raise RuntimeError(
-                            f"Rubrique AELF non retirée après nettoyage ({', '.join(dirty)}) — "
-                            "vérifie le déploiement du module core/aelf_text_cleanup.py"
+            for lg0 in langs:
+                lg = coerce_liturgy_pref_langue(lg0)
+                zone = rdc_zone_for_pref_langue(lg)
+                source_tag = "aelf_api_prefetch" if lg == "FR" else f"evangelizo_prefetch_{lg}"
+                existing_dates = {
+                    str(r.get("date") or "").strip()
+                    for r in existing
+                    if _readings_row_is_usable(r, zone=zone, year=int(year))
+                }
+                unavailable_dates = {
+                    str(r.get("date") or "").strip()
+                    for r in existing
+                    if _readings_row_is_source_unavailable(r, zone=zone, year=int(year))
+                }
+                to_fetch = [
+                    d
+                    for d in targets
+                    if d.isoformat() not in existing_dates and d.isoformat() not in unavailable_dates
+                ]
+                skipped_ok += len(existing_dates & target_iso)
+                st.write(
+                    f"**{lg}** (`{zone}`) — déjà OK : **{len(existing_dates & target_iso)}** · "
+                    f"indispo. : **{len(unavailable_dates & target_iso)}** · "
+                    f"à récupérer : **{len(to_fetch)}**."
+                )
+                for d in to_fetch:
+                    ds = d.isoformat()
+                    try:
+                        identity, texts, source_id = fetch_liturgy_day(ds, pref_langue=lg)
+                        z_write = str(getattr(identity, "zone", None) or zone)
+                        row = _readings_cache_row(
+                            ds=ds,
+                            zone=z_write,
+                            identity=identity,
+                            texts=texts,
+                            source=source_tag if lg == "FR" else f"{source_id}_prefetch",
                         )
-                    rows.append(row)
-                    ok_count += 1
-                except Exception as ex:
-                    if is_aelf_not_found_error(ex):
-                        unavailable_count += 1
-                        if len(errors_preview) < 8:
-                            errors_preview.append(
-                                f"{ds} : non publié par l'API AELF (404) — réessayez plus tard"
-                            )
-                        continue
-                    err_count += 1
-                    msg = str(ex)[:900]
-                    if len(errors_preview) < 8:
-                        errors_preview.append(f"{ds} : {msg[:200]}")
-                    rows.append(
-                        {
-                            "entity_id": sha256(f"read|{ds}|{zone}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24],
-                            "date": ds,
-                            "zone": zone,
-                            "source": "aelf_api_prefetch",
-                            "error": msg,
-                        }
-                    )
+                        if lg == "FR":
+                            dirty = [
+                                k
+                                for k in _READING_BODY_COLS
+                                if aelf_text_still_has_lectionary_rubric(row.get(k))
+                            ]
+                            if dirty:
+                                raise RuntimeError(
+                                    f"Rubrique AELF non retirée après nettoyage ({', '.join(dirty)})"
+                                )
+                        rows.append(row)
+                        ok_count += 1
+                    except Exception as ex:
+                        if lg == "FR" and is_aelf_not_found_error(ex):
+                            unavailable_count += 1
+                            if len(errors_preview) < 12:
+                                errors_preview.append(f"{lg} {ds} : AELF 404 (non publié)")
+                            continue
+                        err_count += 1
+                        msg = str(ex)[:900]
+                        if len(errors_preview) < 12:
+                            errors_preview.append(f"{lg} {ds} : {msg[:180]}")
+                        rows.append(
+                            {
+                                "entity_id": sha256(
+                                    f"read|{ds}|{zone}|{utc_now_iso()}".encode("utf-8")
+                                ).hexdigest()[:24],
+                                "date": ds,
+                                "zone": zone,
+                                "source": source_tag,
+                                "error": msg,
+                            }
+                        )
 
             added = 0
             if rows:
@@ -296,17 +338,18 @@ def render_admin_readings_cache() -> None:
                     values_by_col_list=rows,
                     chunk_size=120,
                 )
+                invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="readings_cache")
+                invalidate_adm_sheets_fetch_cache()
             st.success(
                 f"Préchargement terminé : **{added}** ligne(s) ajoutée(s) "
-                f"({ok_count} succès, {unavailable_count} indisponible(s) AELF, {err_count} échec(s))."
+                f"({ok_count} succès, {unavailable_count} indisponible(s), "
+                f"{err_count} échec(s), {skipped_ok} déjà OK ignoré(s))."
             )
             if errors_preview:
                 st.warning("Dates non récupérées :")
                 for line in errors_preview:
                     st.caption(line)
             if err_count:
-                st.info(
-                    "Les autres échecs (hors 404) seront re-tentés au prochain préchargement."
-                )
+                st.info("Les échecs (hors 404 AELF) seront re-tentés au prochain préchargement.")
         finally:
             ov.empty()

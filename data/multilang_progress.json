@@ -7,6 +7,7 @@
     "lang_priority_fr_de_en_es_it",
     "license_checklist",
     "pref_langue_users",
+    "readings_cache_lang",
     "rule_full_mass_only",
     "rule_no_house_translation",
     "spike_de",
@@ -17,5 +18,5 @@
     "validate_aelf_fr"
   ],
   "current_step_id": "email_pref_langue",
-  "notes": "Câblage 2026-08-03 : dimanche charge cached_liturgy_day(pref_langue session) — FR=AELF/RDC, DE/EN/ES/IT=Evangelizo. Admin génération : sélecteur langue + chemins GCS {LANG}/. E-mail manuel : URLs signées + nom_du_dimanche par pref_langue destinataire (templates encore FR). Reste : ToS Evangelizo canaux larges ; TTS titres sections encore FR ; templates e-mail multilingues."
+  "notes": "Cache lectures (RDC) multi-langue 2026-08-03 : même page admin — FR=zone france (AELF), DE/EN/ES/IT=evangelizo_* ; Dimanche lit RDC toutes langues avant API. E-mail manuel : URLs + nom_du_dimanche par pref_langue (templates encore FR). Reste : ToS Evangelizo canaux larges ; TTS titres sections encore FR ; templates e-mail multilingues."
 }

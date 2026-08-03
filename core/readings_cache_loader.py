@@ -6,7 +6,25 @@ import re
 from datetime import date
 
 from core.aelf import AelfDayIdentity, AelfTexts
+from core.locale_codes import DEFAULT_PREF_LANGUE, normalize_pref_langue
 from core.sheets_db import fetch_records, sheet_row_status_is_live
+
+# Zone AELF historique (FR). Hors FR : zone = identité Evangelizo (evangelizo_de, …).
+RDC_ZONE_FRANCE = "france"
+
+
+def rdc_zone_for_pref_langue(pref_langue: object | None) -> str:
+    """Clé ``zone`` RDC pour une langue produit (FR → france, sinon evangelizo_*)."""
+    lg = normalize_pref_langue(pref_langue)
+    if lg == DEFAULT_PREF_LANGUE or lg == "FR":
+        return RDC_ZONE_FRANCE
+    # Aligné sur core.evangelizo.payload_to_identity / PRODUCT_LANG_TO_EVANGELIZO
+    from core.evangelizo import PRODUCT_LANG_TO_EVANGELIZO
+
+    e_lang = PRODUCT_LANG_TO_EVANGELIZO.get(lg)
+    if e_lang:
+        return f"evangelizo_{e_lang.lower()}"
+    return RDC_ZONE_FRANCE
 
 
 def _cache_date_key(raw: object) -> str:
@@ -78,8 +96,15 @@ def aelf_texts_from_readings_cache_row(row: dict) -> AelfTexts:
     )
 
 
-def readings_cache_row_from_aelf_texts(*, ds: str, zone: str, identity, texts) -> dict[str, str]:
-    """Ligne ``readings_cache`` prête pour ``append_immutable_row``."""
+def readings_cache_row_from_texts(
+    *,
+    ds: str,
+    zone: str,
+    identity,
+    texts,
+    source: str = "aelf_api_prefetch",
+) -> dict[str, str]:
+    """Ligne ``readings_cache`` prête pour ``append_immutable_row`` (AELF ou Evangelizo)."""
 
     def _txt(v: object) -> str:
         return _normalize_cached_text(str(v or ""))
@@ -110,9 +135,16 @@ def readings_cache_row_from_aelf_texts(*, ds: str, zone: str, identity, texts) -
         "evangile": _txt(getattr(texts, "evangile", None)),
         "evangile_intro": _txt(getattr(texts, "evangile_intro", None)),
         "evangile_ref": _txt(getattr(texts, "evangile_ref", None)),
-        "source": "aelf_api_prefetch",
+        "source": source,
         "error": "",
     }
+
+
+def readings_cache_row_from_aelf_texts(*, ds: str, zone: str, identity, texts) -> dict[str, str]:
+    """Alias historique — source ``aelf_api_prefetch``."""
+    return readings_cache_row_from_texts(
+        ds=ds, zone=zone, identity=identity, texts=texts, source="aelf_api_prefetch"
+    )
 
 
 def load_aelf_from_readings_cache(
@@ -159,3 +191,19 @@ def load_aelf_from_readings_cache(
         jour_liturgique_nom=str(best.get("jour_liturgique_nom") or "") or None,
     )
     return identity, aelf_texts_from_readings_cache_row(best)
+
+
+def load_liturgy_from_readings_cache(
+    *,
+    gs: object,
+    spreadsheet_id: str,
+    date_str: str,
+    pref_langue: object | None = None,
+) -> tuple[AelfDayIdentity, AelfTexts] | None:
+    """RDC pour une ``pref_langue`` produit (FR=france, DE/EN/ES/IT=evangelizo_*)."""
+    return load_aelf_from_readings_cache(
+        gs=gs,
+        spreadsheet_id=spreadsheet_id,
+        date_str=date_str,
+        zone=rdc_zone_for_pref_langue(pref_langue),
+    )
