@@ -95,23 +95,19 @@ def _sort_rows(rows: list[dict[str, str]], *, col: SortCol, direction: SortDir) 
     return sorted(rows, key=key_fn, reverse=reverse)
 
 
-def _toggle_sort(col: SortCol) -> None:
-    cur = str(st.session_state.get("plan_sort_col") or "")
-    direction = str(st.session_state.get("plan_sort_dir") or "asc")
-    if cur == col:
-        st.session_state.plan_sort_dir = "desc" if direction == "asc" else "asc"
-    else:
-        st.session_state.plan_sort_col = col
-        st.session_state.plan_sort_dir = "asc"
-
-
-def _header_label(col: SortCol) -> str:
-    base = _COL_LABELS.get(col or "", col or "")
+def _th_html(col: SortCol) -> str:
+    """En-tête HTML avec indicateur de tri visible dans le tableau."""
+    base = _COL_LABELS.get(col or "", "")
     cur = str(st.session_state.get("plan_sort_col") or "")
     if cur != col:
-        return f"{base} ⇅"
-    direction = str(st.session_state.get("plan_sort_dir") or "asc")
-    return f"{base} {'▲' if direction == 'asc' else '▼'}"
+        mark = '<span class="lv-plan-sort-idle" title="Non trié"> ↕</span>'
+        cls = ""
+    else:
+        direction = str(st.session_state.get("plan_sort_dir") or "asc")
+        arrow = "▲" if direction == "asc" else "▼"
+        mark = f'<span class="lv-plan-sort-active" title="Tri {direction}"> {arrow}</span>'
+        cls = ' class="lv-plan-th-sorted"'
+    return f"<th{cls}>{html_lib.escape(base)}{mark}</th>"
 
 
 def render_admin_plan_consolide() -> None:
@@ -127,62 +123,136 @@ def render_admin_plan_consolide() -> None:
     if "plan_sort_dir" not in st.session_state:
         st.session_state.plan_sort_dir = "asc"
 
-    sc1, sc2, sc3, sc4 = st.columns([2.2, 1.15, 3.0, 1.1], gap="small")
-    with sc1:
-        if st.button(_header_label("theme"), key="plan_sort_theme", use_container_width=True):
-            _toggle_sort("theme")
-            st.rerun()
-    with sc2:
-        if st.button(_header_label("status"), key="plan_sort_status", use_container_width=True):
-            _toggle_sort("status")
-            st.rerun()
-    with sc3:
-        if st.button(_header_label("notes"), key="plan_sort_notes", use_container_width=True):
-            _toggle_sort("notes")
-            st.rerun()
-    with sc4:
-        if st.button("Ordre d’origine", key="plan_sort_reset", use_container_width=True):
-            st.session_state.plan_sort_col = ""
-            st.session_state.plan_sort_dir = "asc"
-            st.rerun()
-
-    cur_col = str(st.session_state.get("plan_sort_col") or "")
-    cur_dir = str(st.session_state.get("plan_sort_dir") or "asc")
-    if cur_col in _COL_LABELS:
-        st.caption(
-            f"Tri actif : **{_COL_LABELS[cur_col]}** — "
-            f"{'ascendant ▲' if cur_dir == 'asc' else 'descendant ▼'} "
-            "(recliquer la même colonne inverse l’ordre)."
-        )
-    else:
-        st.caption("Clique une colonne pour trier (asc / desc).")
-
-    plan_html = """
+    st.markdown(
+        """
 <style>
-.lv-plan-wrap { font-family: Lora, Georgia, serif; color: #342E29; font-size: 0.92rem; }
-.lv-plan-table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.25rem 0; }
-.lv-plan-table th {
+div[class*="st-key-plan_sort_"] button {
+  min-height: 44px !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  font-weight: 600 !important;
+  background: rgba(212, 175, 55, 0.18) !important;
+  color: #342E29 !important;
+  border: 1px solid rgba(212, 175, 55, 0.55) !important;
+}
+div[class*="st-key-plan_sort_"] button p,
+div[class*="st-key-plan_sort_"] button span {
+  color: #342E29 !important;
+  white-space: normal !important;
+}
+div[class*="st-key-plan_sort_bar"] {
+  margin: 0.4rem 0 0.75rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  background: rgba(255, 255, 255, 0.85);
+}
+</style>
+        """.strip(),
+        unsafe_allow_html=True,
+    )
+
+    with st.container(key="plan_sort_bar"):
+        st.markdown("**Tri du tableau**")
+        opt_map = {
+            "Ordre d’origine": "",
+            "Thème": "theme",
+            "Statut": "status",
+            "Reste à faire / notes": "notes",
+        }
+        inv = {v: k for k, v in opt_map.items()}
+        if "plan_sort_select_col" not in st.session_state:
+            st.session_state.plan_sort_select_col = inv.get(
+                str(st.session_state.get("plan_sort_col") or ""),
+                "Ordre d’origine",
+            )
+        if "plan_sort_select_dir" not in st.session_state:
+            st.session_state.plan_sort_select_dir = (
+                "Descendant ▼"
+                if str(st.session_state.get("plan_sort_dir") or "") == "desc"
+                else "Ascendant ▲"
+            )
+
+        c_a, c_b, c_c = st.columns([2.2, 1.6, 1.2])
+        with c_a:
+            pick = st.selectbox(
+                "Colonne",
+                options=list(opt_map.keys()),
+                key="plan_sort_select_col",
+            )
+        with c_b:
+            dir_pick = st.radio(
+                "Sens",
+                options=["Ascendant ▲", "Descendant ▼"],
+                horizontal=True,
+                key="plan_sort_select_dir",
+                disabled=opt_map.get(str(pick), "") == "",
+            )
+        with c_c:
+            st.write("")
+            if st.button("Réinitialiser", key="plan_sort_reset", use_container_width=True):
+                st.session_state.plan_sort_col = ""
+                st.session_state.plan_sort_dir = "asc"
+                st.session_state.plan_sort_select_col = "Ordre d’origine"
+                st.session_state.plan_sort_select_dir = "Ascendant ▲"
+                st.rerun()
+
+        st.session_state.plan_sort_col = opt_map.get(str(pick), "")
+        st.session_state.plan_sort_dir = (
+            "desc" if str(dir_pick).startswith("Descendant") and st.session_state.plan_sort_col else "asc"
+        )
+
+        show_col = str(st.session_state.get("plan_sort_col") or "")
+        show_dir = str(st.session_state.get("plan_sort_dir") or "asc")
+        if show_col in _COL_LABELS:
+            st.caption(
+                f"Indicateurs aussi dans l’en-tête HTML du tableau · tri actif : "
+                f"**{_COL_LABELS[show_col]}** ({'ascendant ▲' if show_dir == 'asc' else 'descendant ▼'})."
+            )
+        else:
+            st.caption("En-têtes du tableau : ↕ = non trié · ▲/▼ = tri actif.")
+
+    thead_html = (
+        "<tr>"
+        + _th_html("theme")
+        + _th_html("status")
+        + _th_html("notes")
+        + "</tr>"
+    )
+
+    plan_html = f"""
+<style>
+.lv-plan-wrap {{ font-family: Lora, Georgia, serif; color: #342E29; font-size: 0.92rem; }}
+.lv-plan-table {{ width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.25rem 0; }}
+.lv-plan-table th {{
   text-align: left; padding: 10px 12px; background: rgba(212, 175, 55, 0.18);
   border: 1px solid rgba(212, 175, 55, 0.45); font-weight: 600;
-}
-.lv-plan-table td {
+}}
+.lv-plan-table th.lv-plan-th-sorted {{
+  background: rgba(212, 175, 55, 0.38);
+  box-shadow: inset 0 -3px 0 #D4AF37;
+}}
+.lv-plan-sort-active {{ color: #1b5e20; font-weight: 700; }}
+.lv-plan-sort-idle {{ color: rgba(52, 46, 41, 0.45); font-weight: 500; }}
+.lv-plan-table td {{
   vertical-align: top; padding: 10px 12px; border: 1px solid rgba(52, 46, 41, 0.15);
   background: rgba(255, 255, 255, 0.65);
-}
-.lv-plan-table tr:nth-child(even) td { background: rgba(253, 251, 247, 0.95); }
-.lv-st-ok { color: #1b5e20; font-weight: 600; }
-.lv-st-partiel { color: #bf360c; font-weight: 600; }
-.lv-st-todo { color: #6a1b9a; font-weight: 600; }
-.lv-keylist { margin-top: 1rem; padding: 12px 14px; border-left: 3px solid #D4AF37; background: rgba(255,255,255,0.75); }
-.lv-keylist dt { font-weight: 600; margin-top: 8px; color: #342E29; }
-.lv-keylist dd { margin: 4px 0 0 0; padding-left: 0.5rem; border-left: 2px solid rgba(212, 175, 55, 0.35); }
+}}
+.lv-plan-table tr:nth-child(even) td {{ background: rgba(253, 251, 247, 0.95); }}
+.lv-st-ok {{ color: #1b5e20; font-weight: 600; }}
+.lv-st-partiel {{ color: #bf360c; font-weight: 600; }}
+.lv-st-todo {{ color: #6a1b9a; font-weight: 600; }}
+.lv-keylist {{ margin-top: 1rem; padding: 12px 14px; border-left: 3px solid #D4AF37; background: rgba(255,255,255,0.75); }}
+.lv-keylist dt {{ font-weight: 600; margin-top: 8px; color: #342E29; }}
+.lv-keylist dd {{ margin: 4px 0 0 0; padding-left: 0.5rem; border-left: 2px solid rgba(212, 175, 55, 0.35); }}
 </style>
 <div class="lv-plan-wrap">
 <table class="lv-plan-table">
   <thead>
-    <tr><th>Thème</th><th>Statut</th><th>Reste à faire / notes</th></tr>
+    {thead_html}
   </thead>
   <tbody>
+"""
+    plan_body = """
     <tr>
       <td><strong>Déploiement public (Git + Streamlit Cloud) — sécurité</strong></td>
       <td><span class="lv-st-ok">Livré</span></td>
@@ -452,6 +522,7 @@ def render_admin_plan_consolide() -> None:
 </dl>
 </div>
 """
+    plan_html = plan_html + plan_body
     m = re.search(r"(<tbody>)(.*?)(</tbody>)", plan_html, flags=re.I | re.S)
     if m:
         sort_col = str(st.session_state.get("plan_sort_col") or "")
