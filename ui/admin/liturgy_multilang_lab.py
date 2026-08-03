@@ -402,6 +402,43 @@ def _render_adapter_smoke_test() -> None:
             overlay.empty()
 
 
+def _purge_stale_lab_session(active_ids: set[str]) -> bool:
+    """Efface résultats / export session s’ils citent des sources hors catalogue actif.
+
+    Évite d’afficher un vieux JSON (katholisch, USCCB…) après mise à jour du Lab.
+    Retourne True si une purge a eu lieu.
+    """
+    meta = st.session_state.get("lab_ml_last_meta")
+    results = st.session_state.get("lab_ml_last_results")
+    stale = False
+    if isinstance(meta, dict):
+        srcs = meta.get("sources") or []
+        if any(str(s) not in active_ids for s in srcs):
+            stale = True
+    if isinstance(results, list):
+        for row in results:
+            if not isinstance(row, dict):
+                continue
+            sid = str(row.get("source_id") or "")
+            if sid and sid not in active_ids:
+                stale = True
+                break
+    # Ancien schéma d’export / résultats sans les champs adapter
+    if not stale and isinstance(results, list) and results:
+        # Universalis via ancien probe HTTP brut (kind=jsonp) = run obsolète
+        for row in results:
+            if not isinstance(row, dict):
+                continue
+            if row.get("source_id") == "universalis_mass" and row.get("kind") in ("jsonp", "html"):
+                stale = True
+                break
+    if not stale:
+        return False
+    for k in ("lab_ml_last_results", "lab_ml_last_meta", "lab_ml_last_export_json"):
+        st.session_state.pop(k, None)
+    return True
+
+
 def render_admin_liturgy_multilang_lab() -> None:
     st.title("Lab — lectures multi-langues")
     st.markdown(_lab_css(), unsafe_allow_html=True)
@@ -412,6 +449,13 @@ def render_admin_liturgy_multilang_lab() -> None:
 
     catalogue = _active_lab_sources()
     by_id = {s.id: s for s in catalogue}
+    active_ids = set(by_id)
+
+    if _purge_stale_lab_session(active_ids):
+        st.warning(
+            "Anciens résultats Lab (sources mortes ou probe obsolète) effacés de la session. "
+            "Relance **Lancer la sonde** pour un export à jour — Evangelizo doit apparaître dans `meta.sources`."
+        )
 
     with st.expander("Sources actives", expanded=False):
         _render_copyable_table(
