@@ -679,7 +679,27 @@ def render_join() -> None:
     with col_n2:
         last_name = st.text_input("Nom", key="join_last_name").strip()
 
-    country = st.selectbox("Pays", options=["FR"], index=0, key="join_country")
+    _langues_opts, _pays_opts = _locale_select_options(gs=gs, cfg=cfg)
+    _lang_codes = [c for c, _ in _langues_opts] or [DEFAULT_PREF_LANGUE]
+    _pays_codes = [c for c, _ in _pays_opts] or [DEFAULT_COUNTRY]
+    col_loc1, col_loc2 = st.columns([1, 1], gap="small")
+    with col_loc1:
+        country = st.selectbox(
+            "Pays",
+            options=_pays_codes,
+            index=_pays_codes.index(DEFAULT_COUNTRY) if DEFAULT_COUNTRY in _pays_codes else 0,
+            format_func=lambda c: next((lab for code, lab in _pays_opts if code == c), c),
+            key="join_country",
+        )
+    with col_loc2:
+        pref_langue = st.selectbox(
+            "Préférence langue",
+            options=_lang_codes,
+            index=_lang_codes.index(DEFAULT_PREF_LANGUE) if DEFAULT_PREF_LANGUE in _lang_codes else 0,
+            format_func=lambda c: next((lab for code, lab in _langues_opts if code == c), c),
+            key="join_pref_langue",
+            help="Langue de consultation LumenVia (e-mails et contenus).",
+        )
     phone_e164 = st.text_input(
         "Téléphone (optionnel, format international)",
         key="join_phone_e164",
@@ -750,8 +770,8 @@ def render_join() -> None:
                         "first_name": first_name.strip(),
                         "last_name": last_name.strip(),
                         "phone_e164": phone_e164.strip(),
-                        "country": str(country or DEFAULT_COUNTRY).strip() or DEFAULT_COUNTRY,
-                        "pref_langue": DEFAULT_PREF_LANGUE,
+                        "country": normalize_country(country or DEFAULT_COUNTRY),
+                        "pref_langue": normalize_pref_langue(pref_langue or DEFAULT_PREF_LANGUE),
                         "source": "newsletter",
                     },
                 )

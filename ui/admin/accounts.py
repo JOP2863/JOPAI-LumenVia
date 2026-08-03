@@ -9,6 +9,17 @@ from html import escape as html_escape
 import streamlit as st
 
 from core.config import load_config
+from core.locale_codes import (
+    DEFAULT_COUNTRY,
+    DEFAULT_PREF_LANGUE,
+    DOMAINE_LANGUE,
+    DOMAINE_PAYS,
+    fallback_langue_options,
+    fallback_pays_options,
+    normalize_country,
+    normalize_pref_langue,
+    options_from_langues_pays_rows,
+)
 from core.sheets_db import (
     append_immutable_row,
     append_immutable_rows_bulk,
@@ -19,6 +30,34 @@ from core.sheets_db import (
 from core.subscriptions_util import subscription_is_active
 from ui.admin_secrets import admin_login_and_password
 from ui.components import loading_overlay
+from ui.streamlit_caches import adm_sheets_fetch_cached, service_account_json_fingerprint
+
+
+def _admin_locale_options(*, cfg: object, gs: object, sa_json: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    rows: list[dict] = []
+    try:
+        gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
+        if sa_json and gsheet_id:
+            rows = list(adm_sheets_fetch_cached(gsheet_id, "langues_pays", 0, sa_json) or [])
+    except Exception:
+        rows = []
+    if not rows:
+        try:
+            rows = list(
+                fetch_records(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="langues_pays",
+                    limit=0,
+                    use_cache=True,
+                )
+                or []
+            )
+        except Exception:
+            rows = []
+    langues = options_from_langues_pays_rows(rows, domaine=DOMAINE_LANGUE) or fallback_langue_options()
+    pays = options_from_langues_pays_rows(rows, domaine=DOMAINE_PAYS) or fallback_pays_options()
+    return langues, pays
 
 
 def render_admin_accounts() -> None:
@@ -30,6 +69,7 @@ def render_admin_accounts() -> None:
         return
 
     gs = build_gspread_client(cfg.gcp_service_account)
+    sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
     try:
         users = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
     except Exception as e:
@@ -65,8 +105,44 @@ def render_admin_accounts() -> None:
                 return True
             return bool(re.match(r"^\+\d{8,15}$", ph))
 
+        langues_opts, pays_opts = _admin_locale_options(cfg=cfg, gs=gs, sa_json=sa_json)
+        lang_codes = [c for c, _ in langues_opts]
+        pays_codes = [c for c, _ in pays_opts]
+        if DEFAULT_PREF_LANGUE not in lang_codes:
+            lang_codes = [DEFAULT_PREF_LANGUE] + lang_codes
+            langues_opts = [(DEFAULT_PREF_LANGUE, f"Français ({DEFAULT_PREF_LANGUE})")] + langues_opts
+        if DEFAULT_COUNTRY not in pays_codes:
+            pays_codes = [DEFAULT_COUNTRY] + pays_codes
+            pays_opts = [(DEFAULT_COUNTRY, f"France ({DEFAULT_COUNTRY})")] + pays_opts
+
         # Formulaire en lot : 5 lignes
         with st.form("adm_add_subscribers_5"):
+            c_pay, c_lang, c_len = st.columns([1, 1, 1], gap="small")
+            with c_pay:
+                country = st.selectbox(
+                    "Pays / nationalité",
+                    options=pays_codes,
+                    index=pays_codes.index(DEFAULT_COUNTRY) if DEFAULT_COUNTRY in pays_codes else 0,
+                    format_func=lambda c: next((lab for code, lab in pays_opts if code == c), c),
+                    key=f"adm_addsub_country_{nonce}",
+                )
+            with c_lang:
+                pref_langue = st.selectbox(
+                    "Préférence langue",
+                    options=lang_codes,
+                    index=lang_codes.index(DEFAULT_PREF_LANGUE) if DEFAULT_PREF_LANGUE in lang_codes else 0,
+                    format_func=lambda c: next((lab for code, lab in langues_opts if code == c), c),
+                    key=f"adm_addsub_pref_langue_{nonce}",
+                    help="Langue de consultation LumenVia (ISO 639-1 majuscules) — e-mails et contenus.",
+                )
+            with c_len:
+                length_pref = st.selectbox(
+                    "Préférence de longueur",
+                    options=["150", "250", "400"],
+                    index=1,
+                    key=f"adm_addsub_lenpref_{nonce}",
+                )
+
             col_a, col_b, col_c, col_d = st.columns([1.3, 1, 1, 1], gap="small")
             with col_a:
                 st.markdown("**E-mail**")
@@ -95,20 +171,6 @@ def render_admin_accounts() -> None:
                     ).strip()
                 rows_in.append({"email": em, "first_name": fn, "last_name": ln, "phone_e164": ph})
 
-            country = st.selectbox("Pays / nationalité", options=["FR"], index=0, key=f"adm_addsub_country_{nonce}")
-            pref_langue = st.selectbox(
-                "Langue de consultation",
-                options=["FR"],
-                index=0,
-                key=f"adm_addsub_pref_langue_{nonce}",
-                help="ISO 639-1 en majuscules — table langues_pays (LGP).",
-            )
-            length_pref = st.selectbox(
-                "Préférence de longueur",
-                options=["150", "250", "400"],
-                index=1,
-                key=f"adm_addsub_lenpref_{nonce}",
-            )
             do_submit = st.form_submit_button(
                 "Créer ces abonnés", type="primary", use_container_width=True
             )
@@ -185,6 +247,8 @@ def render_admin_accounts() -> None:
 
                             # User (si absent)
                             if em_lc not in by_email:
+                                country_n = normalize_country(country)
+                                lang_n = normalize_pref_langue(pref_langue)
                                 to_add_users.append(
                                     {
                                         "entity_id": uid0,
@@ -192,10 +256,12 @@ def render_admin_accounts() -> None:
                                         "first_name": r["first_name"],
                                         "last_name": r["last_name"],
                                         "phone_e164": r.get("phone_e164") or "",
-                                        "country": str(country or "").strip().upper() or "FR",
-                                        "pref_langue": str(pref_langue or "FR").strip().upper() or "FR",
+                                        "country": country_n,
+                                        "pref_langue": lang_n,
                                         # Aligné avec “Nous rejoindre”
                                         "source": "newsletter",
+                                        "password_salt_b64": "",
+                                        "password_hash_b64": "",
                                     }
                                 )
                                 by_email[em_lc] = {"entity_id": uid0, "email": em_lc, "created_at": utc_now_iso()}
