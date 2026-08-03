@@ -5,12 +5,13 @@
     "gcs_lang_paths",
     "lab_page",
     "lang_priority_fr_de_en_es_it",
+    "license_checklist",
     "pref_langue_users",
     "rule_full_mass_only",
     "rule_no_house_translation",
     "spike_en",
     "validate_aelf_fr"
   ],
-  "current_step_id": "license_checklist",
-  "notes": "Lab 2026-08-03 : AELF OK ; Universalis EN = candidate (adapter core/universalis.py, horizon JSONP court). DE/ES/IT/USCCB exclus (404/403). Prochaine étape : checklist licence Universalis puis brancher pref_langue EN."
+  "current_step_id": "sunday_pref_langue",
+  "notes": "Licence Universalis : checklist faite (data/universalis_license_checklist.json). Gate prod fermée — e-mail/TTS/PDF bloqués sans accord écrit. Adapter Lab OK. Prochaine : contact éditeur ou affichage EN admin-only."
 }

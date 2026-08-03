@@ -18,7 +18,44 @@ import requests
 from core.aelf import AelfDayIdentity, AelfTexts
 
 UNIVERSALIS_JSONP_TEMPLATE = "https://universalis.com/{date_compact}/jsonpmass.js"
+UNIVERSALIS_HOME_URL = "https://universalis.com/"
+UNIVERSALIS_MASS_READINGS_URL = "https://universalis.com/mass.htm"
+UNIVERSALIS_JSONP_DOC_URL = "https://universalis.com/n-jsonp-technical.htm"
 _UA = "JOPAI-LumenVia-Universalis/0.1"
+
+# Canaux autorisés tant qu’aucun accord écrit n’est obtenu (voir data/universalis_license_checklist.json).
+UNIVERSALIS_ALLOWED_WITHOUT_WRITTEN_OK: frozenset[str] = frozenset({"lab", "admin_spike"})
+UNIVERSALIS_BLOCKED_WITHOUT_WRITTEN_OK: frozenset[str] = frozenset(
+    {"email", "sms", "tts", "pdf", "production_ui", "ai_synthesis_public"}
+)
+
+
+def attribution_html(*, copyright_text: str = "") -> str:
+    """Bloc attribution obligatoire (lien + copyright payload si fourni)."""
+    notice = (copyright_text or "").strip()
+    parts = [
+        'Source: <a href="https://universalis.com/" rel="noopener noreferrer">Universalis</a>',
+        '(<a href="https://universalis.com/mass.htm" rel="noopener noreferrer">Mass readings</a>).',
+    ]
+    if notice:
+        parts.append(html_lib.escape(notice))
+    return " ".join(parts)
+
+
+def attribution_plain(*, copyright_text: str = "") -> str:
+    notice = (copyright_text or "").strip()
+    base = "Source: Universalis — https://universalis.com/ (Mass readings)."
+    return f"{base} {notice}".strip() if notice else base
+
+
+def channel_allowed(channel: str, *, written_permission: bool = False) -> bool:
+    """True si le canal est utilisable sous la politique LumenVia actuelle."""
+    ch = str(channel or "").strip().lower()
+    if written_permission:
+        return True
+    if ch in UNIVERSALIS_BLOCKED_WITHOUT_WRITTEN_OK:
+        return False
+    return ch in UNIVERSALIS_ALLOWED_WITHOUT_WRITTEN_OK or ch in {"web_jsonp_client"}
 
 
 class UniversalisError(RuntimeError):

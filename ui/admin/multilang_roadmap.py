@@ -12,6 +12,7 @@ from core.liturgy_sources_registry import LANG_PRIORITY
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PROGRESS_PATH = _REPO_ROOT / "data" / "multilang_progress.json"
+_UNIVERSALIS_LICENSE_PATH = _REPO_ROOT / "data" / "universalis_license_checklist.json"
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,7 @@ MULTILANG_PHASES: tuple[tuple[str, tuple[MultilangStep, ...]], ...] = (
             MultilangStep(
                 "license_checklist",
                 "Checklist licence / ToS par source retenue (web, e-mail, TTS, PDF)",
+                "Universalis : data/universalis_license_checklist.json",
             ),
         ),
     ),
@@ -195,9 +197,13 @@ def _default_progress() -> dict:
             "spike_en",
             "adapter_contract",
             "adapter_first_non_fr",
+            "license_checklist",
         ],
-        "current_step_id": "license_checklist",
-        "notes": "",
+        "current_step_id": "sunday_pref_langue",
+        "notes": (
+            "Licence Universalis traitée (checklist JSON) : prod e-mail/TTS/PDF bloqués "
+            "sans accord écrit. Prochaine étape : affichage EN conditionnel ou contact éditeur."
+        ),
     }
 
 
@@ -311,6 +317,68 @@ def _multilang_controls_fragment() -> None:
                 st.rerun(scope="fragment")
 
 
+def load_universalis_license() -> dict:
+    try:
+        if _UNIVERSALIS_LICENSE_PATH.is_file():
+            data = json.loads(_UNIVERSALIS_LICENSE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def _render_universalis_license_panel() -> None:
+    data = load_universalis_license()
+    if not data:
+        st.warning("Checklist licence Universalis introuvable (`data/universalis_license_checklist.json`).")
+        return
+
+    st.subheader("Licence Universalis — checklist")
+    gate = "fermée" if not data.get("production_gate_open") else "ouverte"
+    st.caption(
+        f"Revue {data.get('reviewed_at') or '—'} · gate production **{gate}** · "
+        f"{data.get('summary_fr') or ''}"
+    )
+
+    rows_md = ["| Canal / item | Verdict | Notes |", "|---|---|---|"]
+    for it in data.get("items") or []:
+        if not isinstance(it, dict):
+            continue
+        rows_md.append(
+            f"| {it.get('label', it.get('id', ''))} | `{it.get('verdict', '')}` | "
+            f"{(it.get('notes') or '').replace('|', '/')} |"
+        )
+    st.markdown("\n".join(rows_md))
+
+    policy = data.get("lumenvia_policy") or {}
+    until = policy.get("until_written_permission") or []
+    if until:
+        st.markdown("**Tant qu’aucun accord écrit :**")
+        for line in until:
+            st.markdown(f"- {line}")
+
+    with st.expander("Brouillon de contact éditeur", expanded=False):
+        st.text_input(
+            "Sujet",
+            value=str(policy.get("contact_draft_subject") or ""),
+            key="univ_lic_subj",
+            disabled=True,
+        )
+        st.text_area(
+            "Corps (à envoyer via le formulaire Contact Universalis)",
+            value=str(policy.get("contact_draft_body_fr") or ""),
+            height=220,
+            key="univ_lic_body",
+        )
+        st.caption("Références : " + " · ".join(str(u) for u in (data.get("sources_consulted") or [])))
+
+    st.info(
+        "Checklist **cochée** (analyse faite). Gate production **fermée** jusqu’à réponse éditeur — "
+        "adapter Lab/admin OK ; e-mail / TTS / PDF EN Universalis interdits pour l’instant."
+    )
+
+
 def render_admin_multilang_roadmap() -> None:
     st.title("Multi-langues — suivi (page temporaire)")
     st.caption(
@@ -329,7 +397,7 @@ def render_admin_multilang_roadmap() -> None:
     else:
         st.info(f"**Avancement** : {n_done} / {n_tot} · lab = tuile « Lab lectures ».")
 
-    with st.expander("Règles & stratégie", expanded=True):
+    with st.expander("Règles & stratégie", expanded=False):
         st.markdown(_STRATEGY_MD)
 
     st.markdown(
@@ -337,11 +405,13 @@ def render_admin_multilang_roadmap() -> None:
 | Livré / en cours | Cible |
 |---|---|
 | `pref_langue` + LGP + chemins GCS `{LANG}/` | Consommation réelle hors FR |
-| Registre + Lab sondes | Adapters production DE/EN/ES/IT |
-| AELF FR | Première 2ᵉ langue en prod |
-| Plan consolidé mis à jour | Retrait de cette page temporaire |
+| AELF FR + adapter Universalis EN | Accord écrit éditeur puis prod EN |
+| Checklist licence Universalis | Contact éditeur (e-mail/TTS/PDF) |
+| Lab + export JSON | Sources DE/ES/IT réelles |
         """.strip()
     )
 
+    st.divider()
+    _render_universalis_license_panel()
     st.divider()
     _multilang_controls_fragment()

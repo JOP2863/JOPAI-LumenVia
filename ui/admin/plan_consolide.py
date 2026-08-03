@@ -282,11 +282,12 @@ div[class*="wrap_active"] button {
         (pas de traduction IA/maison à partir de l’AELF ; exclus : évangile-seul, calendrier-seul / Romcal).
         Priorité langues : <strong>FR → DE → EN → ES → IT</strong>.
         Socle : <code>pref_langue</code> + LGP + chemins GCS <code>&#123;LANG&#125;/</code>.
-        <strong>FR</strong> : AELF production. <strong>EN</strong> : adapter Universalis (<code>core/universalis.py</code>,
-        JSONP <code>Mass_R1/Ps/R2/G</code>) — candidat technique OK, <em>licence / horizon dates</em> à valider avant prod
-        (e-mail, TTS). DE/ES/IT : endpoints lab en 404 → exclus jusqu’à vraie API.
-        Lab + export JSON : <code>?route=admin_liturgy_lab</code> ; suivi : <code>admin_multilang_roadmap</code>.
-        Reste : ToS Universalis, brancher <code>pref_langue</code> sur dimanche/e-mail/TTS, trouver sources DE/ES/IT.
+        <strong>FR</strong> : AELF production. <strong>EN</strong> : adapter Universalis (<code>core/universalis.py</code>) —
+        checklist licence livrée (<code>data/universalis_license_checklist.json</code>) : attribution + copyright obligatoires ;
+        <em>e-mail / TTS / PDF / prod bloqués</em> sans accord écrit éditeur ; fetch serveur à confirmer.
+        DE/ES/IT : endpoints lab en 404 → exclus jusqu’à vraie API.
+        Lab : <code>?route=admin_liturgy_lab</code> ; suivi : <code>admin_multilang_roadmap</code>.
+        Reste : mail de contact Universalis, puis brancher <code>pref_langue</code> EN si autorisé.
       </td>
     </tr>
     <tr>

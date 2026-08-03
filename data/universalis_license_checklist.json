@@ -1,0 +1,125 @@
+{
+  "schema": "lumenvia.universalis_license.v1",
+  "source_id": "universalis_mass",
+  "reviewed_at": "2026-08-03",
+  "sources_consulted": [
+    "https://universalis.com/n-web.htm",
+    "https://universalis.com/n-jsonp.htm",
+    "https://universalis.com/n-jsonp-technical.htm",
+    "https://universalis.com/faq.htm"
+  ],
+  "publisher": "Universalis Publishing Ltd",
+  "contact_required_url": "https://universalis.com/faq.htm",
+  "summary_fr": "Le JSONP webmaster est le canal prévu pour afficher les lectures sur un site, avec lien + copyright visibles. Toute reproduction pour autrui (impression, e-mail, TTS, PDF, scrape serveur) exige un contact préalable ; pas de gain commercial sans accord.",
+  "items": [
+    {
+      "id": "attribution_link",
+      "label": "Lien vers Universalis (universalis.com) visible",
+      "status": "required",
+      "channel": "all",
+      "verdict": "obligatoire",
+      "notes": "FAQ + doc JSONP technique : créditer avec adresse web."
+    },
+    {
+      "id": "copyright_notice",
+      "label": "Notice copyright du payload JSON visible",
+      "status": "required",
+      "channel": "all",
+      "verdict": "obligatoire",
+      "notes": "Doc JSONP technique §5 : afficher le copyright fourni dans la réponse."
+    },
+    {
+      "id": "no_html_scrape",
+      "label": "Interdiction de scraper les pages HTML Universalis",
+      "status": "forbidden",
+      "channel": "infra",
+      "verdict": "interdit",
+      "notes": "n-web.htm : pas de copie/colle ni scrape serveur des pages."
+    },
+    {
+      "id": "web_jsonp_client",
+      "label": "Affichage web via JSONP côté navigateur (modèle webmaster)",
+      "status": "allowed_with_conditions",
+      "channel": "web",
+      "verdict": "ok_si_attribution",
+      "notes": "Canal officiel free services for webmasters."
+    },
+    {
+      "id": "server_side_jsonp_fetch",
+      "label": "Fetch JSONP côté serveur (adapter LumenVia actuel)",
+      "status": "needs_written_ok",
+      "channel": "infra",
+      "verdict": "à_confirmer",
+      "notes": "Écart vs modèle « script dans la page ». Pas un scrape HTML, mais reproduction serveur — contacter avant prod."
+    },
+    {
+      "id": "streamlit_display_en",
+      "label": "Afficher lectures EN dans l’app Streamlit",
+      "status": "needs_written_ok",
+      "channel": "web",
+      "verdict": "à_confirmer",
+      "notes": "Proche d’un site webmaster si attribution + copyright ; confirmer le fetch serveur."
+    },
+    {
+      "id": "email_full_texts",
+      "label": "Inclure les textes complets dans un e-mail",
+      "status": "needs_written_ok",
+      "channel": "email",
+      "verdict": "non_sans_accord",
+      "notes": "FAQ reproduction pour autrui : contact obligatoire ; newsletter = redistribution."
+    },
+    {
+      "id": "tts_audio",
+      "label": "TTS / audio des lectures Universalis",
+      "status": "needs_written_ok",
+      "channel": "tts",
+      "verdict": "non_sans_accord",
+      "notes": "Reproduction dérivée ; hors JSONP webmaster."
+    },
+    {
+      "id": "pdf_export",
+      "label": "PDF / fascicule avec textes Universalis",
+      "status": "needs_written_ok",
+      "channel": "pdf",
+      "verdict": "non_sans_accord",
+      "notes": "Équivalent « print for other people » → contact."
+    },
+    {
+      "id": "ai_synthesis",
+      "label": "Synthèse IA à partir des lectures EN",
+      "status": "needs_written_ok",
+      "channel": "ai",
+      "verdict": "à_confirmer",
+      "notes": "Texte dérivé ; demander explicitement dans le mail de contact."
+    },
+    {
+      "id": "commercial_gain",
+      "label": "Usage « for gain » / monétisé",
+      "status": "forbidden_unless_licensed",
+      "channel": "all",
+      "verdict": "non_sans_accord",
+      "notes": "FAQ : reproduction normalement OK seulement si pas for gain."
+    },
+    {
+      "id": "horizon_limit",
+      "label": "Horizon JSONP (~quelques jours)",
+      "status": "product_constraint",
+      "channel": "infra",
+      "verdict": "contrainte_produit",
+      "notes": "Pas une clause licence ; limite technique free JSONP (n-otherdates)."
+    }
+  ],
+  "lumenvia_policy": {
+    "until_written_permission": [
+      "Pas d’e-mail / SMS avec textes Universalis",
+      "Pas de TTS / PDF des lectures EN Universalis",
+      "Pas de passage status=production dans le registre",
+      "Adapter + Lab OK pour spike / admin uniquement",
+      "Toujours préparer attribution + copyright si affichage test"
+    ],
+    "contact_draft_subject": "Permission request — LumenVia (non-profit liturgy prep) using Universalis JSONP",
+    "contact_draft_body_fr": "Bonjour,\n\nLumenVia (projet JOPAI, préparation dominicale catholique) souhaite utiliser le JSONP Mass readings (jsonpmass.js) pour proposer les lectures en anglais à des utilisateurs opt-in, sans traduction maison.\n\nUsages envisagés (à valider) :\n1) Affichage dans une app web Streamlit avec lien universalis.com + copyright du payload ;\n2) éventuellement e-mail hebdomadaire, TTS et PDF — seulement avec votre accord ;\n3) fetch JSONP côté serveur (pas de scrape HTML).\n\nPouvez-vous indiquer ce qui est autorisé, et sous quelles conditions (attribution, volume, non-commercial) ?\n\nMerci,\n"
+  },
+  "checklist_complete": true,
+  "production_gate_open": false
+}

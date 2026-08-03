@@ -53,11 +53,13 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         notes=(
             "Adapter : core/universalis.py → AelfTexts (Mass_R1/Ps/R2/G). "
             "Horizon JSONP court (souvent ~4 j) : au-delà → redirect n-otherdates.htm. "
-            "Afficher le copyright du payload. Prod e-mail/TTS : valider ToS Universalis."
+            "Checklist licence : data/universalis_license_checklist.json — "
+            "prod e-mail/TTS/PDF bloqués sans accord écrit ; attribution + copyright obligatoires."
         ),
         license_note=(
-            "Universalis Publishing Ltd — copyright dans le JSON obligatoire à afficher ; "
-            "usage commercial / redistribution à confirmer avant prod."
+            "Universalis Publishing Ltd. JSONP webmaster OK avec lien + copyright ; "
+            "reproduction pour autrui / gain / e-mail / TTS / PDF → contacter avant. "
+            "Fetch serveur = à confirmer. Voir data/universalis_license_checklist.json."
         ),
     ),
     LiturgySourceSpec(
