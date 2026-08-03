@@ -15,7 +15,6 @@ import streamlit.components.v1 as components
 from core.liturgy_source_probes import LiturgyProbeResult, probe_liturgy_source
 from core.liturgy_sources_registry import (
     LANG_PRIORITY,
-    LITURGY_SOURCES,
     format_endpoint,
     sources_by_priority,
 )
@@ -260,12 +259,22 @@ def _render_copyable_table(
     )
 
 
+def _active_lab_sources():
+    """Sources sondables : production + candidats (jamais les exclus / morts)."""
+    return [
+        s
+        for s in sources_by_priority(include_excluded=False)
+        if s.status in ("production", "candidate", "unproven")
+    ]
+
+
 def _build_export_payload(
     *,
     meta: dict[str, Any],
     results: list[dict[str, Any]],
     synth_rows: list[list[Any]],
     url_rows: list[list[str]],
+    registry_sources: list[Any],
 ) -> dict[str, Any]:
     return {
         "schema": "lumenvia.liturgy_lab.v1",
@@ -284,7 +293,7 @@ def _build_export_payload(
                 "notes": s.notes,
                 "license_note": s.license_note,
             }
-            for s in LITURGY_SOURCES
+            for s in registry_sources
         ],
         "results": results,
         "synthesis": [
@@ -306,67 +315,139 @@ def _build_export_payload(
     }
 
 
+def _render_adapter_smoke_test() -> None:
+    """Test rapide d’un adapter qui marche (Universalis ou Evangelizo)."""
+    with st.expander("Test adapter (optionnel)", expanded=False):
+        kind = st.radio(
+            "Adapter",
+            options=["universalis", "evangelizo"],
+            format_func=lambda k: {
+                "universalis": "Universalis EN (JSONP)",
+                "evangelizo": "Evangelizo DE / ES(SP) / IT / EN(AM)",
+            }[k],
+            horizontal=True,
+            key="lab_adapter_kind",
+        )
+        t_date = st.date_input("Date", value=date.today(), key="lab_adapter_date")
+
+        if kind == "evangelizo":
+            e_lang = st.selectbox(
+                "Langue Reader",
+                options=["DE", "SP", "IT", "AM"],
+                format_func=lambda x: {
+                    "DE": "DE — allemand",
+                    "SP": "SP — espagnol (produit ES)",
+                    "IT": "IT — italien",
+                    "AM": "AM — anglais US (produit EN)",
+                }.get(x, x),
+                key="lab_ev_lang",
+            )
+        else:
+            e_lang = None
+            st.caption("Horizon JSONP souvent ~4 jours ; au-delà → erreur d’horizon.")
+
+        if not st.button("Tester", key="lab_adapter_run"):
+            return
+
+        overlay = loading_overlay("Adapter…")
+        try:
+            if kind == "universalis":
+                from core.universalis import copyright_notice, fetch_universalis_mass, is_full_mass
+
+                ident, texts, payload = fetch_universalis_mass(t_date.isoformat())
+                full = is_full_mass(texts)
+                extra = f"- Copyright : {copyright_notice(payload)[:280]}"
+                sample_extra = {"copyright": copyright_notice(payload), "top_keys": sorted(payload.keys())}
+            else:
+                from core.evangelizo import fetch_evangelizo_mass, is_full_mass as ev_full
+
+                ident, texts, payload = fetch_evangelizo_mass(
+                    t_date.isoformat(),
+                    evangelizo_lang=str(e_lang),
+                )
+                full = ev_full(texts)
+                extra = f"- Reader lang : `{e_lang}` · zone `{ident.zone}`"
+                sample_extra = {"evangelizo_lang": e_lang, "payload_keys": sorted(payload.keys())}
+
+            st.success(
+                f"{ident.jour_liturgique_nom or ident.date} · "
+                f"messe complète = {'oui' if full else 'non'}"
+            )
+            st.markdown(
+                f"- L1 : {len(texts.premiere_lecture or '')} car. · ref `{texts.premiere_lecture_ref or '—'}`\n"
+                f"- Ps : {len(texts.psaume or '')} car. · ref `{texts.psaume_ref or '—'}`\n"
+                f"- L2 : {len(texts.deuxieme_lecture or '')} car. · ref `{texts.deuxieme_lecture_ref or '—'}`\n"
+                f"- Év : {len(texts.evangile or '')} car. · ref `{texts.evangile_ref or '—'}`\n"
+                f"{extra}"
+            )
+            sample = {
+                "date": ident.date,
+                "fete": ident.fete,
+                "premiere_lecture_ref": texts.premiere_lecture_ref,
+                "psaume_ref": texts.psaume_ref,
+                "deuxieme_lecture_ref": texts.deuxieme_lecture_ref,
+                "evangile_ref": texts.evangile_ref,
+                "excerpt_gospel": (texts.evangile or "")[:400],
+                **sample_extra,
+            }
+            st.text_area(
+                "JSON (copier)",
+                value=json.dumps(sample, ensure_ascii=False, indent=2),
+                height=160,
+                key="lab_adapter_json",
+            )
+        except Exception as ex:
+            st.error(f"{type(ex).__name__}: {ex}")
+        finally:
+            overlay.empty()
+
+
 def render_admin_liturgy_multilang_lab() -> None:
     st.title("Lab — lectures multi-langues")
     st.markdown(_lab_css(), unsafe_allow_html=True)
     st.caption(
-        "Règle : **pas de traduction maison**. Uniquement des API à textes complets. "
-        f"Priorité : {' · '.join(LANG_PRIORITY)}. "
-        "« messe complète » = heuristique L1+Ps+Év + payload substantiel."
+        "Uniquement les sources qui marchent : AELF (FR), Universalis (EN), Evangelizo (DE/ES/IT/EN-AM). "
+        f"Priorité : {' · '.join(LANG_PRIORITY)}. Pas de traduction maison."
     )
 
-    reg_headers = ["id", "label", "langue", "statut", "full_mass prouvé", "endpoint", "notes", "licence"]
-    reg_rows: list[list[str]] = []
-    for s in LITURGY_SOURCES:
-        reg_rows.append(
-            [
-                s.id,
-                s.label,
-                s.lang,
-                s.status,
-                _yn(s.provides_full_mass_texts),
-                s.endpoint_template,
-                s.notes,
-                s.license_note,
-            ]
-        )
+    catalogue = _active_lab_sources()
+    by_id = {s.id: s for s in catalogue}
 
-    with st.expander("Registre des sources", expanded=False):
+    with st.expander("Sources actives", expanded=False):
         _render_copyable_table(
-            title="Registre",
-            headers=reg_headers,
-            rows=reg_rows,
+            title="Registre (actifs seulement)",
+            headers=["id", "label", "langue", "statut", "endpoint"],
+            rows=[
+                [s.id, s.label, s.lang, s.status, s.endpoint_template]
+                for s in catalogue
+            ],
             table_id="lab_reg",
             copy_key="copy_reg",
         )
-
-    include_excluded = st.checkbox(
-        "Inclure les sources exclues (Romcal, Evangeli.net…) pour documentation",
-        value=False,
-        key="lab_ml_include_excluded",
-    )
-    catalogue = sources_by_priority(include_excluded=include_excluded)
-    by_id = {s.id: s for s in catalogue}
-
-    default_ids = [s.id for s in catalogue if s.status in ("production", "unproven", "candidate")]
 
     def _fmt_source(sid: str) -> str:
         s = by_id[sid]
         return f"[{s.lang}] {s.label} — {s.status}"
 
+    # Nettoie une éventuelle sélection session qui contenait encore des sources mortes.
+    prev = st.session_state.get("lab_ml_sources")
+    if isinstance(prev, list):
+        cleaned = [i for i in prev if i in by_id]
+        if cleaned != prev:
+            st.session_state["lab_ml_sources"] = cleaned or [s.id for s in catalogue]
+
     selected_ids = st.multiselect(
         "Sources à sonder",
         options=[s.id for s in catalogue],
-        default=default_ids,
+        default=[s.id for s in catalogue],
         format_func=_fmt_source,
         key="lab_ml_sources",
     )
 
-    lang_options = list(LANG_PRIORITY)
     lang_filter = st.multiselect(
-        "Filtrer les langues (vide = toutes dans la sélection)",
-        options=lang_options,
-        default=lang_options,
+        "Langues",
+        options=list(LANG_PRIORITY),
+        default=list(LANG_PRIORITY),
         format_func=lambda lg: f"[{lg}] {_LANG_LABELS.get(lg, lg)}",
         key="lab_ml_langs",
     )
@@ -379,134 +460,16 @@ def render_admin_liturgy_multilang_lab() -> None:
             key="lab_ml_anchor",
         )
     with c2:
-        st.markdown(
-            "- Si **dimanche** : 7 jours dimanche → samedi.\n"
-            "- Sinon : semaine ISO **lundi → dimanche** contenant la date."
-        )
+        st.caption("Dimanche → semaine dim–sam · sinon semaine ISO lun–dim.")
 
     if not isinstance(anchor, date):
         st.warning("Date invalide.")
         return
 
     week = _week_dates(anchor)
-    st.info("Semaine sondée : " + " · ".join(d.isoformat() for d in week))
+    st.info("Semaine : " + " · ".join(d.isoformat() for d in week))
 
-    with st.expander("Adapter Universalis EN (spike)", expanded=True):
-        st.caption(
-            "Parse JSONP → contrat `AelfTexts` via `core/universalis.py` + `fetch_liturgy_day(..., pref_langue='EN')`. "
-            "Horizon limité : au-delà de quelques jours → erreur `UniversalisHorizonError`."
-        )
-        u_date = st.date_input(
-            "Date Universalis",
-            value=date.today(),
-            key="lab_univ_date",
-        )
-        if st.button("Tester l’adapter Universalis", key="lab_univ_run"):
-            from core.liturgy_day import fetch_liturgy_day
-            from core.universalis import copyright_notice, fetch_universalis_mass, is_full_mass
-
-            overlay = loading_overlay("Universalis…")
-            try:
-                ident, texts, payload = fetch_universalis_mass(u_date.isoformat())
-                st.success(
-                    f"{ident.jour_liturgique_nom or ident.date} · "
-                    f"messe complète = {'oui' if is_full_mass(texts) else 'non'}"
-                )
-                st.markdown(
-                    f"- L1 : {len(texts.premiere_lecture or '')} car. · ref `{texts.premiere_lecture_ref or '—'}`\n"
-                    f"- Ps : {len(texts.psaume or '')} car. · ref `{texts.psaume_ref or '—'}`\n"
-                    f"- L2 : {len(texts.deuxieme_lecture or '')} car. · ref `{texts.deuxieme_lecture_ref or '—'}`\n"
-                    f"- Év : {len(texts.evangile or '')} car. · ref `{texts.evangile_ref or '—'}`\n"
-                    f"- Copyright : {copyright_notice(payload)[:280]}"
-                )
-                # Vérifie aussi la facade
-                _i2, _t2, sid = fetch_liturgy_day(u_date.isoformat(), pref_langue="EN")
-                st.caption(f"Facade `fetch_liturgy_day` → source_id=`{sid}`")
-                sample = {
-                    "date": ident.date,
-                    "fete": ident.fete,
-                    "premiere_lecture_ref": texts.premiere_lecture_ref,
-                    "psaume_ref": texts.psaume_ref,
-                    "deuxieme_lecture_ref": texts.deuxieme_lecture_ref,
-                    "evangile_ref": texts.evangile_ref,
-                    "excerpt_gospel": (texts.evangile or "")[:400],
-                    "copyright": copyright_notice(payload),
-                    "top_keys": sorted(payload.keys()),
-                }
-                st.text_area(
-                    "JSON adapter (copier)",
-                    value=json.dumps(sample, ensure_ascii=False, indent=2),
-                    height=180,
-                    key="lab_univ_json",
-                )
-            except Exception as ex:
-                st.error(f"{type(ex).__name__}: {ex}")
-            finally:
-                overlay.empty()
-
-    with st.expander("Adapter Evangelizo DE/ES/IT/EN-AM (Reader Feed)", expanded=False):
-        st.caption(
-            "XML officiel `feed.evangelizo.org/v2/reader.php` → `AelfTexts` via `core/evangelizo.py`. "
-            "Codes Reader : DE, SP (ES), IT, AM (EN). Horizon ≈ 30 j. "
-            "Les URLs REST `levangileauquotidien.org/api/v1/...` sont un faux positif LLM (HTML SPA)."
-        )
-        e_lang = st.selectbox(
-            "Langue Reader",
-            options=["DE", "SP", "IT", "AM"],
-            format_func=lambda x: {
-                "DE": "DE — allemand",
-                "SP": "SP — espagnol (produit ES)",
-                "IT": "IT — italien",
-                "AM": "AM — anglais US (produit EN)",
-            }.get(x, x),
-            key="lab_ev_lang",
-        )
-        e_date = st.date_input(
-            "Date Evangelizo",
-            value=date.today(),
-            key="lab_ev_date",
-        )
-        if st.button("Tester l’adapter Evangelizo", key="lab_ev_run"):
-            from core.evangelizo import fetch_evangelizo_mass, is_full_mass as ev_full
-
-            overlay = loading_overlay("Evangelizo…")
-            try:
-                ident, texts, payload = fetch_evangelizo_mass(
-                    e_date.isoformat(),
-                    evangelizo_lang=str(e_lang),
-                )
-                st.success(
-                    f"{ident.jour_liturgique_nom or ident.date} · "
-                    f"messe complète = {'oui' if ev_full(texts) else 'non'}"
-                )
-                st.markdown(
-                    f"- L1 : {len(texts.premiere_lecture or '')} car. · ref `{texts.premiere_lecture_ref or '—'}`\n"
-                    f"- Ps : {len(texts.psaume or '')} car. · ref `{texts.psaume_ref or '—'}`\n"
-                    f"- L2 : {len(texts.deuxieme_lecture or '')} car. · ref `{texts.deuxieme_lecture_ref or '—'}`\n"
-                    f"- Év : {len(texts.evangile or '')} car. · ref `{texts.evangile_ref or '—'}`"
-                )
-                sample = {
-                    "date": ident.date,
-                    "zone": ident.zone,
-                    "fete": ident.fete,
-                    "evangelizo_lang": e_lang,
-                    "premiere_lecture_ref": texts.premiere_lecture_ref,
-                    "psaume_ref": texts.psaume_ref,
-                    "deuxieme_lecture_ref": texts.deuxieme_lecture_ref,
-                    "evangile_ref": texts.evangile_ref,
-                    "excerpt_gospel": (texts.evangile or "")[:400],
-                    "payload_keys": sorted(payload.keys()),
-                }
-                st.text_area(
-                    "JSON adapter Evangelizo (copier)",
-                    value=json.dumps(sample, ensure_ascii=False, indent=2),
-                    height=180,
-                    key="lab_ev_json",
-                )
-            except Exception as ex:
-                st.error(f"{type(ex).__name__}: {ex}")
-            finally:
-                overlay.empty()
+    _render_adapter_smoke_test()
 
     run = st.button("Lancer la sonde (semaine × sources)", type="primary", key="lab_ml_run")
 
@@ -672,23 +635,16 @@ def render_admin_liturgy_multilang_lab() -> None:
         copy_key="copy_synth",
     )
 
-    only_prod = [
-        s for s in LITURGY_SOURCES if s.id in {r.get("source_id") for r in results} and s.provides_full_mass_texts
+    only_full = [
+        s for s in catalogue if s.id in {r.get("source_id") for r in results} and s.provides_full_mass_texts
     ]
-    if only_prod:
-        st.success(
-            "Sources déjà marquées « textes complets prouvés » : " + ", ".join(s.label for s in only_prod)
-        )
-    else:
-        st.warning(
-            "Aucune source de la sélection n’est encore `provides_full_mass_texts=True` "
-            "hors AELF — valider manuellement avant adapters."
-        )
+    if only_full:
+        st.success("Messe complète déjà prouvée pour : " + ", ".join(s.label for s in only_full))
 
     d0 = (meta.get("week") or [week[0].isoformat()])[0]
     url_rows: list[list[str]] = []
     for sid in meta.get("sources") or []:
-        spec = by_id.get(sid) or next((s for s in LITURGY_SOURCES if s.id == sid), None)
+        spec = by_id.get(sid)
         if not spec:
             continue
         url_rows.append([spec.id, spec.lang, spec.status, format_endpoint(spec, date_iso=d0)])
@@ -701,7 +657,13 @@ def render_admin_liturgy_multilang_lab() -> None:
         copy_key="copy_urls",
     )
 
-    export = _build_export_payload(meta=meta, results=results, synth_rows=synth_rows, url_rows=url_rows)
+    export = _build_export_payload(
+        meta=meta,
+        results=results,
+        synth_rows=synth_rows,
+        url_rows=url_rows,
+        registry_sources=catalogue,
+    )
     export_json = json.dumps(export, ensure_ascii=False, indent=2)
     st.session_state["lab_ml_last_export_json"] = export_json
 
