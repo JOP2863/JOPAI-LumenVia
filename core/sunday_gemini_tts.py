@@ -17,6 +17,7 @@ from core.catechese_section_strip import (
 from core.sunday_readings_tts import (
     coalesce_liturgy_reading_sections,
     dedupe_tts_section_body,
+    default_first_reading_tts_title,
     is_liturgy_readings_tts_text,
     liturgy_section_oral_announcement,
     normalize_liturgy_section_title,
@@ -24,6 +25,7 @@ from core.sunday_readings_tts import (
     pick_tts_french_accent,
     spoken_text_for_tts,
 )
+from core.prompt_locale import canonical_reading_section_key
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
 
 # Modèles TTS — l'API Gemini (clé) et Vertex (GCP) n'exposent pas les mêmes noms.
@@ -122,7 +124,7 @@ def _liturgy_section_tts_pieces(
     """
     body = dedupe_tts_section_body(title, body, intro_lue=intro_lue)
     title_norm = normalize_liturgy_section_title(title) if title else ""
-    if title_norm == "Psaume":
+    if title_norm == "Psaume" or canonical_reading_section_key(title) == "psaume":
         body = re.sub(r"[ \t]+\n", "\n", (body or ""))
         body = re.sub(r"\n{3,}", "\n\n", body).strip()
     else:
@@ -131,7 +133,7 @@ def _liturgy_section_tts_pieces(
         return []
 
     announcement = liturgy_section_oral_announcement(
-        title_norm or title,
+        title or title_norm,
         intro_lue=intro_lue,
         ref=ref,
     )
@@ -170,7 +172,7 @@ def _liturgy_readings_tts_section_chunk_specs(
                 if (body or "").strip():
                     started = True
                     pieces = _liturgy_section_tts_pieces(
-                        "Première lecture",
+                        default_first_reading_tts_title(text),
                         body,
                         max_chars=max_chars,
                         intro_lue=intro_lue,

@@ -224,7 +224,7 @@ def _resolve_texts_for_readings_tts(
     pref_langue: str = DEFAULT_PREF_LANGUE,
 ) -> object:
     """Recharge les textes si le corps TTS est vide (RDC toutes langues, puis facade)."""
-    readings_plain = plain_readings_for_tts(texts)
+    readings_plain = plain_readings_for_tts(texts, pref_langue=pref_langue)
     if readings_plain.strip():
         return texts
     lg = coerce_liturgy_pref_langue(pref_langue)
@@ -239,14 +239,14 @@ def _resolve_texts_for_readings_tts(
         )
         if loaded:
             _id, cache_texts = loaded
-            if plain_readings_for_tts(cache_texts).strip():
+            if plain_readings_for_tts(cache_texts, pref_langue=lg).strip():
                 return cache_texts
     if lg != "FR":
         try:
             from ui.streamlit_caches import cached_liturgy_day
 
             _id, cache_texts, _sid = cached_liturgy_day(date_str, pref_langue=lg)
-            if plain_readings_for_tts(cache_texts).strip():
+            if plain_readings_for_tts(cache_texts, pref_langue=lg).strip():
                 return cache_texts
         except Exception:
             pass
@@ -362,7 +362,7 @@ def _run_incremental_sunday_outputs(
             texts = _resolve_texts_for_readings_tts(
                 texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone, pref_langue=pref_langue
             )
-            readings_plain = plain_readings_for_tts(texts)
+            readings_plain = plain_readings_for_tts(texts, pref_langue=pref_langue)
             if not readings_plain.strip():
                 issues.append(
                     "Texte des lectures vide pour ce dimanche — impossible de produire l’audio. "
@@ -1054,7 +1054,7 @@ def _run_generate_sunday_flow(
         texts = _resolve_texts_for_readings_tts(
             texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone_key, pref_langue=pref_langue
         )
-        readings_plain = plain_readings_for_tts(texts)
+        readings_plain = plain_readings_for_tts(texts, pref_langue=pref_langue)
         if readings_plain.strip():
             try:
                 _flow_overlay_step(

@@ -5,6 +5,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from core.prompt_locale import (
+    DEFAULT_PREF_LANGUE,
+    canonical_reading_section_key,
+    coerce_aip_langue,
+    detect_pref_langue_from_section_title,
+    pdf_titles,
+    tts_fallback_intro,
+    tts_oral_section_label,
+)
+
 # Ligne injectée par ``plain_readings_for_tts`` : §intro§réf§
 _READINGS_TTS_META_LINE_RE = re.compile(r"^§([^§]*)§([^§]*)§\s*$")
 
@@ -39,8 +49,15 @@ def compose_psalm_text(*, refrain: str | None, body: str | None) -> str | None:
     return r or b or None
 
 
-def liturgy_tts_sections_from_texts(texts: object) -> list[LiturgyTtsSection]:
+def liturgy_tts_sections_from_texts(
+    texts: object,
+    *,
+    pref_langue: object | None = None,
+) -> list[LiturgyTtsSection]:
     """Sections orales pour le TTS des lectures intégrales."""
+
+    lg = coerce_aip_langue(pref_langue)
+    titles = pdf_titles(lg)
 
     def _field(name: str) -> str | None:
         v = getattr(texts, name, None)
@@ -71,10 +88,26 @@ def liturgy_tts_sections_from_texts(texts: object) -> list[LiturgyTtsSection]:
             )
         )
 
-    _add("Première lecture", "premiere_lecture", "premiere_lecture_intro", "premiere_lecture_ref")
-    _add("Psaume", "psaume", "psaume_intro", "psaume_ref", refrain_key="psaume_refrain")
-    _add("Deuxième lecture", "deuxieme_lecture", "deuxieme_lecture_intro", "deuxieme_lecture_ref")
-    _add("Évangile", "evangile", "evangile_intro", "evangile_ref")
+    _add(
+        titles["premiere_lecture"],
+        "premiere_lecture",
+        "premiere_lecture_intro",
+        "premiere_lecture_ref",
+    )
+    _add(
+        titles["psaume"],
+        "psaume",
+        "psaume_intro",
+        "psaume_ref",
+        refrain_key="psaume_refrain",
+    )
+    _add(
+        titles["deuxieme_lecture"],
+        "deuxieme_lecture",
+        "deuxieme_lecture_intro",
+        "deuxieme_lecture_ref",
+    )
+    _add(titles["evangile"], "evangile", "evangile_intro", "evangile_ref")
     return out
 
 
@@ -109,22 +142,21 @@ def oral_reading_intro_phrase(
     *,
     intro_lue: str | None,
     ref: str | None = None,
+    pref_langue: object | None = None,
 ) -> str:
     """
-    Annonce orale d'une section (remplace « selon le lectionnaire » par l'``intro_lue`` AELF).
+    Annonce orale d'une section (remplace « selon le lectionnaire » par l'``intro_lue``).
+
+    Les libellés suivent ``pref_langue`` (ou la langue déduite du titre injecté).
     """
-    norm = (title or "").strip()
-    low = norm.lower()
-    if low.startswith("première") or low.startswith("premiere"):
-        label = "Première lecture"
-    elif low.startswith("deuxième") or low.startswith("deuxieme"):
-        label = "Deuxième lecture"
-    elif low.startswith("psaume"):
-        label = "Le Psaume"
-    elif low.startswith("évangile") or low.startswith("evangile"):
-        label = "Évangile"
+    key = canonical_reading_section_key(title)
+    lg = coerce_aip_langue(
+        pref_langue or detect_pref_langue_from_section_title(title) or DEFAULT_PREF_LANGUE
+    )
+    if key:
+        label = tts_oral_section_label(key, lg)
     else:
-        label = norm or "Lecture"
+        label = (title or "").strip() or tts_oral_section_label("premiere_lecture", lg)
 
     intro = (intro_lue or "").strip()
     if intro:
@@ -132,16 +164,18 @@ def oral_reading_intro_phrase(
             intro += "."
         return f"{label}. {intro}"
 
-    if label == "Première lecture":
-        return "Première lecture. Écoutez la première lecture de la Parole."
-    if label == "Le Psaume":
+    if key == "premiere_lecture":
+        return tts_fallback_intro("premiere_lecture", lg)
+    if key == "psaume":
         reference = (ref or "").strip()
         if reference:
             if not reference.endswith("."):
                 reference += "."
-            return f"Le Psaume. {reference}"
-        return "Le Psaume."
-    return f"{label}."
+            return f"{label}. {reference}"
+        return tts_fallback_intro("psaume", lg)
+    if key:
+        return tts_fallback_intro(key, lg)
+    return f"{label}." if label and not label.endswith(".") else label
 
 
 def pdf_liturgy_reading_kwargs(texts: object) -> dict[str, str | None]:
@@ -166,3 +200,15 @@ def pdf_liturgy_reading_kwargs(texts: object) -> dict[str, str | None]:
         "evangile_intro": _t("evangile_intro"),
         "evangile_ref": _t("evangile_ref"),
     }
+
+
+__all__ = [
+    "LiturgyTtsSection",
+    "compose_psalm_text",
+    "encode_readings_tts_meta_line",
+    "liturgy_tts_sections_from_texts",
+    "oral_reading_intro_phrase",
+    "pdf_liturgy_reading_kwargs",
+    "reading_caption",
+    "split_readings_tts_body_meta",
+]

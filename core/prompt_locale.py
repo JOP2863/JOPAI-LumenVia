@@ -142,6 +142,181 @@ TAKEAWAYS_SECTION_TITLE: dict[str, str] = {
     "IT": "Da ricordare",
 }
 
+# Annonces orales TTS si ``intro_lue`` absente (cache ancien / feed incomplet).
+TTS_READING_FALLBACK_INTRO: dict[str, dict[str, str]] = {
+    "FR": {
+        "premiere_lecture": "Première lecture. Écoutez la première lecture de la Parole.",
+        "psaume": "Le Psaume.",
+        "deuxieme_lecture": "Deuxième lecture.",
+        "evangile": "Évangile.",
+    },
+    "DE": {
+        "premiere_lecture": "Erste Lesung. Hören Sie die erste Lesung des Wortes Gottes.",
+        "psaume": "Der Psalm.",
+        "deuxieme_lecture": "Zweite Lesung.",
+        "evangile": "Evangelium.",
+    },
+    "EN": {
+        "premiere_lecture": "First reading. Listen to the first reading from the Word of God.",
+        "psaume": "The Psalm.",
+        "deuxieme_lecture": "Second reading.",
+        "evangile": "Gospel.",
+    },
+    "ES": {
+        "premiere_lecture": "Primera lectura. Escuchen la primera lectura de la Palabra de Dios.",
+        "psaume": "El Salmo.",
+        "deuxieme_lecture": "Segunda lectura.",
+        "evangile": "Evangelio.",
+    },
+    "IT": {
+        "premiere_lecture": "Prima lettura. Ascoltate la prima lettura della Parola di Dio.",
+        "psaume": "Il Salmo.",
+        "deuxieme_lecture": "Seconda lettura.",
+        "evangile": "Vangelo.",
+    },
+}
+
+_READING_SECTION_KEYS: tuple[str, ...] = (
+    "premiere_lecture",
+    "psaume",
+    "deuxieme_lecture",
+    "evangile",
+)
+
+
+def _fold_title(s: str) -> str:
+    return (
+        (s or "")
+        .strip()
+        .lower()
+        .replace("é", "e")
+        .replace("è", "e")
+        .replace("ê", "e")
+        .replace("à", "a")
+        .replace("á", "a")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+        .replace("ü", "u")
+    )
+
+
+def tts_oral_section_label(section_key: str, pref_langue: object | None) -> str:
+    """Libellé annoncé à voix haute (psaume = « Le Psaume » / « Der Psalm », …)."""
+    lg = coerce_aip_langue(pref_langue)
+    key = (section_key or "").strip().lower()
+    if key == "psaume":
+        return PSALM_SECTION_TITLE.get(lg) or PSALM_SECTION_TITLE[DEFAULT_PREF_LANGUE]
+    titles = PDF_READING_TITLES.get(lg) or PDF_READING_TITLES[DEFAULT_PREF_LANGUE]
+    return titles.get(key) or key or "Lecture"
+
+
+def tts_fallback_intro(section_key: str, pref_langue: object | None) -> str:
+    lg = coerce_aip_langue(pref_langue)
+    key = (section_key or "").strip().lower()
+    table = TTS_READING_FALLBACK_INTRO.get(lg) or TTS_READING_FALLBACK_INTRO[DEFAULT_PREF_LANGUE]
+    return table.get(key) or f"{tts_oral_section_label(key, lg)}."
+
+
+def all_tts_reading_section_titles() -> tuple[str, ...]:
+    """Tous les titres de section lectures connus (détection / regex multi-langues)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for lg, titles in PDF_READING_TITLES.items():
+        for key in _READING_SECTION_KEYS:
+            t = (titles.get(key) or "").strip()
+            if t and t.lower() not in seen:
+                seen.add(t.lower())
+                out.append(t)
+        oral = (PSALM_SECTION_TITLE.get(lg) or "").strip()
+        if oral and oral.lower() not in seen:
+            seen.add(oral.lower())
+            out.append(oral)
+    # Variantes ASCII FR historiques
+    for alt in ("Premiere lecture", "Deuxieme lecture", "Evangile"):
+        if alt.lower() not in seen:
+            seen.add(alt.lower())
+            out.append(alt)
+    return tuple(out)
+
+
+def canonical_reading_section_key(title: str) -> str | None:
+    """Mappe un titre (toute langue) → clé ``premiere_lecture`` / ``psaume`` / …"""
+    raw = (title or "").strip()
+    if not raw:
+        return None
+    folded = _fold_title(raw)
+    # Index titres PDF + annonces orales psaume
+    for lg, titles in PDF_READING_TITLES.items():
+        for key in _READING_SECTION_KEYS:
+            t = titles.get(key) or ""
+            if folded == _fold_title(t) or folded.startswith(_fold_title(t)):
+                return key
+        oral = PSALM_SECTION_TITLE.get(lg) or ""
+        if oral and (folded == _fold_title(oral) or folded.startswith(_fold_title(oral))):
+            return "psaume"
+    # Heuristiques FR / EN courtes
+    if folded.startswith("premiere lecture") or folded.startswith("first reading") or folded.startswith(
+        "erste lesung"
+    ):
+        return "premiere_lecture"
+    if folded.startswith("deuxieme lecture") or folded.startswith("second reading") or folded.startswith(
+        "zweite lesung"
+    ):
+        return "deuxieme_lecture"
+    if (
+        folded.startswith("psaume")
+        or folded.startswith("antwortpsalm")
+        or folded.startswith("responsorial")
+        or folded.startswith("salmo")
+        or "psalm" in folded.split()[:2]
+        or folded.startswith("le psaume")
+        or folded.startswith("der psalm")
+        or folded.startswith("the psalm")
+        or folded.startswith("el salmo")
+        or folded.startswith("il salmo")
+    ):
+        return "psaume"
+    if (
+        folded.startswith("evangile")
+        or folded.startswith("evangelium")
+        or folded.startswith("gospel")
+        or folded.startswith("evangelio")
+        or folded.startswith("vangelo")
+    ):
+        return "evangile"
+    if folded.startswith("primera lectura") or folded.startswith("prima lettura"):
+        return "premiere_lecture"
+    if folded.startswith("segunda lectura") or folded.startswith("seconda lettura"):
+        return "deuxieme_lecture"
+    return None
+
+
+def detect_pref_langue_from_section_title(title: str) -> str | None:
+    """Devine FR/DE/EN/ES/IT d’après un titre de section injecté dans le TTS."""
+    raw = (title or "").strip()
+    if not raw:
+        return None
+    folded = _fold_title(raw)
+    for lg in AIP_PROMPT_LANGS:
+        titles = PDF_READING_TITLES.get(lg) or {}
+        for key in _READING_SECTION_KEYS:
+            t = titles.get(key) or ""
+            if t and (folded == _fold_title(t) or folded.startswith(_fold_title(t))):
+                return lg
+        oral = PSALM_SECTION_TITLE.get(lg) or ""
+        if oral and (folded == _fold_title(oral) or folded.startswith(_fold_title(oral))):
+            return lg
+    return None
+
+
+def fr_canonical_reading_title(section_key: str) -> str:
+    """Titre FR canonique (branchements internes historiques)."""
+    key = (section_key or "").strip().lower()
+    if key == "psaume":
+        return "Psaume"
+    return (PDF_READING_TITLES[DEFAULT_PREF_LANGUE].get(key) or key or "").strip()
+
 
 def coerce_aip_langue(raw: object | None) -> str:
     """Normalise une langue AIP (FR par défaut ; cellule vide = FR)."""

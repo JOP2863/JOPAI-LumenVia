@@ -19,6 +19,16 @@ from core.catechese_section_strip import (
     find_catechese_section_index,
     strip_catechese_title_prefix,
 )
+from core.prompt_locale import (
+    DEFAULT_PREF_LANGUE,
+    all_tts_reading_section_titles,
+    canonical_reading_section_key,
+    coerce_aip_langue,
+    detect_pref_langue_from_section_title,
+    fr_canonical_reading_title,
+    pdf_titles,
+    tts_fallback_intro,
+)
 from core.tts_pronunciation import apply_tts_pronunciation
 from core.voix_audio import norm_slug
 
@@ -41,29 +51,49 @@ _TTS_ADMIN_PREAMBLE_PREFIXES: tuple[str, ...] = (
     "garde une gravité paisible",
 )
 
-# Titres injectés par ``plain_readings_for_tts`` — point de départ du contenu parlé.
-_READINGS_TTS_SECTION_MARKERS: tuple[str, ...] = (
-    "Première lecture",
-    "Premiere lecture",
-    "Psaume",
-    "Deuxième lecture",
-    "Deuxieme lecture",
-    "Évangile",
-    "Evangile",
-)
+# Titres injectés par ``plain_readings_for_tts`` (FR + DE/EN/ES/IT).
+_READINGS_TTS_SECTION_MARKERS: tuple[str, ...] = all_tts_reading_section_titles()
 
+_LITURGY_SECTION_TITLE_ALT = "|".join(
+    re.escape(t) for t in sorted(_READINGS_TTS_SECTION_MARKERS, key=len, reverse=True)
+)
 _LITURGY_SECTION_LINE_RE = re.compile(
-    r"^(Première lecture|Premiere lecture|Psaume|Deuxième lecture|Deuxieme lecture|Évangile|Evangile)\.\s*(.*)$",
+    rf"^({_LITURGY_SECTION_TITLE_ALT})\.\s*(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
+_LITURGY_FIRST_SECTION_RE = re.compile(
+    r"(?i)\b("
+    + "|".join(
+        re.escape(t)
+        for t in (
+            "Première lecture",
+            "Premiere lecture",
+            "Erste Lesung",
+            "First reading",
+            "Primera lectura",
+            "Prima lettura",
+        )
+    )
+    + r")\.",
+)
+
+# Annonce de repli FR (rétrocompat imports).
+PREMIERE_LECTURE_TTS_INTRO_FALLBACK = tts_fallback_intro("premiere_lecture", "FR")
 
 
-# Annonce de repli si l'API AELF ne fournit pas ``intro_lue`` (cache ancien).
-PREMIERE_LECTURE_TTS_INTRO_FALLBACK = "Première lecture. Écoutez la première lecture de la Parole."
-
-
-def premiere_lecture_tts_intro(intro_lue: str | None = None) -> str:
-    return oral_reading_intro_phrase("Première lecture", intro_lue=intro_lue)
+def premiere_lecture_tts_intro(
+    intro_lue: str | None = None,
+    *,
+    pref_langue: object | None = None,
+) -> str:
+    lg = coerce_aip_langue(pref_langue)
+    return oral_reading_intro_phrase(
+        fr_canonical_reading_title("premiere_lecture")
+        if lg == "FR"
+        else pdf_titles(lg)["premiere_lecture"],
+        intro_lue=intro_lue,
+        pref_langue=lg,
+    )
 
 
 _SYNTHESIS_TTS_HEADINGS: tuple[str, ...] = (
@@ -80,16 +110,10 @@ _SYNTHESIS_HEADING_SPLIT_RE = re.compile(
 
 
 def normalize_liturgy_section_title(title: str) -> str:
-    """Libellé oral canonique pour annoncer une section du lectionnaire."""
-    low = (title or "").strip().lower()
-    if low.startswith("première") or low.startswith("premiere"):
-        return "Première lecture"
-    if low.startswith("deuxième") or low.startswith("deuxieme"):
-        return "Deuxième lecture"
-    if low.startswith("psaume"):
-        return "Psaume"
-    if low.startswith("évangile") or low.startswith("evangile"):
-        return "Évangile"
+    """Titre FR canonique (branchements internes) — conserve le libellé localisé si inconnu."""
+    key = canonical_reading_section_key(title)
+    if key:
+        return fr_canonical_reading_title(key)
     return (title or "").strip()
 
 
@@ -98,14 +122,20 @@ def liturgy_section_oral_announcement(
     *,
     intro_lue: str | None = None,
     ref: str | None = None,
+    pref_langue: object | None = None,
 ) -> str:
     """Annonce orale d'une césure liturgique ou d'une sous-section de synthèse."""
     raw = (title or "").strip()
     if raw.lower().startswith("à retenir"):
         return "À retenir."
-    norm = normalize_liturgy_section_title(raw)
-    if norm in ("Première lecture", "Deuxième lecture", "Psaume", "Évangile") or raw.lower() == "le psaume":
-        return oral_reading_intro_phrase(norm or raw, intro_lue=intro_lue, ref=ref)
+    key = canonical_reading_section_key(raw)
+    if key or raw.lower() in ("le psaume", "der psalm", "the psalm", "el salmo", "il salmo"):
+        return oral_reading_intro_phrase(
+            raw,
+            intro_lue=intro_lue,
+            ref=ref,
+            pref_langue=pref_langue,
+        )
     return f"{raw}." if raw and not raw.endswith(".") else raw
 
 
@@ -124,34 +154,61 @@ def dedupe_tts_section_body(
     if not text:
         return text
 
+    key = canonical_reading_section_key(section_title)
     norm = normalize_liturgy_section_title(section_title)
     raw = (section_title or "").strip()
     stems: list[tuple[str, str | None]] = []
 
-    if norm == "Psaume" or raw.lower() == "le psaume":
+    if key == "psaume" or norm == "Psaume" or raw.lower() in (
+        "le psaume",
+        "der psalm",
+        "the psalm",
+        "el salmo",
+        "il salmo",
+    ):
         stems = [
             ("le psaume", "Il"),
+            ("der psalm", None),
+            ("the psalm", None),
+            ("el salmo", None),
+            ("il salmo", None),
+            ("antwortpsalm", None),
+            ("responsorial psalm", None),
+            ("salmo responsorial", None),
+            ("salmo responsoriale", None),
             ("psaume", "Il"),
             ("ce psaume", "Il"),
         ]
-    elif norm == "Première lecture":
+    elif key == "premiere_lecture":
         stems = [
             ("la première lecture", "Elle"),
             ("première lecture", "Elle"),
             ("premiere lecture", "Elle"),
+            ("erste lesung", None),
+            ("first reading", None),
+            ("primera lectura", None),
+            ("prima lettura", None),
         ]
-    elif norm == "Deuxième lecture":
+    elif key == "deuxieme_lecture":
         stems = [
             ("la deuxième lecture", "Elle"),
             ("deuxième lecture", "Elle"),
             ("deuxieme lecture", "Elle"),
+            ("zweite lesung", None),
+            ("second reading", None),
+            ("segunda lectura", None),
+            ("seconda lettura", None),
         ]
-    elif norm == "Évangile":
+    elif key == "evangile":
         stems = [
             ("l'évangile", "Il"),
             ("l'evangile", "Il"),
             ("évangile", "Il"),
             ("evangile", "Il"),
+            ("evangelium", None),
+            ("gospel", None),
+            ("evangelio", None),
+            ("vangelo", None),
         ]
     elif raw.lower().startswith("à retenir"):
         stems = [("à retenir", None), ("a retenir", None)]
@@ -238,11 +295,11 @@ def parse_synthesis_tts_sections(text: str) -> list[tuple[str, str]] | None:
 
 
 def _trim_to_first_liturgy_section(text: str) -> str:
-    """Coupe tout texte parasite avant « Première lecture. » (consignes / morceaux orphelins)."""
+    """Coupe tout texte parasite avant la première section lectures (toute langue)."""
     t = (text or "").strip()
     if not t:
         return t
-    m = re.search(r"(?i)\b(Première lecture|Premiere lecture)\.", t)
+    m = _LITURGY_FIRST_SECTION_RE.search(t)
     if m and m.start() > 0:
         return t[m.start() :].strip()
     return t
@@ -250,14 +307,20 @@ def _trim_to_first_liturgy_section(text: str) -> str:
 
 def is_liturgy_readings_tts_text(text: str) -> bool:
     """True si le texte provient de ``plain_readings_for_tts`` (lectionnaire dominical)."""
-    return bool(re.match(r"(?i)^(?:Première|Premiere) lecture\b", (text or "").strip()))
+    head = (text or "").strip()
+    if not head:
+        return False
+    return bool(_LITURGY_FIRST_SECTION_RE.match(head)) or bool(
+        canonical_reading_section_key(head.split(".", 1)[0]) == "premiere_lecture"
+        and head.lstrip().find(".") > 0
+    )
 
 
 def parse_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
     """
     Découpe le texte ``plain_readings_for_tts`` en sections ``(titre, corps)``.
 
-    Chaque paragraphe commence par « Première lecture. », « Psaume. », etc.
+    Conserve le titre localisé injecté (Erste Lesung, First reading, …).
     """
     out: list[tuple[str, str]] = []
     for para in (text or "").split("\n\n"):
@@ -268,13 +331,22 @@ def parse_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
         if m:
             out.append(
                 (
-                    normalize_liturgy_section_title(m.group(1)),
+                    (m.group(1) or "").strip(),
                     (m.group(2) or "").strip(),
                 )
             )
         else:
             out.append(("", p))
     return out
+
+
+def default_first_reading_tts_title(text: str) -> str:
+    """Titre de repli pour un corps orphelin en tête — suit la langue du reste du texte."""
+    for title, _body in parse_liturgy_reading_sections(text):
+        lg = detect_pref_langue_from_section_title(title)
+        if lg:
+            return pdf_titles(lg)["premiere_lecture"]
+    return pdf_titles(DEFAULT_PREF_LANGUE)["premiere_lecture"]
 
 
 def coalesce_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
@@ -290,6 +362,7 @@ def coalesce_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
 
     merged: list[tuple[str, str]] = []
     pending = ""
+    default_first = default_first_reading_tts_title(text)
 
     for title, body in sections:
         body = (body or "").strip()
@@ -310,9 +383,9 @@ def coalesce_liturgy_reading_sections(text: str) -> list[tuple[str, str]]:
             pending = (pending + "\n\n" + body).strip() if pending and body else (body or pending)
 
     if pending and merged:
-        merged.insert(0, ("Première lecture", pending))
+        merged.insert(0, (default_first, pending))
     elif pending:
-        merged.insert(0, ("Première lecture", pending))
+        merged.insert(0, (default_first, pending))
 
     fixed: list[tuple[str, str]] = []
     i = 0
@@ -511,13 +584,15 @@ def strict_verbatim_tts_prompt(
     )
 
 
-def plain_readings_for_tts(texts: object) -> str:
-    """Texte continu pour TTS des quatre lectures AELF (sans HTML)."""
+def plain_readings_for_tts(texts: object, *, pref_langue: object | None = None) -> str:
+    """Texte continu pour TTS des quatre lectures (sans HTML), titres selon ``pref_langue``."""
+    lg = coerce_aip_langue(pref_langue)
     parts: list[str] = []
-    for sec in liturgy_tts_sections_from_texts(texts):
+    for sec in liturgy_tts_sections_from_texts(texts, pref_langue=lg):
         raw = clean_aelf_text_for_display(sec.body or "")
         raw = re.sub(r"<[^>]+>", " ", raw)
-        if sec.title == "Psaume":
+        is_psalm = canonical_reading_section_key(sec.title) == "psaume"
+        if is_psalm:
             raw = re.sub(r"[ \t]+\n", "\n", raw)
             raw = re.sub(r"\n{3,}", "\n\n", raw).strip()
         else:
@@ -525,7 +600,7 @@ def plain_readings_for_tts(texts: object) -> str:
         raw = strip_tts_admin_preamble(raw)
         if not raw.strip():
             continue
-        if len(raw.strip()) < 12 and sec.title.lower().startswith("psaume"):
+        if len(raw.strip()) < 12 and is_psalm:
             continue
         block = f"{sec.title}."
         meta = encode_readings_tts_meta_line(intro_lue=sec.intro_lue, ref=sec.ref)

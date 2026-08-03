@@ -71,6 +71,45 @@ def translate_prompt_markdown_fr_to(
     )
 
 
+def translate_plain_fr_to(
+    body_fr: str,
+    *,
+    target_lang: object,
+    vertex_client: object | None = None,
+    context: str = "short liturgical image commentary for a Sunday fascicule",
+) -> str:
+    """Traduit un court texte FR (ex. commentaire d’illustration) vers ``target_lang``."""
+    lg = coerce_aip_langue(target_lang)
+    src = (body_fr or "").strip()
+    if not src or lg == DEFAULT_PREF_LANGUE:
+        return src
+    native = output_language_label(lg)
+    if vertex_client is not None:
+        prompt = (
+            f"Translate the following {context} from French to {native} ({lg}).\n"
+            "Keep the same meaning and tone (reverent, concise). "
+            "Do not add titles, quotes, or commentary. Output only the translation.\n\n"
+            f"---\n{src}\n---"
+        )
+        try:
+            if hasattr(vertex_client, "generate_text_auto"):
+                res = vertex_client.generate_text_auto(
+                    preferred_models=["gemini-2.0-flash", "gemini-2.5-flash"],
+                    prompt=prompt,
+                    max_output_tokens=1024,
+                )
+            else:
+                res = vertex_client.generate_text(
+                    model="gemini-2.0-flash", prompt=prompt, max_output_tokens=1024
+                )
+            text = str(getattr(res, "text", None) or res or "").strip()
+            if text:
+                return text
+        except Exception:
+            pass
+    return src
+
+
 def sibling_langs(*, pivot: object = DEFAULT_PREF_LANGUE) -> tuple[str, ...]:
     p = coerce_aip_langue(pivot)
     return tuple(lg for lg in AIP_PROMPT_LANGS if lg != p)
