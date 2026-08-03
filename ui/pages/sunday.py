@@ -1272,13 +1272,27 @@ def render_sunday() -> None:
                 ilus_desc_view = ""
 
         if gcs_top and cfg.gcs_bucket_name:
-            ap._try_show_liturgy_illustration(
-                gcs=gcs_top,
-                cfg=cfg,
-                date_str=date_str,
-                pref_langue=pref_langue,
-                illustration_description=ilus_desc_view or None,
-            )
+            try:
+                ap._try_show_liturgy_illustration(
+                    gcs=gcs_top,
+                    cfg=cfg,
+                    date_str=date_str,
+                    pref_langue=pref_langue,
+                    illustration_description=ilus_desc_view or None,
+                )
+            except TypeError:
+                # Déploiement partiel Cloud : ancienne signature sans pref_langue.
+                try:
+                    ap._try_show_liturgy_illustration(
+                        gcs=gcs_top, cfg=cfg, date_str=date_str
+                    )
+                except Exception:
+                    pass
+                if ilus_desc_view:
+                    st.markdown(f"**{_ui['image_comment']}**")
+                    st.markdown(ilus_desc_view)
+            except Exception:
+                pass
 
         from core.aelf_reading_meta import compose_psalm_text
 
