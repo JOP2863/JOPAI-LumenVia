@@ -77,6 +77,22 @@ def render_admin_plan_consolide() -> None:
       </td>
     </tr>
     <tr>
+      <td><strong>Multi-langues — lectures natives (pas de traduction maison)</strong></td>
+      <td><span class="lv-st-partiel">En cours</span></td>
+      <td>
+        Règle produit : uniquement des API qui livrent les <strong>textes complets</strong> de la messe dans la langue
+        (pas de traduction IA/maison à partir de l’AELF ; exclus : évangile-seul, calendrier-seul / Romcal).
+        Priorité langues : <strong>FR → DE → EN → ES → IT</strong>.
+        Socle déjà en place : <code>pref_langue</code> (ISO majuscules) + table <code>langues_pays</code> (<strong>LGP</strong>),
+        chemins GCS <code>Syntheses/&#123;LANG&#125;/</code>, <code>Audio/&#123;LANG&#125;/</code>, etc.
+        <strong>Lab admin</strong> (<code>?route=admin_liturgy_lab</code>) : sonde une semaine × sources × langues.
+        <strong>Suivi temporaire</strong> (<code>?route=admin_multilang_roadmap</code>) +
+        <code>data/multilang_progress.json</code>.
+        Reste : valider licences + adapters DE/EN/ES/IT, brancher génération / dimanche / e-mail / TTS sur <code>pref_langue</code>
+        (aujourd’hui encore FR via AELF).
+      </td>
+    </tr>
+    <tr>
       <td><strong>Automatisation envoi hebdomadaire (vendredi soir) — e-mail / SMS</strong></td>
       <td><span class="lv-st-todo">À faire</span></td>
       <td>
@@ -135,7 +151,7 @@ def render_admin_plan_consolide() -> None:
     <tr>
       <td>Typologie biblique / section « Le Psaume » (<code>data/instructions_ia.md</code>)</td>
       <td><span class="lv-st-ok">En données</span></td>
-      <td>Pilotage éditorial continu ; pas de sources hors AELF.</td>
+      <td>Pilotage éditorial continu ; lectures FR via AELF ; autres langues uniquement via API natives validées (pas de traduction maison).</td>
     </tr>
     <tr>
       <td>Paramètres IA (Google Sheets, append-only) + secret sauce</td>
@@ -268,6 +284,10 @@ def render_admin_plan_consolide() -> None:
   <dd>Stabiliser Vision sur le bon projet GCP et valider une analyse complète sans 403.</dd>
   <dd>Repasser sur le PDF mensuel et la couverture si tu veux un gabarit « fascicule » multi-pages.</dd>
   <dd>PWA : choix d’hébergement et socle technique pour exposer le manifest au navigateur.</dd>
+  <dd>
+    Multi-langues : lab API (textes complets uniquement) → première langue non-FR en production →
+    consommation <code>pref_langue</code> (dimanche / e-mail / TTS) — page suivi temporaire à retirer ensuite.
+  </dd>
 </dl>
 
 <dl class="lv-keylist">

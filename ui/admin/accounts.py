@@ -489,6 +489,15 @@ def render_admin_accounts() -> None:
                     key="adm_edit_pwd2",
                     autocomplete="new-password",
                 )
+                send_welcome = st.checkbox(
+                    "Envoyer un e-mail d’instructions (connexion, mot de passe…)",
+                    value=True,
+                    key="adm_edit_send_welcome",
+                    help=(
+                        "Si un nouveau mot de passe est défini, il est communiqué une fois "
+                        "(provisoire). Sinon un lien de réinitialisation est proposé."
+                    ),
+                )
                 save_ed = st.form_submit_button(
                     "Enregistrer les modifications",
                     type="primary",
@@ -504,6 +513,11 @@ def render_admin_accounts() -> None:
                         errs.append("Mot de passe : 8 caractères minimum.")
                     if (e_pwd or "") != (e_pwd2 or ""):
                         errs.append("Les deux mots de passe ne correspondent pas.")
+                if send_welcome and not set_pwd and not has_pwd:
+                    errs.append(
+                        "Pour envoyer l’e-mail d’instructions, définis d’abord un mot de passe "
+                        "(case « Définir / réinitialiser »)."
+                    )
                 if errs:
                     for m in errs:
                         st.error(m)
@@ -569,6 +583,67 @@ def render_admin_accounts() -> None:
                                 },
                             )
 
+                        mail_note = ""
+                        if send_welcome:
+                            try:
+                                from datetime import datetime, timedelta, timezone
+                                from secrets import token_urlsafe
+
+                                from core.account_welcome_email import send_account_welcome_email
+                                from core.sheets_db import ensure_table, get_table_spec
+                                from ui.navigation import lumenvia_app_origin_url
+
+                                origin = (lumenvia_app_origin_url() or "").rstrip("/")
+                                login_url = (origin + "/?route=account") if origin else ""
+                                temp_pwd: str | None = e_pwd if set_pwd else None
+                                reset_url: str | None = None
+                                if not temp_pwd:
+                                    ensure_table(
+                                        gspread_client=gs,
+                                        spreadsheet_id=cfg.gsheet_id,
+                                        table=get_table_spec("password_resets"),
+                                    )
+                                    tok = token_urlsafe(32)
+                                    tok_h = sha256(tok.encode("utf-8")).hexdigest()
+                                    exp = (
+                                        datetime.now(timezone.utc) + timedelta(hours=2)
+                                    ).isoformat(timespec="seconds")
+                                    append_immutable_row(
+                                        gspread_client=gs,
+                                        spreadsheet_id=cfg.gsheet_id,
+                                        table="password_resets",
+                                        values_by_col={
+                                            "entity_id": sha256(
+                                                f"pwdreset|{em_pick}|{utc_now_iso()}".encode("utf-8")
+                                            ).hexdigest()[:24],
+                                            "email": em_pick,
+                                            "token_hash": tok_h,
+                                            "expires_at": exp,
+                                            "used": "false",
+                                        },
+                                    )
+                                    if not origin:
+                                        raise RuntimeError(
+                                            "URL publique introuvable (PUBLIC_APP_URL) pour le lien."
+                                        )
+                                    reset_url = (
+                                        origin
+                                        + "/?route=reset_password&email="
+                                        + em_pick
+                                        + "&token="
+                                        + tok
+                                    )
+                                send_account_welcome_email(
+                                    to_email=em_pick,
+                                    first_name=e_fn.strip(),
+                                    login_url=login_url or origin,
+                                    temp_password=temp_pwd,
+                                    reset_password_url=reset_url,
+                                )
+                                mail_note = f" E-mail d’instructions envoyé à {em_pick}."
+                            except Exception as ex_mail:
+                                mail_note = f" Fiche OK, mais e-mail non envoyé : {ex_mail}"
+
                         invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="users")
                         invalidate_fetch_records_cache(
                             spreadsheet_id=cfg.gsheet_id, table="subscriptions"
@@ -577,10 +652,74 @@ def render_admin_accounts() -> None:
                         msg_ok = "Fiche enregistrée."
                         if set_pwd:
                             msg_ok += " Mot de passe initialisé — l’utilisateur peut se connecter."
+                        msg_ok += mail_note
                         st.session_state["adm_addsub_flash"] = msg_ok
                         st.rerun()
                     finally:
                         ov_ed.empty()
+
+            # Renvoi d’instructions sans modifier la fiche (compte déjà avec mot de passe)
+            if has_pwd:
+                if st.button(
+                    "Renvoyer uniquement l’e-mail d’instructions (lien de réinit.)",
+                    key="adm_edit_resend_welcome",
+                    use_container_width=True,
+                ):
+                    ov_m = loading_overlay("Envoi de l’e-mail d’instructions…")
+                    try:
+                        from datetime import datetime, timedelta, timezone
+                        from secrets import token_urlsafe
+
+                        from core.account_welcome_email import send_account_welcome_email
+                        from core.sheets_db import ensure_table, get_table_spec
+                        from ui.navigation import lumenvia_app_origin_url
+
+                        origin = (lumenvia_app_origin_url() or "").rstrip("/")
+                        if not origin:
+                            raise RuntimeError("PUBLIC_APP_URL manquant pour générer le lien.")
+                        ensure_table(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table=get_table_spec("password_resets"),
+                        )
+                        tok = token_urlsafe(32)
+                        tok_h = sha256(tok.encode("utf-8")).hexdigest()
+                        exp = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(
+                            timespec="seconds"
+                        )
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="password_resets",
+                            values_by_col={
+                                "entity_id": sha256(
+                                    f"pwdreset|{em_pick}|{utc_now_iso()}".encode("utf-8")
+                                ).hexdigest()[:24],
+                                "email": em_pick,
+                                "token_hash": tok_h,
+                                "expires_at": exp,
+                                "used": "false",
+                            },
+                        )
+                        reset_url = (
+                            origin
+                            + "/?route=reset_password&email="
+                            + em_pick
+                            + "&token="
+                            + tok
+                        )
+                        send_account_welcome_email(
+                            to_email=em_pick,
+                            first_name=str(rp.get("first_name") or "").strip(),
+                            login_url=origin + "/?route=account",
+                            temp_password=None,
+                            reset_password_url=reset_url,
+                        )
+                        st.success(f"E-mail d’instructions envoyé à **{em_pick}**.")
+                    except Exception as ex:
+                        st.error(str(ex))
+                    finally:
+                        ov_m.empty()
 
     # Filtre simple (côté UI) : sous-chaîne e-mail
     q = st.text_input("Filtrer (e-mail contient)", value="", key="adm_accounts_filter").strip().lower()

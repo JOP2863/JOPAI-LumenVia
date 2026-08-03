@@ -15,6 +15,8 @@ _ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
     ("thumbs", "Vignettes\nCloud", "admin_thumbs"),
     ("vision", "Texte\nimages", "admin_vision"),
     ("readings_cache", "Cache\nlectures", "admin_readings_cache"),
+    ("lab_ml", "Lab\nlectures", "admin_liturgy_lab"),
+    ("ml_suivi", "Suivi\nmulti-langues", "admin_multilang_roadmap"),
     ("accounts", "Comptes\ninscrits", "admin_accounts"),
     ("emailing", "Emailing", "admin_emailing"),
     ("feedback_ai", "Sondage\nsynthèse", "admin_feedback_insights"),

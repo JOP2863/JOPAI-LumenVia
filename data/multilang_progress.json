@@ -1,0 +1,12 @@
+{
+  "completed_ids": [
+    "gcs_lang_paths",
+    "lab_page",
+    "lang_priority_fr_de_en_es_it",
+    "pref_langue_users",
+    "rule_full_mass_only",
+    "rule_no_house_translation"
+  ],
+  "current_step_id": "validate_aelf_fr",
+  "notes": "Socle : pref_langue + LGP + chemins GCS. Lab + page suivi livrés. Spikes DE/EN/ES/IT à valider (textes complets + licence)."
+}

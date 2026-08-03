@@ -197,6 +197,16 @@ def main() -> None:
             st.session_state.route = "admin_granularity"
         else:
             st.session_state.route = "admin_login"
+    elif adm in ("lab_ml", "liturgy_lab", "multilang_lab"):
+        if st.session_state.get("admin_authenticated"):
+            st.session_state.route = "admin_liturgy_lab"
+        else:
+            st.session_state.route = "admin_login"
+    elif adm in ("multilang", "ml_suivi", "multilang_roadmap"):
+        if st.session_state.get("admin_authenticated"):
+            st.session_state.route = "admin_multilang_roadmap"
+        else:
+            st.session_state.route = "admin_login"
 
     sun_qp = (params.get("sunday") or "").strip()
     if sun_qp and len(sun_qp) >= 10:
@@ -234,8 +244,30 @@ def main() -> None:
         st.session_state.route = "admin_recette_continue"
     elif rte_q == "admin_granularity":
         st.session_state.route = "admin_granularity"
+    elif rte_q in ("admin_liturgy_lab", "admin_lab_ml"):
+        st.session_state.route = "admin_liturgy_lab"
+    elif rte_q in ("admin_multilang_roadmap", "admin_multilang"):
+        st.session_state.route = "admin_multilang_roadmap"
 
-    if adm in ("1", "login", "step3", "cdc", "mob", "mobile", "refactor", "recette", "recette_continue", "tests", "granularity"):
+    if adm in (
+        "1",
+        "login",
+        "step3",
+        "cdc",
+        "mob",
+        "mobile",
+        "refactor",
+        "recette",
+        "recette_continue",
+        "tests",
+        "granularity",
+        "lab_ml",
+        "liturgy_lab",
+        "multilang_lab",
+        "multilang",
+        "ml_suivi",
+        "multilang_roadmap",
+    ):
         try:
             del st.query_params["admin"]
         except Exception:

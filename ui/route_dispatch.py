@@ -10,8 +10,10 @@ from ui.admin.emailing import render_admin_emailing
 from ui.admin.feedback_insights import render_admin_feedback_insights
 from ui.admin.granularity_audit import render_admin_granularity_audit
 from ui.admin.illustration_vertex import render_admin_step3
+from ui.admin.liturgy_multilang_lab import render_admin_liturgy_multilang_lab
 from ui.admin.login import render_admin_login
 from ui.admin.mobile_simulator import render_admin_mobile_simulator
+from ui.admin.multilang_roadmap import render_admin_multilang_roadmap
 from ui.admin.plan_consolide import render_admin_plan_consolide
 from ui.admin.readings_cache import render_admin_readings_cache
 from ui.admin.recette_continue import render_admin_recette_continue
@@ -133,6 +135,22 @@ def dispatch_route(route: str) -> None:
                 st.rerun()
         else:
             render_admin_readings_cache()
+    elif route == "admin_liturgy_lab":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_liturgy_lab"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_liturgy_multilang_lab()
+    elif route == "admin_multilang_roadmap":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_multilang"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_multilang_roadmap()
     elif route == "admin_refactor":
         if not st.session_state.get("admin_authenticated"):
             st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
