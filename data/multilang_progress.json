@@ -15,8 +15,9 @@
     "spike_es",
     "spike_it",
     "sunday_pref_langue",
+    "synth_tts_lang",
     "validate_aelf_fr"
   ],
   "current_step_id": "email_pref_langue",
-  "notes": "Cache lectures (RDC) multi-langue 2026-08-03 : même page admin — FR=zone france (AELF), DE/EN/ES/IT=evangelizo_* ; Dimanche lit RDC toutes langues avant API. E-mail manuel : URLs + nom_du_dimanche par pref_langue (templates encore FR). Reste : ToS Evangelizo canaux larges ; TTS titres sections encore FR ; templates e-mail multilingues."
+  "notes": "Prompts AIP multi-langue 2026-08-03 : colonne Langue + pick par pref_langue ; surcouches DE/EN/ES/IT en code ; assemblage Vertex + titres PDF localisés ; admin Test ressources : édition par langue + propagation depuis pivot FR (Actif/Version par clé+langue). Reste : templates e-mail multilingues ; ToS Evangelizo canaux larges."
 }

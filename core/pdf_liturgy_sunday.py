@@ -27,7 +27,6 @@ from reportlab.platypus.frames import Frame
 from core.aelf_reading_meta import reading_caption
 from core.aelf_text_cleanup import clean_aelf_text_for_display
 from core.catechese_section_strip import (
-    CATECHESE_SECTION_TITLE,
     find_catechese_section_index,
     strip_catechese_title_prefix,
 )
@@ -218,8 +217,13 @@ def build_liturgy_body_pdf_bytes(
     back_cover_image_bytes: bytes | None = None,
     accent_hex: str | None = None,
     back_cover_highlight_cell_index: int | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
-    """Pages suivantes : lectures AELF + chapitres (Synthèse, Passerelle)."""
+    """Pages suivantes : lectures + chapitres (Synthèse, Passerelle)."""
+    from core.prompt_locale import catechese_title, pdf_titles
+
+    titles = pdf_titles(pref_langue)
+    cate_chapter = catechese_title(pref_langue)
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -324,12 +328,12 @@ def build_liturgy_body_pdf_bytes(
     # - Page 1 : Première lecture + Psaume
     # - Page 2 : Deuxième lecture + Évangile
     blocks_page1 = [
-        ("Première lecture", premiere_lecture, premiere_lecture_intro, premiere_lecture_ref),
-        ("Psaume", psaume, psaume_intro, psaume_ref),
+        (titles["premiere_lecture"], premiere_lecture, premiere_lecture_intro, premiere_lecture_ref),
+        (titles["psaume"], psaume, psaume_intro, psaume_ref),
     ]
     blocks_page2 = [
-        ("Deuxième lecture", deuxieme_lecture, deuxieme_lecture_intro, deuxieme_lecture_ref),
-        ("Évangile", evangile, evangile_intro, evangile_ref),
+        (titles["deuxieme_lecture"], deuxieme_lecture, deuxieme_lecture_intro, deuxieme_lecture_ref),
+        (titles["evangile"], evangile, evangile_intro, evangile_ref),
     ]
 
     for title, txt, intro_lue, ref in blocks_page1:
@@ -341,7 +345,7 @@ def build_liturgy_body_pdf_bytes(
 
     # Chapitre Synthèse
     story.append(PageBreak())
-    story.append(Paragraph("Synthèse (LumenVia)", chapter))
+    story.append(Paragraph(titles["synthese"], chapter))
     syn_raw = (synthesis_text or "").strip()
     if syn_raw:
         # Découpe : la Passerelle catéchèse doit être un chapitre séparé.
@@ -367,14 +371,13 @@ def build_liturgy_body_pdf_bytes(
 
         if cate_part:
             story.append(PageBreak())
-            story.append(Paragraph(CATECHESE_SECTION_TITLE, chapter))
+            story.append(Paragraph(cate_chapter, chapter))
             cate_body = strip_catechese_title_prefix(cate_part)
             _append_markdownish_text(story, cate_body, body_style=body, sub_style=sub)
     else:
         story.append(
             Paragraph(
-                "<i>Synthèse non encore générée pour cette date — utilise « Générer la synthèse et l’audio » "
-                "dans l’application.</i>",
+                f"<i>{xml_escape(titles['synthese_missing'])}</i>",
                 body,
             )
         )
@@ -647,6 +650,7 @@ def build_liturgy_sunday_pdf_bytes(
     back_cover_image_bytes: bytes | None = None,
     accent_hex: str | None = None,
     back_cover_highlight_cell_index: int | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     """Couverture + corps fusionnés en un seul PDF."""
     cover = build_liturgy_cover_pdf_bytes(
@@ -679,6 +683,7 @@ def build_liturgy_sunday_pdf_bytes(
         back_cover_image_bytes=back_cover_image_bytes,
         accent_hex=accent_hex,
         back_cover_highlight_cell_index=back_cover_highlight_cell_index,
+        pref_langue=pref_langue,
     )
     writer = PdfWriter()
     for page in PdfReader(BytesIO(cover)).pages:

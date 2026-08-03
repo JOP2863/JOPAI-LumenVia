@@ -20,14 +20,19 @@ from ui.streamlit_caches import (
 )
 from core.gcp_clients import build_gcs_client
 from core.gemini_tts_catalog import gemini_tts_voice_names_ordered, load_gemini_tts_voice_catalog
-from core.parametres_ia import pick_effective_templates
+from core.parametres_ia import pick_effective_templates, row_aip_langue
+from core.prompt_locale import AIP_PROMPT_LANGS, coerce_aip_langue, default_overlays_for_lang
+from core.prompt_translate import sibling_langs, translate_prompt_markdown_fr_to
+from core.locale_codes import DEFAULT_PREF_LANGUE
 from gspread.exceptions import WorksheetNotFound
 
 from core.sheets_db import (
+    _ensure_header,
     _resolve_table_name,
     audit_alias_tables,
     build_gspread_client,
     fetch_records,
+    get_table_spec,
     format_alias_audit_report,
     sheet_row_status_is_live,
 )
@@ -1125,7 +1130,21 @@ def _render_admin_prompts_editor_section(
                 st.code(instr_path.read_text(encoding="utf-8").strip()[:2000] or "", language="markdown")
                 st.caption("Ce fallback doit rester minimal dans le dépôt public (il ne doit pas contenir la matière du prompt).")
 
-    latest = pick_effective_templates(rows, allowed_keys=None)
+    suffix = section_key_suffix
+    edit_lang = st.selectbox(
+        "Langue du prompt (colonne `Langue` AIP)",
+        options=list(AIP_PROMPT_LANGS),
+        index=0,
+        key=f"adm_tpl_lang_{suffix}",
+        help=(
+            "Versioning append-only par couple (Clé_Prompt, Langue) : nouvel enregistrement = Version+1, "
+            "l’ancien Actif de la même clé+langue passe Inactif. Cellules vides historiques = FR."
+        ),
+    )
+    edit_lang = coerce_aip_langue(edit_lang)
+    latest = pick_effective_templates(
+        rows, allowed_keys=None, pref_langue=edit_lang, fallback_fr=False
+    )
 
     def _is_audio_key(k: str) -> bool:
         return k in _AUDIO_PROMPT_KEYS
@@ -1138,6 +1157,15 @@ def _render_admin_prompts_editor_section(
     )
     if audio_only and "tts_pronunciation" not in existing_keys:
         existing_keys = sorted(existing_keys + ["tts_pronunciation"])
+    # Hors FR texte : proposer aussi les clés FR Actives pour localiser.
+    if edit_lang != DEFAULT_PREF_LANGUE and not audio_only:
+        fr_latest = pick_effective_templates(
+            rows, allowed_keys=None, pref_langue=DEFAULT_PREF_LANGUE, fallback_fr=False
+        )
+        for k in fr_latest:
+            if _wanted(k) and k not in existing_keys:
+                existing_keys.append(k)
+        existing_keys = sorted(existing_keys)
 
     def _norm0(v: object) -> str:
         return str(v or "").strip()
@@ -1152,13 +1180,15 @@ def _render_admin_prompts_editor_section(
         for r in rows:
             if _norm0(r.get("Clé_Prompt")) != k:
                 continue
+            if row_aip_langue(r) != edit_lang:
+                continue
             rid = _norm0(r.get("#ID") or r.get("ID") or r.get("id"))
             if eff_id and rid and rid == eff_id:
                 chosen = _norm0(r.get("Description"))
                 break
         if not chosen:
             for r in rows:
-                if _norm0(r.get("Clé_Prompt")) != k:
+                if _norm0(r.get("Clé_Prompt")) != k or row_aip_langue(r) != edit_lang:
                     continue
                 try:
                     rv = int(_norm0(r.get("Version") or 0) or 0)
@@ -1176,7 +1206,6 @@ def _render_admin_prompts_editor_section(
         d = (desc_by_key.get(k) or _PROMPT_TEMPLATE_LABELS.get(k) or "").strip()
         return f"{k} — {d}" if d else k
 
-    suffix = section_key_suffix
     create_new = st.toggle(
         "Créer un nouveau prompt", value=False, key=f"adm_tpl_create_new_{suffix}"
     )
@@ -1196,8 +1225,8 @@ def _render_admin_prompts_editor_section(
     else:
         if not existing_keys:
             st.warning(
-                "Aucun prompt Actif trouvé pour cette section. "
-                "Active « Créer un nouveau prompt » ou lance `python .\\tools\\init_sheets_db.py`."
+                "Aucun prompt Actif trouvé pour cette section / langue. "
+                "Active « Créer un nouveau prompt », change de langue, ou lance `python .\\tools\\init_sheets_db.py`."
             )
             picked = ""
             current = ""
@@ -1217,6 +1246,8 @@ def _render_admin_prompts_editor_section(
                 format_func=_fmt_key,
             )
             current = (latest.get(picked).content_md if picked in latest else "").strip()
+            if not current and picked in default_overlays_for_lang(edit_lang):
+                current = default_overlays_for_lang(edit_lang).get(picked) or ""
             if not current and picked == "tts_pronunciation":
                 try:
                     file_rules = dict(tts_pronunciation_breakdown().get("file") or {})
@@ -1228,24 +1259,58 @@ def _render_admin_prompts_editor_section(
     edited_desc = st.text_input(
         "Description (affichage dans la liste)",
         value=current_desc,
-        key=f"adm_tpl_desc_{suffix}__{picked or '__none__'}",
+        key=f"adm_tpl_desc_{suffix}__{edit_lang}__{picked or '__none__'}",
         help="Optionnel. Sert uniquement à rendre la liste plus claire (tu peux mettre un nom métier).",
     )
     edited = st.text_area(
         "Contenu (Markdown)",
         value=current,
         height=260,
-        key=f"adm_tpl_editor_{suffix}__{picked or '__none__'}",
-        help="Append-only : enregistre une nouvelle version (Version + 1).",
+        key=f"adm_tpl_editor_{suffix}__{edit_lang}__{picked or '__none__'}",
+        help="Append-only : enregistre une nouvelle version (Version + 1) pour cette Langue.",
     )
     notes = st.text_input("Notes (optionnel)", key=f"adm_tpl_notes_{suffix}", value="")
     active = st.checkbox(
         "Activer ce prompt",
         value=True,
         key=f"adm_tpl_active_{suffix}",
-        help="Si coché, l'ancien Actif de la même Clé_Prompt sera automatiquement désactivé.",
+        help="Si coché, l'ancien Actif de la même Clé_Prompt + Langue sera automatiquement désactivé.",
     )
     date_effet = st.date_input("Date d'effet", value=date.today(), key=f"adm_tpl_date_effet_{suffix}")
+
+    propagate = False
+    prop_targets: list[str] = []
+    if edit_lang == DEFAULT_PREF_LANGUE and not audio_only:
+        propagate = st.checkbox(
+            "Mettre aussi à jour les autres langues (DE, EN, ES, IT)",
+            value=False,
+            key=f"adm_tpl_propagate_{suffix}",
+            help=(
+                "Depuis le pivot FR : crée une nouvelle version Actif pour chaque langue cochée "
+                "(surcouches = traductions code ; socle = traduction Vertex si dispo)."
+            ),
+        )
+        if propagate:
+            prop_targets = st.multiselect(
+                "Langues à synchroniser",
+                options=list(sibling_langs()),
+                default=list(sibling_langs()),
+                key=f"adm_tpl_propagate_langs_{suffix}",
+            )
+
+    if (
+        edit_lang != DEFAULT_PREF_LANGUE
+        and not audio_only
+        and picked in ("overlay_takeaways", "overlay_no_takeaways", "overlay_catechese_bridge")
+    ):
+        if st.button(
+            f"Remplir depuis les défauts {edit_lang}",
+            key=f"adm_tpl_fill_defaults_{suffix}_{edit_lang}",
+        ):
+            st.session_state[f"adm_tpl_editor_{suffix}__{edit_lang}__{picked or '__none__'}"] = (
+                default_overlays_for_lang(edit_lang).get(picked) or ""
+            )
+            st.rerun()
 
     disabled_save = (not bool(edited.strip())) or (not bool(picked.strip()))
     if st.button(
@@ -1267,80 +1332,151 @@ def _render_admin_prompts_editor_section(
                     "Vérifie `AliasTables` ou lance `python tools/init_sheets_db.py`."
                 )
                 return
+            try:
+                _ensure_header(ws, get_table_spec("Paramètres_IA").columns)
+            except Exception:
+                pass
             header = ws.row_values(1)
             if not header:
                 raise RuntimeError("Onglet `Paramètres_IA` non initialisé (header vide). Lance init_sheets_db.")
             if "Description" not in header:
                 raise RuntimeError("Colonne `Description` manquante dans `Paramètres_IA`. Relance init_sheets_db.py ou mets à jour le header.")
+            if "Langue" not in header:
+                raise RuntimeError("Colonne `Langue` manquante — `_ensure_header` a échoué. Relance init_sheets_db.")
 
             def _norm(s: object) -> str:
                 return str(s or "").strip()
 
-            key_norm = _norm(picked)
-            max_ver = 0
-            for r in rows:
-                if _norm(r.get("Clé_Prompt")) != key_norm:
-                    continue
-                try:
-                    max_ver = max(max_ver, int(_norm(r.get("Version") or 0) or 0))
-                except Exception:
-                    pass
-            next_ver = int(max_ver + 1)
-            de = str(date_effet)
+            def _max_ver_for(key: str, langue: str) -> int:
+                mx = 0
+                for r in rows:
+                    if _norm(r.get("Clé_Prompt")) != key:
+                        continue
+                    if row_aip_langue(r) != langue:
+                        continue
+                    try:
+                        mx = max(mx, int(_norm(r.get("Version") or 0) or 0))
+                    except Exception:
+                        pass
+                return mx
 
-            if active:
+            def _inactivate_active(*, key: str, langue: str, date_effet_s: str) -> None:
                 try:
                     records = ws.get_all_records()
                 except Exception:
                     records = []
-
-                def _make_concat(*, row_id: str, key: str, version: str, statut: str, date_effet: str) -> str:
-                    return " | ".join([_norm(row_id), _norm(key), _norm(version), _norm(statut), _norm(date_effet)])
-
                 try:
                     col_statut = header.index("Statut") + 1
                     col_concat = header.index("Concaténation") + 1
                 except Exception:
-                    col_statut = 0
-                    col_concat = 0
+                    return
+                for i, r in enumerate(records):
+                    if _norm(r.get("Clé_Prompt")) != key:
+                        continue
+                    if row_aip_langue(r) != langue:
+                        continue
+                    if not sheet_row_status_is_live(r.get("Statut")):
+                        continue
+                    row_num = i + 2
+                    ws.update_cell(row_num, col_statut, "Inactif")
+                    row_id = _norm(r.get("#ID") or r.get("ID") or r.get("id"))
+                    ver_str = _norm(r.get("Version"))
+                    de_str = _norm(r.get("Date_Effet")) or date_effet_s
+                    lang_s = row_aip_langue(r)
+                    concat_parts = [row_id, key, ver_str, "Inactif", de_str, lang_s]
+                    ws.update_cell(row_num, col_concat, " | ".join(concat_parts))
 
-                if col_statut and col_concat:
-                    for i, r in enumerate(records):
-                        if _norm(r.get("Clé_Prompt")) != key_norm:
-                            continue
-                        if not sheet_row_status_is_live(r.get("Statut")):
-                            continue
-                        row_num = i + 2
-                        ws.update_cell(row_num, col_statut, "Inactif")
-                        row_id = _norm(r.get("#ID") or r.get("ID") or r.get("id"))
-                        ver_str = _norm(r.get("Version"))
-                        de_str = _norm(r.get("Date_Effet")) or de
-                        ws.update_cell(
-                            row_num,
-                            col_concat,
-                            _make_concat(row_id=row_id, key=key_norm, version=ver_str, statut="Inactif", date_effet=de_str),
-                        )
+            def _append_version(
+                *,
+                key: str,
+                langue: str,
+                content: str,
+                description: str,
+                statut: str,
+                date_effet_s: str,
+            ) -> int:
+                next_ver = _max_ver_for(key, langue) + 1
+                if statut == "Actif":
+                    _inactivate_active(key=key, langue=langue, date_effet_s=date_effet_s)
+                row_id = sha256(
+                    f"ia|{key}|{langue}|{next_ver}|{content}".encode("utf-8")
+                ).hexdigest()[:18]
+                concat = " | ".join([row_id, key, str(next_ver), statut, date_effet_s, langue])
+                row_map = {
+                    "#ID": row_id,
+                    "Clé_Prompt": key,
+                    "Description": description,
+                    "Version": str(next_ver),
+                    "Statut": statut,
+                    "Date_Effet": date_effet_s,
+                    "Langue": langue,
+                    "Contenu_Markdown": content,
+                    "Concaténation": concat,
+                }
+                ws.append_rows([[row_map.get(c, "") for c in header]], value_input_option="RAW")
+                return next_ver
 
-            row_id = sha256(f"ia|{key_norm}|{next_ver}|{body}".encode("utf-8")).hexdigest()[:18]
+            key_norm = _norm(picked)
+            de = str(date_effet)
             statut = "Actif" if active else "Inactif"
-            concat = " | ".join([row_id, key_norm, str(next_ver), statut, de])
-            row_map = {
-                "#ID": row_id,
-                "Clé_Prompt": key_norm,
-                "Description": str(edited_desc or "").strip(),
-                "Version": str(next_ver),
-                "Statut": statut,
-                "Date_Effet": de,
-                "Contenu_Markdown": body,
-                "Concaténation": concat,
-            }
-            ws.append_rows([[row_map.get(c, "") for c in header]], value_input_option="RAW")
+            desc_s = str(edited_desc or "").strip()
+            ver = _append_version(
+                key=key_norm,
+                langue=edit_lang,
+                content=body,
+                description=desc_s,
+                statut=statut,
+                date_effet_s=de,
+            )
+            prop_ok: list[str] = []
+            prop_err: list[str] = []
+            if (
+                propagate
+                and edit_lang == DEFAULT_PREF_LANGUE
+                and active
+                and prop_targets
+                and not audio_only
+            ):
+                vertex = None
+                try:
+                    from core.vertex_gemini import VertexGeminiClient
 
-            st.success("Paramètre IA enregistré.")
+                    sa = getattr(cfg, "gcp_service_account", None)
+                    if sa:
+                        vertex = VertexGeminiClient(service_account_info=sa)
+                except Exception:
+                    vertex = None
+                for lg in prop_targets:
+                    try:
+                        translated = translate_prompt_markdown_fr_to(
+                            body, target_lang=lg, key=key_norm, vertex_client=vertex
+                        )
+                        _append_version(
+                            key=key_norm,
+                            langue=coerce_aip_langue(lg),
+                            content=translated,
+                            description=f"{desc_s} [{lg}]".strip() if desc_s else f"{key_norm} [{lg}]",
+                            statut="Actif",
+                            date_effet_s=de,
+                        )
+                        prop_ok.append(lg)
+                    except Exception as ex:
+                        prop_err.append(f"{lg}: {ex}")
+
+            msg = f"Paramètre IA enregistré (`{key_norm}` / `{edit_lang}` v{ver})."
+            if prop_ok:
+                msg += f" Propagé vers : {', '.join(prop_ok)}."
+            st.success(msg)
+            if prop_err:
+                st.warning("Propagation partielle : " + " · ".join(prop_err))
             try:
                 import app as ap
 
                 ap._load_prompt_templates_cached.clear()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            try:
+                invalidate_adm_sheets_fetch_cache()
             except Exception:
                 pass
             st.rerun()
@@ -1453,9 +1589,10 @@ def render_admin_test_resources() -> None:
         key="adm_res_exp_texte",
     ):
         st.caption(
-            "Socle anti-hallucination + surcouches utilisées par la génération **écrite** "
-            "(`instructions_base_md`, `overlay_takeaways`, `overlay_no_takeaways`, "
-            "`overlay_catechese_bridge`, `retry_hardened_prefix`)."
+            "Socle anti-hallucination + surcouches de la génération **écrite** "
+            "(`instructions_base_md`, overlays…). Colonne **Langue** (FR pivot) : "
+            "versioning Actif/Inactif par (clé, langue) ; à l’enregistrement FR, option de "
+            "propagation vers DE/EN/ES/IT."
         )
         _render_admin_prompts_editor_section(
             cfg=cfg, gs=gs, rows=rows, audio_only=False, section_key_suffix="texte"

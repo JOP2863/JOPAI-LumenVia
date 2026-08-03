@@ -389,6 +389,7 @@ def _run_incremental_sunday_outputs(
                                 service_account_fingerprint=service_account_json_fingerprint(
                                     getattr(cfg, "gcp_service_account", {}) or {}
                                 ),
+                                pref_langue=pref_langue,
                             )
                             voix_r = ap._load_voix_rules_cached(
                                 gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
@@ -578,6 +579,7 @@ def _run_incremental_sunday_outputs(
                     back_cover_image_bytes=back_cover_b,
                     accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
                     back_cover_highlight_cell_index=highlight_idx,
+                    pref_langue=pref_langue,
                 )
                 upload_bytes(
                     gcs=gcs,
@@ -658,6 +660,7 @@ def _run_generate_sunday_flow(
             service_account_fingerprint=service_account_json_fingerprint(
                 getattr(cfg, "gcp_service_account", {}) or {}
             ),
+            pref_langue=pref_langue,
         )
     except Exception:
         templates = {}
@@ -720,6 +723,7 @@ def _run_generate_sunday_flow(
             "evangile": texts.evangile,
         },
         liturgical_context=liturgical_context,
+        pref_langue=pref_langue,
     )
 
     source_hash = sha256(
@@ -1274,6 +1278,7 @@ def _run_generate_sunday_flow(
                 back_cover_image_bytes=back_cover_b,
                 accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
                 back_cover_highlight_cell_index=highlight_idx,
+                pref_langue=pref_langue,
             )
             fasc_path = fascicule_pdf_path(date_str, pref_langue=pref_langue)
             upload_bytes(

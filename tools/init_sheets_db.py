@@ -349,6 +349,7 @@ def _seed_parametres_ia_audio_styles(*, gc, gsheet_id: str) -> int:
             "Version": ver,
             "Statut": statut,
             "Date_Effet": today,
+            "Langue": "FR",
             "Contenu_Markdown": body,
             "Concaténation": concat,
         }

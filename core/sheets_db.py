@@ -777,6 +777,7 @@ def default_tables() -> list[TableSpec]:
                 "Version",
                 "Statut",
                 "Date_Effet",
+                "Langue",
                 "Contenu_Markdown",
                 "Concaténation",
             ],

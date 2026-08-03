@@ -9,11 +9,20 @@ CATECHESE_SECTION_TITLE = "Passerelle catéchèse"
 CATECHESE_SECTION_TITLE_LEGACY = "Passerelle catéchèse — L\u2019écho des paraboles"
 CATECHESE_SECTION_TITLE_LEGACY_ASCII = "Passerelle catéchèse — L'écho des paraboles"
 
-CATECHESE_SECTION_TITLES: tuple[str, ...] = (
-    CATECHESE_SECTION_TITLE,
-    CATECHESE_SECTION_TITLE_LEGACY,
-    CATECHESE_SECTION_TITLE_LEGACY_ASCII,
-)
+def _catechese_titles_tuple() -> tuple[str, ...]:
+    try:
+        from core.prompt_locale import all_catechese_titles
+
+        return all_catechese_titles()
+    except Exception:
+        return (
+            CATECHESE_SECTION_TITLE,
+            CATECHESE_SECTION_TITLE_LEGACY,
+            CATECHESE_SECTION_TITLE_LEGACY_ASCII,
+        )
+
+
+CATECHESE_SECTION_TITLES: tuple[str, ...] = _catechese_titles_tuple()
 
 CATECHESE_TTS_INTRO = f"{CATECHESE_SECTION_TITLE}."
 

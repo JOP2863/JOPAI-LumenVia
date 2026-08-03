@@ -81,19 +81,36 @@ def adm_feedback_sheet_fetch_cached(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_prompt_templates_cached(*, gsheet_id: str, service_account_fingerprint: str) -> dict[str, str]:
+def load_prompt_templates_cached(
+    *,
+    gsheet_id: str,
+    service_account_fingerprint: str,
+    pref_langue: str = "FR",
+) -> dict[str, str]:
     """
     Charge les prompts IA depuis Google Sheets (onglet `Paramètres_IA`, append-only).
-    Cache court pour éviter de relire Sheets à chaque run Streamlit.
+    ``pref_langue`` sélectionne la colonne ``Langue`` (fallback FR + surcouches code).
     """
     if not gsheet_id:
         return {}
     sa_json = _sa_json_for_adm_sheets_cache(service_account_fingerprint)
     if not sa_json:
         return {}
+    from core.prompt_locale import coerce_aip_langue, default_overlays_for_lang
+
+    lg = coerce_aip_langue(pref_langue)
     rows = adm_sheets_fetch_cached(gsheet_id, "Paramètres_IA", 5000, sa_json)
-    latest = pick_effective_templates(rows, allowed_keys=set(PROMPT_TEMPLATE_KEYS))
+    latest = pick_effective_templates(
+        rows,
+        allowed_keys=set(PROMPT_TEMPLATE_KEYS),
+        pref_langue=lg,
+        fallback_fr=True,
+    )
     out = {k: v.content_md for k, v in latest.items() if k in PROMPT_TEMPLATE_KEYS and v.content_md}
+    # Surcouches texte : compléter avec les défauts localisés si absents en Sheets.
+    for k, v in default_overlays_for_lang(lg).items():
+        if k in PROMPT_TEMPLATE_KEYS and not str(out.get(k) or "").strip():
+            out[k] = v
     try:
         from core.tts_pronunciation import refresh_tts_pronunciation_overrides_from_templates
 

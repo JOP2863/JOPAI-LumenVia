@@ -14,6 +14,12 @@ from core.aelf_text_cleanup import (
     strip_aelf_lectionary_rubrics,
 )
 from core.config import load_config
+from core.evangelizo import (
+    EVANGELIZO_HORIZON_DAYS,
+    EvangelizoHorizonError,
+    evangelizo_horizon_bounds,
+    is_within_evangelizo_horizon,
+)
 from core.liturgy_day import coerce_liturgy_pref_langue, fetch_liturgy_day, supported_liturgy_langs
 from core.readings_cache_loader import (
     rdc_zone_for_pref_langue,
@@ -149,7 +155,11 @@ def _readings_row_is_usable(r: dict, *, zone: str, year: int) -> bool:
 
 
 def _readings_row_is_source_unavailable(r: dict, *, zone: str, year: int) -> bool:
-    """Date déjà tentée : source absente (ex. AELF 404)."""
+    """Date déjà tentée : source absente de façon permanente (ex. AELF 404).
+
+    Ne pas y mettre les erreurs d’horizon Evangelizo (±30 j) : la date redevient
+    récupérable quand elle entre dans la fenêtre.
+    """
     if str(r.get("zone") or "").strip() != zone:
         return False
     if not sheet_row_status_is_live(r.get("status")):
@@ -158,9 +168,12 @@ def _readings_row_is_source_unavailable(r: dict, *, zone: str, year: int) -> boo
     if not ds.startswith(str(year)):
         return False
     err = str(r.get("error") or "")
-    return bool(err.strip()) and (
-        is_aelf_not_found_error(Exception(err)) or "404" in err or "horizon" in err.lower()
-    )
+    if not err.strip():
+        return False
+    # Horizon Evangelizo = temporaire → re-tenter quand la date entre dans ±30 j.
+    if "30 day" in err.lower() or "horizon" in err.lower() or "wrong param" in err.lower():
+        return False
+    return is_aelf_not_found_error(Exception(err)) or ("404" in err and "aelf" in err.lower())
 
 
 def render_admin_readings_cache() -> None:
@@ -170,6 +183,11 @@ def render_admin_readings_cache() -> None:
         "comme pour le français : **FR = AELF** (`zone=france`) · "
         "**DE / EN / ES / IT = Evangelizo** (`zone=evangelizo_*`). "
         "La page Dimanche lit d’abord ce cache, puis l’API."
+    )
+    st.caption(
+        f"**Evangelizo** : horizon Reader **±{EVANGELIZO_HORIZON_DAYS} jours** autour d’aujourd’hui "
+        "(pas toute l’année). Hors fenêtre → pas d’appel API, pas de ligne d’échec écrite. "
+        "Reviens chaque mois pour glisser la fenêtre."
     )
     st.caption(
         "Nettoyage auto (FR) : rubriques lectionnaire AELF (`OU LECTURE BREVE`, …) retirées à l’écriture."
@@ -191,6 +209,7 @@ def render_admin_readings_cache() -> None:
         return
 
     today = date.today()
+    e_lo, e_hi = evangelizo_horizon_bounds(today=today)
     year = st.number_input("Année", min_value=2020, max_value=2100, value=int(today.year), step=1)
     month = st.selectbox(
         "Mois (optionnel)",
@@ -214,11 +233,19 @@ def render_admin_readings_cache() -> None:
         return [d for d in _sundays_in_year(y) if d.month == int(m)]
 
     targets = _sundays_in_year(year) if month == "all" else _sundays_in_month(year, int(month))
+    non_fr = [lg for lg in langs if coerce_liturgy_pref_langue(lg) != "FR"]
     st.metric("Dimanches à vérifier", len(targets))
     st.caption(
         "Zones RDC : "
         + " · ".join(f"{lg}→`{rdc_zone_for_pref_langue(lg)}`" for lg in langs)
     )
+    if non_fr:
+        in_h = sum(1 for d in targets if is_within_evangelizo_horizon(d, today=today))
+        st.info(
+            f"Fenêtre Evangelizo aujourd’hui : **{e_lo.isoformat()} → {e_hi.isoformat()}** "
+            f"(±{EVANGELIZO_HORIZON_DAYS} j) — **{in_h}/{len(targets)}** dimanche(s) de la sélection "
+            f"dans la fenêtre pour {', '.join(non_fr)}."
+        )
 
     if st.button(
         "Purger `OU LECTURE BREVE` dans RDC (lignes existantes)",
@@ -256,6 +283,7 @@ def render_admin_readings_cache() -> None:
             err_count = 0
             unavailable_count = 0
             skipped_ok = 0
+            skipped_horizon = 0
             errors_preview: list[str] = []
 
             for lg0 in langs:
@@ -272,16 +300,30 @@ def render_admin_readings_cache() -> None:
                     for r in existing
                     if _readings_row_is_source_unavailable(r, zone=zone, year=int(year))
                 }
-                to_fetch = [
+                candidates = [
                     d
                     for d in targets
                     if d.isoformat() not in existing_dates and d.isoformat() not in unavailable_dates
                 ]
+                if lg == "FR":
+                    to_fetch = candidates
+                    horizon_skip_n = 0
+                else:
+                    to_fetch = [
+                        d for d in candidates if is_within_evangelizo_horizon(d, today=today)
+                    ]
+                    horizon_skip_n = len(candidates) - len(to_fetch)
+                    skipped_horizon += horizon_skip_n
                 skipped_ok += len(existing_dates & target_iso)
                 st.write(
                     f"**{lg}** (`{zone}`) — déjà OK : **{len(existing_dates & target_iso)}** · "
                     f"indispo. : **{len(unavailable_dates & target_iso)}** · "
-                    f"à récupérer : **{len(to_fetch)}**."
+                    + (
+                        f"hors horizon Evangelizo : **{horizon_skip_n}** · "
+                        if lg != "FR"
+                        else ""
+                    )
+                    + f"à récupérer : **{len(to_fetch)}**."
                 )
                 for d in to_fetch:
                     ds = d.isoformat()
@@ -307,6 +349,11 @@ def render_admin_readings_cache() -> None:
                                 )
                         rows.append(row)
                         ok_count += 1
+                    except EvangelizoHorizonError as ex:
+                        # Ne pas polluer RDC : la date sortira / entrera dans la fenêtre plus tard.
+                        skipped_horizon += 1
+                        if len(errors_preview) < 12:
+                            errors_preview.append(f"{lg} {ds} : hors horizon — {str(ex)[:140]}")
                     except Exception as ex:
                         if lg == "FR" and is_aelf_not_found_error(ex):
                             unavailable_count += 1
@@ -317,6 +364,7 @@ def render_admin_readings_cache() -> None:
                         msg = str(ex)[:900]
                         if len(errors_preview) < 12:
                             errors_preview.append(f"{lg} {ds} : {msg[:180]}")
+                        # Échecs non-horizon : journaliser en RDC pour audit (pas pour FR 404).
                         rows.append(
                             {
                                 "entity_id": sha256(
@@ -343,13 +391,21 @@ def render_admin_readings_cache() -> None:
             st.success(
                 f"Préchargement terminé : **{added}** ligne(s) ajoutée(s) "
                 f"({ok_count} succès, {unavailable_count} indisponible(s), "
-                f"{err_count} échec(s), {skipped_ok} déjà OK ignoré(s))."
+                f"{err_count} échec(s), {skipped_ok} déjà OK, "
+                f"{skipped_horizon} hors horizon Evangelizo)."
             )
             if errors_preview:
                 st.warning("Dates non récupérées :")
                 for line in errors_preview:
                     st.caption(line)
+            if skipped_horizon:
+                st.info(
+                    f"Evangelizo ne livre que ±{EVANGELIZO_HORIZON_DAYS} j autour d’aujourd’hui "
+                    f"({e_lo.isoformat()} → {e_hi.isoformat()}). "
+                    "Précharge à nouveau chaque mois pour glisser la fenêtre ; "
+                    "les lignes RDC déjà remplies restent valides."
+                )
             if err_count:
-                st.info("Les échecs (hors 404 AELF) seront re-tentés au prochain préchargement.")
+                st.info("Les échecs (hors 404 AELF / hors horizon) seront re-tentés au prochain préchargement.")
         finally:
             ov.empty()

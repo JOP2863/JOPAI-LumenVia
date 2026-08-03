@@ -8,7 +8,8 @@ Codes langue Evangelizo (≠ ISO 639-1) :
 - AM = anglais US (pas ``EN``)
 - SP = espagnol (pas ``ES``)
 
-Horizon : max ~30 jours à partir d’aujourd’hui (doc Reader).
+Horizon Reader : |date − aujourd’hui| ≤ ``EVANGELIZO_HORIZON_DAYS`` (30 j inclus).
+Hors fenêtre → HTML « Error : wrong param « date » ».
 Licence / ToS : à valider avant e-mail / TTS / PDF / prod.
 """
 
@@ -17,6 +18,7 @@ from __future__ import annotations
 import html as html_lib
 import re
 import xml.etree.ElementTree as ET
+from datetime import date
 from typing import Any
 from xml.etree.ElementTree import Element
 
@@ -28,6 +30,9 @@ EVANGELIZO_READER_URL = "https://feed.evangelizo.org/v2/reader.php"
 EVANGELIZO_HOME_URL = "https://levangileauquotidien.org/"
 EVANGELIZO_DOC_URL = "https://feed.evangelizo.org/v2/reader.php"
 _UA = "JOPAI-LumenVia-Evangelizo/0.1"
+
+# Inclusive : delta −30…+30 OK ; −31 / +31 → wrong param date (probes 2026-08-03).
+EVANGELIZO_HORIZON_DAYS = 30
 
 # Product ISO 639-1 → code Reader Evangelizo
 PRODUCT_LANG_TO_EVANGELIZO: dict[str, str] = {
@@ -52,11 +57,54 @@ class EvangelizoError(RuntimeError):
 
 
 class EvangelizoHorizonError(EvangelizoError):
-    """Date hors horizon Reader (~30 j) ou paramètre invalide."""
+    """Date hors horizon Reader (±30 j) ou paramètre invalide."""
+
+
+def _parse_iso_date(date_iso: object) -> date | None:
+    s = str(date_iso or "").strip()[:10]
+    if len(s) < 10 or s[4] != "-" or s[7] != "-":
+        return None
+    try:
+        return date(int(s[0:4]), int(s[5:7]), int(s[8:10]))
+    except Exception:
+        return None
+
+
+def is_within_evangelizo_horizon(
+    date_iso: object,
+    *,
+    today: date | None = None,
+    horizon_days: int = EVANGELIZO_HORIZON_DAYS,
+) -> bool:
+    """True si la date est dans la fenêtre Reader (± ``horizon_days`` autour d’aujourd’hui)."""
+    d = date_iso if isinstance(date_iso, date) else _parse_iso_date(date_iso)
+    if d is None:
+        return False
+    ref = today or date.today()
+    return abs((d - ref).days) <= int(horizon_days)
+
+
+def evangelizo_horizon_bounds(*, today: date | None = None) -> tuple[date, date]:
+    ref = today or date.today()
+    from datetime import timedelta
+
+    return ref - timedelta(days=EVANGELIZO_HORIZON_DAYS), ref + timedelta(days=EVANGELIZO_HORIZON_DAYS)
 
 
 def _date_compact(date_iso: str) -> str:
     return str(date_iso or "").strip()[:10].replace("-", "")
+
+
+def _reader_html_error_message(raw: str) -> str | None:
+    """Extrait le message rouge « Error : wrong param … » de la page doc Reader."""
+    m = re.search(
+        r"Error\s*:\s*wrong\s+param[^<]{0,240}",
+        raw or "",
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return html_lib.unescape(re.sub(r"\s+", " ", m.group(0))).strip()
 
 
 def _strip_html(fragment: str) -> str:
@@ -95,12 +143,19 @@ def parse_evangelizo_xml(raw: str) -> dict[str, Any]:
     s = (raw or "").strip()
     if not s:
         raise EvangelizoError("Réponse Evangelizo vide")
-    low = s[:300].lower()
+    low = s[:800].lower()
+    html_err = _reader_html_error_message(s)
+    if html_err:
+        # Doc Reader : souvent « wrong param « date » !! Must be less than 30 days… »
+        # (pas le code lang — AM/SP/DE/IT sont valides).
+        raise EvangelizoHorizonError(html_err)
     if "error : wrong param" in low:
-        raise EvangelizoHorizonError("Paramètre Reader invalide (souvent code lang).")
+        raise EvangelizoHorizonError(
+            "Paramètre Reader invalide (date hors horizon ±30 j, ou code lang)."
+        )
     if s.startswith("<!DOCTYPE") or (low.startswith("<html") and "<?xml" not in low):
         raise EvangelizoHorizonError(
-            "Réponse HTML (doc / erreur / hors horizon), pas de XML messe."
+            "Réponse HTML (doc / erreur / hors horizon ±30 j), pas de XML messe."
         )
     i = s.find("<?xml")
     if i > 0:
@@ -210,6 +265,7 @@ def fetch_evangelizo_mass(
     *,
     evangelizo_lang: str,
     timeout_s: float = 20.0,
+    skip_horizon_check: bool = False,
 ) -> tuple[AelfDayIdentity, AelfTexts, dict[str, Any]]:
     """
     Récupère la messe Evangelizo (XML) pour ``date_iso`` et un code langue Reader.
@@ -217,6 +273,12 @@ def fetch_evangelizo_mass(
     lang = str(evangelizo_lang or "").strip().upper()
     if not lang:
         raise EvangelizoError("Code langue Evangelizo manquant")
+    if not skip_horizon_check and not is_within_evangelizo_horizon(date_iso):
+        lo, hi = evangelizo_horizon_bounds()
+        raise EvangelizoHorizonError(
+            f"Date {str(date_iso)[:10]} hors horizon Evangelizo "
+            f"({lo.isoformat()} … {hi.isoformat()}, ±{EVANGELIZO_HORIZON_DAYS} j)."
+        )
     url = format_xml_url(date_iso=date_iso, evangelizo_lang=lang)
     try:
         r = requests.get(

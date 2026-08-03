@@ -14,7 +14,7 @@ from core.sheets_db import build_gspread_client, sheet_row_status_is_live
 
 
 PARAMS_SHEET = "Paramètres_IA"
-HEADER = ["#ID", "Clé_Prompt", "Description", "Version", "Statut", "Date_Effet", "Contenu_Markdown", "Concaténation"]
+HEADER = ["#ID", "Clé_Prompt", "Description", "Version", "Statut", "Date_Effet", "Langue", "Contenu_Markdown", "Concaténation"]
 
 
 def _read_app_defaults() -> dict[str, str]:
@@ -185,8 +185,8 @@ def main(argv: list[str]) -> int:
 
         row_id = sha256(f"ia|{key}|{ver}|{content}".encode("utf-8")).hexdigest()[:18]
         statut = "Actif"
-        concat = _concat([row_id, key, str(ver), statut, today])
-        rows_to_append.append([row_id, key, descs.get(key, ""), str(ver), statut, today, content, concat])
+        concat = _concat([row_id, key, str(ver), statut, today, "FR"])
+        rows_to_append.append([row_id, key, descs.get(key, ""), str(ver), statut, today, "FR", content, concat])
 
     if not rows_to_append:
         print("Rien à insérer (déjà seedé ou contenus vides).")
