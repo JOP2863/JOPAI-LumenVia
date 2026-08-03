@@ -8,6 +8,7 @@ from html import escape as html_escape
 
 import streamlit as st
 
+from core.auth import hash_password
 from core.config import load_config
 from core.locale_codes import (
     DEFAULT_COUNTRY,
@@ -19,18 +20,29 @@ from core.locale_codes import (
     normalize_country,
     normalize_pref_langue,
     options_from_langues_pays_rows,
+    user_country,
+    user_pref_langue,
 )
 from core.sheets_db import (
+    SHEETS_ROW_STATUS_INACTIVE,
     append_immutable_row,
     append_immutable_rows_bulk,
     build_gspread_client,
+    compute_concat,
     fetch_records,
+    invalidate_fetch_records_cache,
+    sheet_row_status_is_live,
     utc_now_iso,
+    _resolve_table_name,
 )
-from core.subscriptions_util import subscription_is_active
+from core.subscriptions_util import latest_subscription_record, subscription_is_active
 from ui.admin_secrets import admin_login_and_password
 from ui.components import loading_overlay
-from ui.streamlit_caches import adm_sheets_fetch_cached, service_account_json_fingerprint
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    service_account_json_fingerprint,
+)
 
 
 def _admin_locale_options(*, cfg: object, gs: object, sa_json: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
@@ -90,6 +102,8 @@ def render_admin_accounts() -> None:
     # (en changeant les keys des widgets plutôt que de dépendre d'un pop()).
     nonce = int(st.session_state.get("adm_addsub_nonce") or 0)
 
+    langues_opts, pays_opts = _admin_locale_options(cfg=cfg, gs=gs, sa_json=sa_json)
+
     with st.expander(
         "Ajouter des abonnés (lot de 5)",
         expanded=bool(st.session_state.get("adm_addsub_open") or False),
@@ -105,15 +119,18 @@ def render_admin_accounts() -> None:
                 return True
             return bool(re.match(r"^\+\d{8,15}$", ph))
 
-        langues_opts, pays_opts = _admin_locale_options(cfg=cfg, gs=gs, sa_json=sa_json)
         lang_codes = [c for c, _ in langues_opts]
         pays_codes = [c for c, _ in pays_opts]
         if DEFAULT_PREF_LANGUE not in lang_codes:
             lang_codes = [DEFAULT_PREF_LANGUE] + lang_codes
-            langues_opts = [(DEFAULT_PREF_LANGUE, f"Français ({DEFAULT_PREF_LANGUE})")] + langues_opts
+            langues_opts_local = [(DEFAULT_PREF_LANGUE, f"Français ({DEFAULT_PREF_LANGUE})")] + list(langues_opts)
+        else:
+            langues_opts_local = list(langues_opts)
         if DEFAULT_COUNTRY not in pays_codes:
             pays_codes = [DEFAULT_COUNTRY] + pays_codes
-            pays_opts = [(DEFAULT_COUNTRY, f"France ({DEFAULT_COUNTRY})")] + pays_opts
+            pays_opts_local = [(DEFAULT_COUNTRY, f"France ({DEFAULT_COUNTRY})")] + list(pays_opts)
+        else:
+            pays_opts_local = list(pays_opts)
 
         # Formulaire en lot : 5 lignes
         with st.form("adm_add_subscribers_5"):
@@ -123,7 +140,7 @@ def render_admin_accounts() -> None:
                     "Pays / nationalité",
                     options=pays_codes,
                     index=pays_codes.index(DEFAULT_COUNTRY) if DEFAULT_COUNTRY in pays_codes else 0,
-                    format_func=lambda c: next((lab for code, lab in pays_opts if code == c), c),
+                    format_func=lambda c: next((lab for code, lab in pays_opts_local if code == c), c),
                     key=f"adm_addsub_country_{nonce}",
                 )
             with c_lang:
@@ -131,7 +148,7 @@ def render_admin_accounts() -> None:
                     "Préférence langue",
                     options=lang_codes,
                     index=lang_codes.index(DEFAULT_PREF_LANGUE) if DEFAULT_PREF_LANGUE in lang_codes else 0,
-                    format_func=lambda c: next((lab for code, lab in langues_opts if code == c), c),
+                    format_func=lambda c: next((lab for code, lab in langues_opts_local if code == c), c),
                     key=f"adm_addsub_pref_langue_{nonce}",
                     help="Langue de consultation LumenVia (ISO 639-1 majuscules) — e-mails et contenus.",
                 )
@@ -315,15 +332,6 @@ def render_admin_accounts() -> None:
                     finally:
                         ov.empty()
 
-    # Filtre simple (côté UI) : sous-chaîne e-mail
-    q = st.text_input("Filtrer (e-mail contient)", value="", key="adm_accounts_filter").strip().lower()
-
-    # Admin canonical : login secret (si présent)
-    try:
-        adm_login, _adm_pwd = admin_login_and_password()
-    except Exception:
-        adm_login = ""
-
     def _latest_by_email(rows: list[dict]) -> list[dict]:
         by: dict[str, dict] = {}
         for r in rows:
@@ -334,6 +342,254 @@ def render_admin_accounts() -> None:
             if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
                 by[em] = r
         return sorted(by.values(), key=lambda x: str(x.get("created_at") or ""), reverse=True)
+
+    def _supersede_users_by_email(email_lc: str) -> None:
+        em0 = str(email_lc or "").strip().lower()
+        if not em0:
+            return
+        try:
+            sh0 = gs.open_by_key(cfg.gsheet_id)
+            ws0 = sh0.worksheet(_resolve_table_name(sh=sh0, table="users"))
+            header0 = ws0.row_values(1)
+            if not header0 or "status" not in header0:
+                return
+            col_status = header0.index("status") + 1
+            col_concat = header0.index("concat") + 1 if "concat" in header0 else 0
+            recs = ws0.get_all_records(numericise_ignore=["all"])
+        except Exception:
+            return
+        for ix, r in enumerate(recs):
+            if str(r.get("email") or "").strip().lower() != em0:
+                continue
+            if not sheet_row_status_is_live(r.get("status")):
+                continue
+            merged = dict(r)
+            merged["status"] = SHEETS_ROW_STATUS_INACTIVE
+            row_num = ix + 2
+            try:
+                ws0.update_cell(row_num, col_status, SHEETS_ROW_STATUS_INACTIVE)
+                if col_concat:
+                    ws0.update_cell(row_num, col_concat, compute_concat(merged, header=header0))
+            except Exception:
+                pass
+
+    latest_for_edit = _latest_by_email(users)
+    edit_emails = [
+        str(u.get("email") or "").strip().lower()
+        for u in latest_for_edit
+        if str(u.get("email") or "").strip()
+    ]
+
+    with st.expander("Éditer un utilisateur / initialiser le mot de passe", expanded=False):
+        st.caption(
+            "Corrige la fiche après création (prénom, pays, langue…) ou **définit un mot de passe** "
+            "pour transformer un abonné newsletter en compte connectable."
+        )
+        if not edit_emails:
+            st.info("Aucun utilisateur à éditer.")
+        else:
+            em_pick = st.selectbox(
+                "Utilisateur (e-mail)",
+                options=edit_emails,
+                key="adm_edit_user_email",
+            )
+            rp = next(
+                (u for u in latest_for_edit if str(u.get("email") or "").strip().lower() == em_pick),
+                {},
+            )
+            has_pwd = bool(str(rp.get("password_hash_b64") or "").strip())
+            st.caption(
+                f"Source actuelle : **{str(rp.get('source') or '—')}** · "
+                f"Mot de passe : **{'déjà défini' if has_pwd else 'absent (newsletter / non activé)'}**"
+            )
+
+            lang_codes_ed = [c for c, _ in langues_opts]
+            pays_codes_ed = [c for c, _ in pays_opts]
+            langues_opts_ed = list(langues_opts)
+            pays_opts_ed = list(pays_opts)
+            if DEFAULT_PREF_LANGUE not in lang_codes_ed:
+                lang_codes_ed = [DEFAULT_PREF_LANGUE] + lang_codes_ed
+                langues_opts_ed = [(DEFAULT_PREF_LANGUE, f"Français ({DEFAULT_PREF_LANGUE})")] + langues_opts_ed
+            if DEFAULT_COUNTRY not in pays_codes_ed:
+                pays_codes_ed = [DEFAULT_COUNTRY] + pays_codes_ed
+                pays_opts_ed = [(DEFAULT_COUNTRY, f"France ({DEFAULT_COUNTRY})")] + pays_opts_ed
+
+            cur_lang = user_pref_langue(rp)
+            cur_country = user_country(rp)
+            if cur_lang not in lang_codes_ed:
+                lang_codes_ed = [cur_lang] + lang_codes_ed
+                langues_opts_ed = [(cur_lang, cur_lang)] + langues_opts_ed
+            if cur_country not in pays_codes_ed:
+                pays_codes_ed = [cur_country] + pays_codes_ed
+                pays_opts_ed = [(cur_country, cur_country)] + pays_opts_ed
+
+            auth_uid = str(rp.get("entity_id") or "").strip() or sha256(em_pick.encode("utf-8")).hexdigest()[:24]
+            latest_sub_ed = latest_subscription_record(subs, auth_uid, "weekly_friday")
+            cur_opt = str((latest_sub_ed or {}).get("opt_in") or "").strip().lower() in (
+                "true",
+                "1",
+                "oui",
+                "yes",
+            ) or subscription_is_active(latest_sub_ed)
+
+            with st.form("adm_edit_user_form"):
+                e_fn = st.text_input(
+                    "Prénom",
+                    value=str(rp.get("first_name") or "").strip(),
+                    key="adm_edit_fn",
+                )
+                e_ln = st.text_input(
+                    "Nom",
+                    value=str(rp.get("last_name") or "").strip(),
+                    key="adm_edit_ln",
+                )
+                e_ph = st.text_input(
+                    "Téléphone (optionnel, E.164)",
+                    value=str(rp.get("phone_e164") or "").strip(),
+                    key="adm_edit_ph",
+                    placeholder="+33612345678",
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    e_country = st.selectbox(
+                        "Pays / nationalité",
+                        options=pays_codes_ed,
+                        index=pays_codes_ed.index(cur_country) if cur_country in pays_codes_ed else 0,
+                        format_func=lambda c: next((lab for code, lab in pays_opts_ed if code == c), c),
+                        key="adm_edit_country",
+                    )
+                with c2:
+                    e_lang = st.selectbox(
+                        "Préférence langue",
+                        options=lang_codes_ed,
+                        index=lang_codes_ed.index(cur_lang) if cur_lang in lang_codes_ed else 0,
+                        format_func=lambda c: next((lab for code, lab in langues_opts_ed if code == c), c),
+                        key="adm_edit_pref_langue",
+                    )
+                e_opt = st.checkbox(
+                    "Opt-in newsletter (vendredi)",
+                    value=bool(cur_opt),
+                    key="adm_edit_optin",
+                )
+                st.markdown("**Mot de passe**")
+                set_pwd = st.checkbox(
+                    "Définir / réinitialiser le mot de passe",
+                    value=False,
+                    key="adm_edit_set_pwd",
+                )
+                e_pwd = st.text_input(
+                    "Nouveau mot de passe (si case cochée)",
+                    type="password",
+                    key="adm_edit_pwd",
+                    autocomplete="new-password",
+                )
+                e_pwd2 = st.text_input(
+                    "Confirmer le mot de passe",
+                    type="password",
+                    key="adm_edit_pwd2",
+                    autocomplete="new-password",
+                )
+                save_ed = st.form_submit_button(
+                    "Enregistrer les modifications",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if save_ed:
+                errs: list[str] = []
+                if e_ph.strip() and not re.match(r"^\+\d{8,15}$", e_ph.strip()):
+                    errs.append("Téléphone invalide (format +41… / +33…).")
+                if set_pwd:
+                    if len(e_pwd or "") < 8:
+                        errs.append("Mot de passe : 8 caractères minimum.")
+                    if (e_pwd or "") != (e_pwd2 or ""):
+                        errs.append("Les deux mots de passe ne correspondent pas.")
+                if errs:
+                    for m in errs:
+                        st.error(m)
+                else:
+                    ov_ed = loading_overlay("Enregistrement de la fiche utilisateur…")
+                    try:
+                        try:
+                            next_ver = int(str(rp.get("version") or "1")) + 1
+                        except ValueError:
+                            next_ver = 2
+                        country_n = normalize_country(e_country)
+                        lang_n = normalize_pref_langue(e_lang)
+                        if set_pwd:
+                            salt_b64, hash_b64 = hash_password(e_pwd)
+                            source_n = "compte"
+                        else:
+                            salt_b64 = str(rp.get("password_salt_b64") or "")
+                            hash_b64 = str(rp.get("password_hash_b64") or "")
+                            source_n = str(rp.get("source") or "newsletter").strip() or "newsletter"
+                            if hash_b64.strip():
+                                source_n = "compte"
+
+                        _supersede_users_by_email(em_pick)
+                        append_immutable_row(
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                            table="users",
+                            values_by_col={
+                                "entity_id": auth_uid,
+                                "email": em_pick,
+                                "first_name": e_fn.strip(),
+                                "last_name": e_ln.strip(),
+                                "phone_e164": e_ph.strip(),
+                                "country": country_n,
+                                "pref_langue": lang_n,
+                                "source": source_n,
+                                "password_salt_b64": salt_b64,
+                                "password_hash_b64": hash_b64,
+                                "version": next_ver,
+                            },
+                            version=next_ver,
+                        )
+
+                        # Opt-in newsletter si changement
+                        if bool(e_opt) != bool(cur_opt):
+                            sub_ent = sha256(
+                                f"sub|{auth_uid}|adm_edit|{utc_now_iso()}".encode("utf-8")
+                            ).hexdigest()[:24]
+                            append_immutable_row(
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table="subscriptions",
+                                values_by_col={
+                                    "entity_id": sub_ent,
+                                    "user_entity_id": auth_uid,
+                                    "type": "weekly_friday",
+                                    "zone": "france",
+                                    "length_pref": str(
+                                        (latest_sub_ed or {}).get("length_pref") or "250"
+                                    ),
+                                    "opt_in": "true" if e_opt else "false",
+                                    "active": "true" if e_opt else "false",
+                                },
+                            )
+
+                        invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="users")
+                        invalidate_fetch_records_cache(
+                            spreadsheet_id=cfg.gsheet_id, table="subscriptions"
+                        )
+                        invalidate_adm_sheets_fetch_cache()
+                        msg_ok = "Fiche enregistrée."
+                        if set_pwd:
+                            msg_ok += " Mot de passe initialisé — l’utilisateur peut se connecter."
+                        st.session_state["adm_addsub_flash"] = msg_ok
+                        st.rerun()
+                    finally:
+                        ov_ed.empty()
+
+    # Filtre simple (côté UI) : sous-chaîne e-mail
+    q = st.text_input("Filtrer (e-mail contient)", value="", key="adm_accounts_filter").strip().lower()
+
+    # Admin canonical : login secret (si présent)
+    try:
+        adm_login, _adm_pwd = admin_login_and_password()
+    except Exception:
+        adm_login = ""
 
     latest = _latest_by_email(users)
     if q:
