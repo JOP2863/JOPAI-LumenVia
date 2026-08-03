@@ -10,7 +10,7 @@ from core.gcs_signed_urls import gcs_first_signed_url, gcs_signed_url
 from core.locale_codes import DEFAULT_PREF_LANGUE
 from core.sheets_db import fetch_records, sheet_row_status_is_live
 
-_WEEKLY_URLS_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
+_WEEKLY_URLS_CACHE: dict[tuple[str, str, str, str], tuple[float, dict[str, str]]] = {}
 _WEEKLY_URLS_CACHE_TTL_S = 90.0
 
 
@@ -85,12 +85,16 @@ def weekly_email_signed_urls(
     gs: object,
     date_str: str,
     zone: str = "france",
+    pref_langue: str = DEFAULT_PREF_LANGUE,
 ) -> dict[str, str]:
     """PDF, audio synthèse, audio lectures (AudioLectures/), illustration — URLs signées pour l’e-mail hebdo."""
+    from core.liturgy_day import coerce_liturgy_pref_langue
+
     gsheet_id = str(getattr(cfg, "gsheet_id", "") or "").strip()
     ds = str(date_str or "").strip()[:10]
     z = str(zone or "france").strip()
-    cache_key = (gsheet_id, ds, z)
+    lg = coerce_liturgy_pref_langue(pref_langue)
+    cache_key = (gsheet_id, ds, z, lg)
     now = time.time()
     cached = _WEEKLY_URLS_CACHE.get(cache_key)
     if cached and now - cached[0] < _WEEKLY_URLS_CACHE_TTL_S:
@@ -122,7 +126,7 @@ def weekly_email_signed_urls(
             )
         except Exception:
             pass
-    p_pdf_cands = fascicule_pdf_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE)
+    p_pdf_cands = fascicule_pdf_path_candidates(date_str, pref_langue=lg)
     for p_pdf in p_pdf_cands:
         try:
             url = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_pdf) or ""
@@ -131,7 +135,7 @@ def weekly_email_signed_urls(
                 break
         except Exception:
             pass
-    cand = illustration_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE)
+    cand = illustration_path_candidates(date_str, pref_langue=lg)
     try:
         out["url_illustration"] = (
             gcs_first_signed_url(gcs=gcs, bucket_name=bucket, candidate_paths=cand) or ""

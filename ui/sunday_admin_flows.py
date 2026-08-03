@@ -19,6 +19,7 @@ from core.content_locale_paths import (
     synthesis_text_path,
 )
 from core.locale_codes import DEFAULT_PREF_LANGUE
+from core.liturgy_day import coerce_liturgy_pref_langue
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
 from core.synthesis_vertex_prompt import (
@@ -220,10 +221,23 @@ def _resolve_texts_for_readings_tts(
     gs: object,
     cfg: object,
     zone: str,
+    pref_langue: str = DEFAULT_PREF_LANGUE,
 ) -> object:
-    """Recharge RDC si le objet ``texts`` courant n'a pas de corps lisible pour le TTS."""
+    """Recharge les textes si le corps TTS est vide (RDC FR ou facade liturgy_day)."""
     readings_plain = plain_readings_for_tts(texts)
     if readings_plain.strip():
+        return texts
+    lg = coerce_liturgy_pref_langue(pref_langue)
+    date_str = str(getattr(identity, "date", "") or "")
+    if lg != "FR":
+        try:
+            from ui.streamlit_caches import cached_liturgy_day
+
+            _id, cache_texts, _sid = cached_liturgy_day(date_str, pref_langue=lg)
+            if plain_readings_for_tts(cache_texts).strip():
+                return cache_texts
+        except Exception:
+            pass
         return texts
     sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
     if not sid:
@@ -231,7 +245,7 @@ def _resolve_texts_for_readings_tts(
     loaded = load_aelf_from_readings_cache(
         gs=gs,
         spreadsheet_id=sid,
-        date_str=str(getattr(identity, "date", "") or ""),
+        date_str=date_str,
         zone=zone,
     )
     if loaded:
@@ -239,6 +253,26 @@ def _resolve_texts_for_readings_tts(
         if plain_readings_for_tts(cache_texts).strip():
             return cache_texts
     return texts
+
+
+def _ensure_texts_for_pref_langue(
+    *,
+    texts: object,
+    identity: object,
+    pref_langue: str,
+) -> tuple[object, object]:
+    """Aligne identity/texts sur la langue de génération (Evangelizo hors FR)."""
+    lg = coerce_liturgy_pref_langue(pref_langue)
+    date_str = str(getattr(identity, "date", "") or "")[:10]
+    if lg == "FR":
+        return identity, texts
+    try:
+        from ui.streamlit_caches import cached_liturgy_day
+
+        ident2, texts2, _sid = cached_liturgy_day(date_str, pref_langue=lg)
+        return ident2, texts2
+    except Exception:
+        return identity, texts
 
 
 def _readings_tts_vertex_client(cfg: object) -> VertexGeminiClient | None:
@@ -266,10 +300,15 @@ def _run_incremental_sunday_outputs(
     also_pdf_if_missing: bool,
     also_readings_if_missing: bool,
     pdf_key: str,
+    pref_langue: str = DEFAULT_PREF_LANGUE,
     _overlay: object | None = None,
 ) -> dict[str, str]:
     """Sans nouvelle synthèse Vertex : audio des lectures (TTS) et/ou fascicule PDF si absents sur Cloud."""
     import app as ap
+    pref_langue = coerce_liturgy_pref_langue(pref_langue)
+    identity, texts = _ensure_texts_for_pref_langue(
+        texts=texts, identity=identity, pref_langue=pref_langue
+    )
     date_str = str(identity.date)
     t_flow = time.perf_counter()
     done: list[str] = []
@@ -323,7 +362,7 @@ def _run_incremental_sunday_outputs(
             )
         else:
             texts = _resolve_texts_for_readings_tts(
-                texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone
+                texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone, pref_langue=pref_langue
             )
             readings_plain = plain_readings_for_tts(texts)
             if not readings_plain.strip():
@@ -392,7 +431,7 @@ def _run_incremental_sunday_outputs(
                         readings_tts_route = last_tts_route()
                     day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
                     readings_path = audio_readings_path(
-                        day_for_path_inc, gen_eid, r_ext, pref_langue=DEFAULT_PREF_LANGUE
+                        day_for_path_inc, gen_eid, r_ext, pref_langue=pref_langue
                     )
                     ru0 = time.perf_counter()
                     upload_bytes(
@@ -426,7 +465,7 @@ def _run_incremental_sunday_outputs(
                 except Exception as ex:
                     issues.append(f"Audio des lectures non publié : {ex}")
 
-    fasc_path = fascicule_pdf_path(date_str, pref_langue=DEFAULT_PREF_LANGUE)
+    fasc_path = fascicule_pdf_path(date_str, pref_langue=pref_langue)
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
     pdf_on_cloud = bool(bucket and blob_exists(gcs=gcs, bucket_name=bucket, path=fasc_path))
     need_pdf = bool(also_pdf_if_missing and synth and bucket and not pdf_on_cloud)
@@ -580,9 +619,14 @@ def _run_generate_sunday_flow(
     generate_readings_audio: bool,
     debug: bool,
     cfg: object,
+    pref_langue: str = DEFAULT_PREF_LANGUE,
 ) -> dict[str, str | bool]:
     import app as ap
     t_flow = time.perf_counter()
+    pref_langue = coerce_liturgy_pref_langue(pref_langue)
+    identity, texts = _ensure_texts_for_pref_langue(
+        texts=texts, identity=identity, pref_langue=pref_langue
+    )
     # Copies locales immédiates (évite tout UnboundLocalError / ombre de paramètre).
     zone_key = str(zone or "france").strip() or "france"
     date_str = str(getattr(identity, "date", "") or "").strip()[:10]
@@ -843,7 +887,7 @@ def _run_generate_sunday_flow(
 
     gen_entity_id = sha256(f"{date_str}|{zone_key}|{source_hash}".encode("utf-8")).hexdigest()[:24]
 
-    text_path = synthesis_text_path(date_str, gen_entity_id, pref_langue=DEFAULT_PREF_LANGUE)
+    text_path = synthesis_text_path(date_str, gen_entity_id, pref_langue=pref_langue)
     _flow_overlay_step(
         _overlay,
         "2/4 — Enregistrement texte + audio synthèse…",
@@ -956,7 +1000,7 @@ def _run_generate_sunday_flow(
 
     if audio_ok:
         audio_path = audio_synth_path(
-            date_str, gen_entity_id, audio_ext, pref_langue=DEFAULT_PREF_LANGUE
+            date_str, gen_entity_id, audio_ext, pref_langue=pref_langue
         )
         uat0 = time.perf_counter()
         upload_bytes(
@@ -1006,7 +1050,7 @@ def _run_generate_sunday_flow(
     readings_cover_signed: str | None = None
     if generate_readings_audio:
         texts = _resolve_texts_for_readings_tts(
-            texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone_key
+            texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone_key, pref_langue=pref_langue
         )
         readings_plain = plain_readings_for_tts(texts)
         if readings_plain.strip():
@@ -1057,7 +1101,7 @@ def _run_generate_sunday_flow(
                     readings_tts_route = last_tts_route()
                 day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
                 readings_path = audio_readings_path(
-                    day_for_path, gen_entity_id, r_ext, pref_langue=DEFAULT_PREF_LANGUE
+                    day_for_path, gen_entity_id, r_ext, pref_langue=pref_langue
                 )
                 ru0 = time.perf_counter()
                 upload_bytes(
@@ -1233,7 +1277,7 @@ def _run_generate_sunday_flow(
                 accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
                 back_cover_highlight_cell_index=highlight_idx,
             )
-            fasc_path = fascicule_pdf_path(date_str, pref_langue=DEFAULT_PREF_LANGUE)
+            fasc_path = fascicule_pdf_path(date_str, pref_langue=pref_langue)
             upload_bytes(
                 gcs=gcs,
                 bucket_name=str(cfg.gcs_bucket_name).strip(),

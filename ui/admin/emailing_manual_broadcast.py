@@ -655,12 +655,21 @@ def render_emailing_manual_broadcast(
                     d_pick = date.today()
             date_str = d_pick.isoformat()[:10]
             try:
-                ident0, _texts0 = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
+                from core.liturgy_day import coerce_liturgy_pref_langue
+                from core.locale_codes import user_pref_langue
+
+                ident0, _texts0, _sid = ap.cached_liturgy_day(date_str, pref_langue="FR")
             except Exception:
-                ident0 = None
+                try:
+                    ident0, _texts0 = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
+                except Exception:
+                    ident0 = None
             origin = _lumenvia_app_origin_url() or ""
             url_app = (origin.rstrip("/") + "/?sunday=" + date_str) if origin else ""
-            _urls_send = weekly_email_signed_urls(cfg=cfg, gs=gs, date_str=date_str, zone="france")
+            # URLs FR de base ; surchargées par destinataire selon pref_langue.
+            _urls_send_fr = weekly_email_signed_urls(
+                cfg=cfg, gs=gs, date_str=date_str, zone="france", pref_langue="FR"
+            )
             values: dict[str, str] = {
                 "prenom": "Jean",
                 "nom": "Dupont",
@@ -672,17 +681,19 @@ def render_emailing_manual_broadcast(
                     gspread_client=gs,
                     spreadsheet_id=cfg.gsheet_id,
                 ),
-                "url_pdf": _urls_send["url_pdf"],
-                "url_audio": _urls_send["url_audio"],
-                "url_audio_readings": _urls_send["url_audio_readings"],
-                "url_illustration": _urls_send["url_illustration"],
-                "illustration_description": (_urls_send.get("illustration_description") or "").strip(),
+                "url_pdf": _urls_send_fr["url_pdf"],
+                "url_audio": _urls_send_fr["url_audio"],
+                "url_audio_readings": _urls_send_fr["url_audio_readings"],
+                "url_illustration": _urls_send_fr["url_illustration"],
+                "illustration_description": (_urls_send_fr.get("illustration_description") or "").strip(),
                 "url_app": url_app,
                 "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
                 "message_actualite": str(
                     st.session_state.get("adm_email_message_actualite") or ""
                 ).strip(),
             }
+
+            _urls_by_lang: dict[str, dict[str, str]] = {"FR": _urls_send_fr}
 
             for uid0, urec in recipients[:500]:
                 to_email = str(urec.get("email") or "").strip()
@@ -691,6 +702,35 @@ def render_emailing_manual_broadcast(
                 values2["prenom"] = str(urec.get("first_name") or "—").strip() or "—"
                 values2["nom"] = str(urec.get("last_name") or "—").strip() or "—"
                 values2["email"] = to_email
+                urec_lang = coerce_liturgy_pref_langue(user_pref_langue(urec))
+                if urec_lang not in _urls_by_lang:
+                    _urls_by_lang[urec_lang] = weekly_email_signed_urls(
+                        cfg=cfg, gs=gs, date_str=date_str, zone="france", pref_langue=urec_lang
+                    )
+                u_urls = _urls_by_lang[urec_lang]
+                values2["url_pdf"] = u_urls.get("url_pdf") or values2.get("url_pdf") or ""
+                values2["url_audio"] = u_urls.get("url_audio") or values2.get("url_audio") or ""
+                values2["url_audio_readings"] = (
+                    u_urls.get("url_audio_readings") or values2.get("url_audio_readings") or ""
+                )
+                values2["url_illustration"] = (
+                    u_urls.get("url_illustration") or values2.get("url_illustration") or ""
+                )
+                if u_urls.get("illustration_description"):
+                    values2["illustration_description"] = str(
+                        u_urls.get("illustration_description") or ""
+                    ).strip()
+                if urec_lang != "FR":
+                    try:
+                        ident_l, _t_l, _s = ap.cached_liturgy_day(date_str, pref_langue=urec_lang)
+                        values2["nom_du_dimanche"] = resolve_email_nom_du_dimanche(
+                            identity=ident_l,
+                            date_str=date_str,
+                            gspread_client=gs,
+                            spreadsheet_id=cfg.gsheet_id,
+                        )
+                    except Exception:
+                        pass
                 # Lien préférences: pré-remplit l'email sur "Nous rejoindre"
                 try:
                     from urllib.parse import quote_plus

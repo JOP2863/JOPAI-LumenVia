@@ -317,7 +317,12 @@ def _build_export_payload(
 
 def _render_adapter_smoke_test() -> None:
     """Test rapide d’un adapter qui marche (Universalis ou Evangelizo)."""
-    with st.expander("Test adapter (optionnel)", expanded=False):
+    with st.expander("Test adapter — Universalis EN · Evangelizo", expanded=False):
+        st.caption(
+            "Universalis est toujours dans la sonde semaine (multiselect). "
+            "Ici : test unitaire d’un adapter. EN produit : Evangelizo AM est plus fiable "
+            "(horizon ~30 j) ; Universalis reste candidat en attendant leur réponse licence."
+        )
         kind = st.radio(
             "Adapter",
             options=["universalis", "evangelizo"],
@@ -443,8 +448,9 @@ def render_admin_liturgy_multilang_lab() -> None:
     st.title("Lab — lectures multi-langues")
     st.markdown(_lab_css(), unsafe_allow_html=True)
     st.caption(
-        "Uniquement les sources qui marchent : AELF (FR), Universalis (EN), Evangelizo (DE/ES/IT/EN-AM). "
-        f"Priorité : {' · '.join(LANG_PRIORITY)}. Pas de traduction maison."
+        "Produit : **FR = AELF** (inchangé) · **DE / EN / ES / IT = Evangelizo**. "
+        "Universalis = Lab / secours seulement. "
+        f"Priorité : {' · '.join(LANG_PRIORITY)}."
     )
 
     catalogue = _active_lab_sources()

@@ -187,16 +187,21 @@ def render_admin_emailing() -> None:
         d_pick = st.date_input("Dimanche ciblé", value=next_sun, key="adm_email_sunday_pick")
         date_str = d_pick.isoformat()[:10]
 
-        # Identité AELF
+        # Identité liturgique (FR = AELF via facade)
         try:
-            ident0, _texts0 = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
+            ident0, _texts0, _sid = ap.cached_liturgy_day(date_str, pref_langue="FR")
         except Exception:
-            ident0 = None
+            try:
+                ident0, _texts0 = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
+            except Exception:
+                ident0 = None
 
         # Liens signés (si objets présents)
         origin = _lumenvia_app_origin_url() or ""
         url_app = (origin.rstrip("/") + "/?sunday=" + date_str) if origin else ""
-        _urls = weekly_email_signed_urls(cfg=cfg, gs=gs, date_str=date_str, zone="france")
+        _urls = weekly_email_signed_urls(
+            cfg=cfg, gs=gs, date_str=date_str, zone="france", pref_langue="FR"
+        )
         url_pdf = _urls["url_pdf"]
         url_audio = _urls["url_audio"]
         url_audio_readings = _urls["url_audio_readings"]

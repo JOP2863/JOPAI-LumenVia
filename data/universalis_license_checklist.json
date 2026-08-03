@@ -121,5 +121,7 @@
     "contact_draft_body_fr": "Bonjour,\n\nLumenVia (projet JOPAI, préparation dominicale catholique) souhaite utiliser le JSONP Mass readings (jsonpmass.js) pour proposer les lectures en anglais à des utilisateurs opt-in, sans traduction maison.\n\nUsages envisagés (à valider) :\n1) Affichage dans une app web Streamlit avec lien universalis.com + copyright du payload ;\n2) éventuellement e-mail hebdomadaire, TTS et PDF — seulement avec votre accord ;\n3) fetch JSONP côté serveur (pas de scrape HTML).\n\nPouvez-vous indiquer ce qui est autorisé, et sous quelles conditions (attribution, volume, non-commercial) ?\n\nMerci,\n"
   },
   "checklist_complete": true,
-  "production_gate_open": false
+  "production_gate_open": false,
+  "contact_email_sent_at": "2026-08-03",
+  "contact_email_note_fr": "Mail envoyé par le porteur projet. Attente réponse. En parallèle, Evangelizo AM couvre mieux l’EN technique (horizon ~30 j) — Universalis reste candidat licence."
 }

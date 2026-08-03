@@ -282,14 +282,12 @@ div[class*="wrap_active"] button {
         (pas de traduction IA/maison à partir de l’AELF ; exclus : évangile-seul, calendrier-seul / Romcal).
         Priorité langues : <strong>FR → DE → EN → ES → IT</strong>.
         Socle : <code>pref_langue</code> + LGP + chemins GCS <code>&#123;LANG&#125;/</code>.
-        <strong>FR</strong> : AELF production. <strong>EN</strong> : adapter Universalis (<code>core/universalis.py</code>) —
-        checklist licence livrée (<code>data/universalis_license_checklist.json</code>) : attribution + copyright obligatoires ;
-        <em>e-mail / TTS / PDF / prod bloqués</em> sans accord écrit éditeur ; fetch serveur à confirmer.
-        <strong>DE / ES / IT (+ EN-AM)</strong> : Reader Evangelizo réel (<code>feed.evangelizo.org</code>,
-        adapter <code>core/evangelizo.py</code>) — candidats Lab ; ToS à valider avant prod.
-        Fausse piste LLM : <code>levangileauquotidien.org/api/v1/…</code> (HTML SPA) et Ciudad Redonda API (404) → exclus.
+        <strong>FR</strong> : AELF production (non remplacé).
+        <strong>DE / EN / ES / IT</strong> : Evangelizo via <code>cached_liturgy_day</code> —
+        page Dimanche + admin génération (sélecteur langue) + e-mail (URLs / titre par destinataire).
+        Universalis = Lab / secours. Templates e-mail et annonces TTS encore FR.
         Lab : <code>?route=admin_liturgy_lab</code> ; suivi : <code>admin_multilang_roadmap</code>.
-        Reste : contact Universalis + checklist licence Evangelizo, puis <code>pref_langue</code> si autorisé.
+        Reste : ToS Evangelizo (e-mail/TTS/PDF larges) + templates / TTS localisés.
       </td>
     </tr>
     <tr>

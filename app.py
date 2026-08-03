@@ -58,6 +58,7 @@ from ui.route_dispatch import dispatch_route
 from ui.streamlit_caches import (
     adm_feedback_sheet_fetch_cached as _adm_feedback_sheet_fetch_cached,
     cached_aelf,
+    cached_liturgy_day,
     load_prompt_templates_cached as _load_prompt_templates_cached,
     load_voix_rules_cached as _load_voix_rules_cached,
 )

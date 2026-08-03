@@ -408,11 +408,11 @@ def render_admin_multilang_roadmap() -> None:
         """
 | Livré / en cours | Cible |
 |---|---|
-| `pref_langue` + LGP + chemins GCS `{LANG}/` | Consommation réelle hors FR |
-| AELF FR + adapter Universalis EN | Accord écrit éditeur puis prod EN |
-| Checklist licence Universalis | Contact éditeur (e-mail/TTS/PDF) |
-| Adapter Evangelizo DE/ES(SP)/IT/EN(AM) | Checklist ToS Evangelizo + prod |
-| Lab + export JSON | Sonde semaine sur `evangelizo_*` |
+| Facade + dimanche `pref_langue` (AELF FR / Evangelizo) | Synthèse IA hors FR (prompts) |
+| E-mail : URLs + titre par `pref_langue` destinataire | Templates ETPL multilingues |
+| Admin génération : sélecteur langue + GCS `{LANG}/` | TTS annonces localisées |
+| Checklist Universalis (secours) | Attente réponse (non bloquant) |
+| Evangelizo Lab 7/7 | ToS Evangelizo canaux larges |
         """.strip()
     )
 

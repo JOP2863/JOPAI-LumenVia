@@ -45,21 +45,19 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
     ),
     LiturgySourceSpec(
         id="universalis_mass",
-        label="Universalis — JSONP messe",
+        label="Universalis — JSONP messe (Lab / secours)",
         lang="EN",
         status="candidate",
         provides_full_mass_texts=True,
         endpoint_template="https://universalis.com/{date_compact}/jsonpmass.js",
         notes=(
-            "Adapter : core/universalis.py → AelfTexts (Mass_R1/Ps/R2/G). "
-            "Horizon JSONP court (souvent ~4 j) : au-delà → redirect n-otherdates.htm. "
-            "Checklist licence : data/universalis_license_checklist.json — "
-            "prod e-mail/TTS/PDF bloqués sans accord écrit ; attribution + copyright obligatoires."
+            "Non câblé en produit : EN produit = evangelizo_en_am. "
+            "Adapter Lab : core/universalis.py. Horizon JSONP ~4 j. "
+            "Mail contact 2026-08-03 — gate licence fermée."
         ),
         license_note=(
-            "Universalis Publishing Ltd. JSONP webmaster OK avec lien + copyright ; "
-            "reproduction pour autrui / gain / e-mail / TTS / PDF → contacter avant. "
-            "Fetch serveur = à confirmer. Voir data/universalis_license_checklist.json."
+            "Universalis Publishing Ltd. Voir data/universalis_license_checklist.json. "
+            "Pas la route produit tant qu’Evangelizo couvre l’EN."
         ),
     ),
     LiturgySourceSpec(
@@ -72,13 +70,12 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=DE"
         ),
         notes=(
-            "Adapter : core/evangelizo.py (XML → AelfTexts). "
-            "Probe 2026-08 : L1+Ps+L2+Év OK (dimanche). Horizon Reader ≈ 30 j. "
-            "Pas l’URL REST Gemini levangileauquotidien.org/api/v1/… (shell HTML SPA)."
+            "Route produit DE via core/liturgy_day.py. Adapter : core/evangelizo.py. "
+            "Lab 2026-08 : 7/7 messe OK. Horizon ≈ 30 j. ToS à checklist avant e-mail/TTS/PDF."
         ),
         license_note=(
             "L’Évangile au Quotidien / Evangelizo — Reader destiné à l’affichage web ; "
-            "ToS / redistribution e-mail/TTS/PDF à confirmer avant prod."
+            "ToS / redistribution e-mail/TTS/PDF à confirmer avant prod canaux larges."
         ),
     ),
     LiturgySourceSpec(
@@ -91,10 +88,10 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=AM"
         ),
         notes=(
-            "Code Reader = AM (pas EN). Alternative / complément à Universalis. "
-            "Adapter : core/evangelizo.py. Horizon ≈ 30 j."
+            "Route produit EN (code Reader AM). Lab 2026-08 : 7/7 messe OK. "
+            "Remplace Universalis comme source câblée. Horizon ≈ 30 j."
         ),
-        license_note="Idem Evangelizo — valider ToS avant prod / e-mail / TTS.",
+        license_note="Idem Evangelizo — valider ToS avant e-mail / TTS / PDF larges.",
     ),
     LiturgySourceSpec(
         id="evangelizo_es_sp",
@@ -106,10 +103,9 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=SP"
         ),
         notes=(
-            "Code Reader = SP (pas ES). Probe 2026-08 : messe complète OK. "
-            "Adapter : core/evangelizo.py. Horizon ≈ 30 j."
+            "Route produit ES (code Reader SP). Lab 2026-08 : 7/7. Adapter : core/evangelizo.py."
         ),
-        license_note="Idem Evangelizo — valider ToS avant prod / e-mail / TTS.",
+        license_note="Idem Evangelizo — valider ToS avant e-mail / TTS / PDF larges.",
     ),
     LiturgySourceSpec(
         id="evangelizo_it",
@@ -121,9 +117,9 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=IT"
         ),
         notes=(
-            "Probe 2026-08 : messe complète OK. Adapter : core/evangelizo.py. Horizon ≈ 30 j."
+            "Route produit IT. Lab 2026-08 : 7/7. Adapter : core/evangelizo.py."
         ),
-        license_note="Idem Evangelizo — valider ToS avant prod / e-mail / TTS.",
+        license_note="Idem Evangelizo — valider ToS avant e-mail / TTS / PDF larges.",
     ),
     LiturgySourceSpec(
         id="usccb_readings",

@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 from core.content_locale_paths import fascicule_pdf_path
-from core.locale_codes import DEFAULT_PREF_LANGUE
+from core.liturgy_day import coerce_liturgy_pref_langue, supported_liturgy_langs
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
@@ -189,6 +189,7 @@ def render_sunday() -> None:
     import app as ap
     st.title("La Lumière du Dimanche")
     zone = "france"
+    pref_langue = coerce_liturgy_pref_langue(st.session_state.get("pref_langue"))
     cfg = load_config()
 
     def _normalize_aelf_text_for_cache(s: str | None) -> str:
@@ -387,14 +388,15 @@ def render_sunday() -> None:
         except Exception:
             pdf_bytes_for_user = None
 
-    # Lectures : on utilise d'abord un cache Sheets (si configuré), sinon AELF, sinon cache local disque.
+    # Lectures : FR → RDC puis AELF ; DE/EN/ES/IT → Evangelizo (facade liturgy_day).
     offline = False
     cached_at = ""
+    liturgy_source_id = "aelf_france"
     with st.spinner("Récupération des lectures…"):
         identity = None
         texts = None
-        # 1) Cache Sheets RDC (lecture mise en cache — pas d'ensure_table au runtime)
-        if cfg.gcp_service_account and cfg.gsheet_id:
+        # 1) Cache Sheets RDC — FR uniquement (schéma zone=france, pas de colonne langue).
+        if pref_langue == "FR" and cfg.gcp_service_account and cfg.gsheet_id:
             try:
                 gs = build_gspread_client(cfg.gcp_service_account)
                 cached_rdc = load_aelf_from_readings_cache(
@@ -405,16 +407,25 @@ def render_sunday() -> None:
                 )
                 if cached_rdc:
                     identity, texts = cached_rdc
+                    liturgy_source_id = "aelf_france"
             except Exception:
                 pass
 
-        # 2) AELF API (cache streamlit) + snapshot disque — sauté si lectures déjà fournies par RDC (Sheets).
+        # 2) Facade multi-langues (AELF / Evangelizo) + snapshot disque.
         if identity is None or texts is None:
             try:
-                identity, texts = ap.cached_aelf(date_str, zone=zone, _identity_schema=5)
-                persist_aelf_snapshot(date_str, zone, identity, texts)
-                # Écrit dans Sheets (sans champs chiffrés) pour éviter les appels futurs.
-                if cfg.gcp_service_account and cfg.gsheet_id:
+                identity, texts, liturgy_source_id = ap.cached_liturgy_day(
+                    date_str, pref_langue=pref_langue
+                )
+                snap_zone = str(getattr(identity, "zone", None) or zone)
+                persist_aelf_snapshot(date_str, snap_zone, identity, texts)
+                # Écrit RDC uniquement pour FR (source AELF).
+                if (
+                    pref_langue == "FR"
+                    and liturgy_source_id == "aelf_france"
+                    and cfg.gcp_service_account
+                    and cfg.gsheet_id
+                ):
                     try:
                         gs2 = build_gspread_client(cfg.gcp_service_account)
                         row = readings_cache_row_from_aelf_texts(
@@ -436,7 +447,10 @@ def render_sunday() -> None:
                     except Exception:
                         pass
             except Exception as aelf_err:
-                snap = load_aelf_snapshot(date_str, zone)
+                snap_zone = zone if pref_langue == "FR" else f"evangelizo_{pref_langue.lower()}"
+                snap = load_aelf_snapshot(date_str, snap_zone)
+                if not snap and pref_langue != "FR":
+                    snap = load_aelf_snapshot(date_str, zone)
                 if not snap:
                     has_published_bundle = False
                     if cfg.gcp_service_account and cfg.gsheet_id:
@@ -451,15 +465,15 @@ def render_sunday() -> None:
                         except Exception:
                             has_published_bundle = False
                     msg = (
-                        "Impossible de joindre l’API AELF pour ce jour, et aucune copie locale n’est encore disponible. "
+                        "Impossible de récupérer les lectures pour ce jour, et aucune copie locale n’est encore disponible. "
                         "Réessaie avec du réseau, ou choisis une date déjà consultée récemment sur cet appareil."
                     )
                     if has_published_bundle:
                         msg += (
                             "\n\n**Note :** le calendrier peut indiquer une synthèse, un audio ou un PDF déjà publiés "
-                            "pour ce dimanche — cela ne remplace pas les lectures liturgiques AELF. "
+                            "pour ce dimanche — cela ne remplace pas les lectures liturgiques. "
                             "En administration, ouvre **Cache lectures** et précharge le mois concerné "
-                            "(table `readings_cache` / **RDC**)."
+                            "(table `readings_cache` / **RDC**) pour le français."
                         )
                     st.error(msg)
                     if st.session_state.get("admin_authenticated"):
@@ -467,6 +481,9 @@ def render_sunday() -> None:
                     return
                 identity, texts, cached_at = snap
                 offline = True
+                liturgy_source_id = (
+                    "aelf_france" if pref_langue == "FR" else f"evangelizo_offline_{pref_langue}"
+                )
 
     inject_liturgical_accent_style(getattr(identity, "couleur", None))
     if offline:
@@ -852,7 +869,7 @@ def render_sunday() -> None:
                     )
                     st.session_state[pdf_key] = pdf_b
                     try:
-                        fasc_path = fascicule_pdf_path(date_str, pref_langue=DEFAULT_PREF_LANGUE)
+                        fasc_path = fascicule_pdf_path(date_str, pref_langue=pref_langue)
                         upload_bytes(
                             gcs=gcs_top,
                             bucket_name=str(cfg.gcs_bucket_name).strip(),
@@ -930,6 +947,27 @@ def render_sunday() -> None:
             help="Fichier distinct AudioLectures/… rattaché à la même génération que la synthèse.",
         )
         debug = st.toggle("Mode debug", value=False, key=f"adm_sunday_debug_{date_str}")
+        admin_pref_langue = st.selectbox(
+            "Langue des lectures / assets générés",
+            options=list(supported_liturgy_langs()),
+            index=list(supported_liturgy_langs()).index(pref_langue)
+            if pref_langue in supported_liturgy_langs()
+            else 0,
+            format_func=lambda lg: {
+                "FR": "FR — AELF",
+                "DE": "DE — Evangelizo",
+                "EN": "EN — Evangelizo (AM)",
+                "ES": "ES — Evangelizo (SP)",
+                "IT": "IT — Evangelizo",
+            }.get(lg, lg),
+            key=f"adm_sunday_pref_langue_{date_str}",
+            help="FR reste AELF. Autres langues : textes Evangelizo + chemins GCS {LANG}/. "
+            "L’affichage public suit la pref_langue du compte (session).",
+        )
+        st.caption(
+            f"Affichage public : `{pref_langue}` / `{liturgy_source_id}` · "
+            f"génération admin : `{admin_pref_langue}`."
+        )
         st.caption(
             "« Compléter les manquants » ajoute seulement ce qui manque encore sur Cloud, selon les cases "
             "**Audio des lectures** et **fascicule PDF** — sans refaire la synthèse IA. "
@@ -980,6 +1018,7 @@ def render_sunday() -> None:
                             identity=identity,
                             texts=texts,
                             zone=zone,
+                            pref_langue=admin_pref_langue,
                             bundle_synth_text=bundle_synth_text,
                             bundle_audio_gcs_path=bundle_audio_gcs_path,
                             bundle_readings_gcs_path=bundle_readings_gcs_path,
@@ -1010,6 +1049,7 @@ def render_sunday() -> None:
                         identity=identity,
                         texts=texts,
                         zone=zone,
+                        pref_langue=admin_pref_langue,
                         total_words=total_words,
                         pct=int(pct or 20),
                         include_takeaways=bool(include_takeaways),

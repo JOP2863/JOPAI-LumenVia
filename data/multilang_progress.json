@@ -13,8 +13,9 @@
     "spike_en",
     "spike_es",
     "spike_it",
+    "sunday_pref_langue",
     "validate_aelf_fr"
   ],
-  "current_step_id": "sunday_pref_langue",
-  "notes": "Evangelizo Reader Feed (feed.evangelizo.org) validé pour DE/SP/IT/AM — adapter core/evangelizo.py. Fausse piste Gemini REST levangileauquotidien.org/api/v1 exclue. Universalis EN : gate prod fermée sans accord écrit. Prochaine : checklist ToS Evangelizo + contact Universalis, puis pref_langue hors Lab."
+  "current_step_id": "email_pref_langue",
+  "notes": "Câblage 2026-08-03 : dimanche charge cached_liturgy_day(pref_langue session) — FR=AELF/RDC, DE/EN/ES/IT=Evangelizo. Admin génération : sélecteur langue + chemins GCS {LANG}/. E-mail manuel : URLs signées + nom_du_dimanche par pref_langue destinataire (templates encore FR). Reste : ToS Evangelizo canaux larges ; TTS titres sections encore FR ; templates e-mail multilingues."
 }

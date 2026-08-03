@@ -127,3 +127,24 @@ def _cached_aelf_raw(date_str: str, zone: str = "france", *, _identity_schema: i
 def cached_aelf(date_str: str, zone: str = "france", *, _identity_schema: int = 5) -> tuple[AelfDayIdentity, AelfTexts]:
     id_d, txt_d = _cached_aelf_raw(date_str, zone=zone, _identity_schema=_identity_schema)
     return AelfDayIdentity(**id_d), AelfTexts(**txt_d)
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def _cached_liturgy_day_raw(date_str: str, pref_langue: str, *, _schema: int = 1) -> tuple[dict, dict, str]:
+    """FR=AELF, DE/EN/ES/IT=Evangelizo — cache Streamlit (TTL 15 min)."""
+    from core.liturgy_day import fetch_liturgy_day
+
+    identity, texts, source_id = fetch_liturgy_day(date_str, pref_langue=pref_langue)
+    return asdict(identity), asdict(texts), source_id
+
+
+def cached_liturgy_day(
+    date_str: str,
+    *,
+    pref_langue: str = "FR",
+) -> tuple[AelfDayIdentity, AelfTexts, str]:
+    """Lectures du jour selon ``pref_langue`` (pas de traduction maison)."""
+    lg = str(pref_langue or "FR").strip().upper() or "FR"
+    id_d, txt_d, source_id = _cached_liturgy_day_raw(date_str, lg)
+    return AelfDayIdentity(**id_d), AelfTexts(**txt_d), source_id
+
