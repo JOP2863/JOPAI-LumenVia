@@ -131,6 +131,10 @@ MULTILANG_PHASES: tuple[tuple[str, tuple[MultilangStep, ...]], ...] = (
                 "fallback_fr",
                 "Fallback explicite FR si langue non couverte (message utilisateur)",
             ),
+            MultilangStep(
+                "site_ui_i18n",
+                "Interface du site (chrome UI) selon pref_langue — plus tard ; pour l’instant FR seul",
+            ),
         ),
     ),
     (

@@ -19,5 +19,5 @@
     "validate_aelf_fr"
   ],
   "current_step_id": "email_pref_langue",
-  "notes": "Prompts AIP multi-langue 2026-08-03 : colonne Langue + pick par pref_langue ; surcouches DE/EN/ES/IT en code ; assemblage Vertex + titres PDF localisés ; admin Test ressources : édition par langue + propagation depuis pivot FR (Actif/Version par clé+langue). Reste : templates e-mail multilingues ; ToS Evangelizo canaux larges."
+  "notes": "Prompts AIP multi-langue + génération selon pref_langue. Décision 2026-08-03 : chrome UI du site reste FR seul pour le moment ; chantier futur site_ui_i18n (plan consolidé + roadmap). Reste : templates e-mail multilingues ; ToS Evangelizo canaux larges."
 }

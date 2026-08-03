@@ -194,8 +194,12 @@ def fetch_existing_sunday_bundle(
     cfg: object,
     date_str: str,
     zone: str,
+    pref_langue: object | None = None,
 ) -> tuple[tuple[bytes, str] | None, str | None, str | None, str | None]:
     """Dernière génération du jour : (audio bytes, mime) + texte synthèse GCS + path audio + voix."""
+    from core.locale_codes import normalize_pref_langue
+
+    lg = normalize_pref_langue(pref_langue)
     try:
         day = sheet_day_key(date_str)
         gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=0, use_cache=True)
@@ -206,7 +210,23 @@ def fetch_existing_sunday_bundle(
         ]
         if not gens_day:
             return None, None, None, None
-        latest = sorted(gens_day, key=lambda r: str(r.get("created_at", "")), reverse=True)[0]
+
+        def _path_lang_score(g: dict) -> tuple[int, str]:
+            tp = str(g.get("text_gcs_path") or "").replace("\\", "/")
+            # Préférer les chemins …/{LANG}/… pour la langue demandée.
+            needle = f"/{lg}/"
+            if needle in tp or tp.startswith(f"{lg}/"):
+                return (2, str(g.get("created_at") or ""))
+            if lg == DEFAULT_PREF_LANGUE and ("/FR/" not in tp.upper() and "/DE/" not in tp and "/EN/" not in tp and "/ES/" not in tp and "/IT/" not in tp):
+                # Anciens chemins sans feuille langue = FR historique.
+                return (1, str(g.get("created_at") or ""))
+            return (0, str(g.get("created_at") or ""))
+
+        ranked = sorted(gens_day, key=_path_lang_score, reverse=True)
+        latest = ranked[0]
+        if _path_lang_score(latest)[0] == 0 and lg != DEFAULT_PREF_LANGUE:
+            # Pas de génération dans cette langue — ne pas servir le FR par erreur.
+            return None, None, None, None
         gen_eid = str(latest.get("entity_id") or "").strip()
         if not gen_eid:
             return None, None, None, None
@@ -269,9 +289,11 @@ def fetch_liturgy_illustration_full_bytes(*, gcs: object, cfg: object, date_str:
     return None
 
 
-def fetch_existing_fascicule_pdf_bytes(*, gcs: object, cfg: object, date_str: str) -> bytes | None:
+def fetch_existing_fascicule_pdf_bytes(
+    *, gcs: object, cfg: object, date_str: str, pref_langue: object | None = None
+) -> bytes | None:
     """PDF déjà généré et stocké sous Fascicules/ (si présent)."""
-    for path in fascicule_pdf_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE):
+    for path in fascicule_pdf_path_candidates(date_str, pref_langue=pref_langue or DEFAULT_PREF_LANGUE):
         try:
             return download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
         except Exception:

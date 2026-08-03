@@ -285,9 +285,24 @@ div[class*="wrap_active"] button {
         <strong>FR</strong> : AELF production (non remplacé).
         <strong>DE / EN / ES / IT</strong> : Evangelizo via <code>cached_liturgy_day</code> —
         page Dimanche + admin génération (sélecteur langue) + e-mail (URLs / titre par destinataire).
-        Universalis = Lab / secours. Templates e-mail et annonces TTS encore FR.
+        Universalis = Lab / secours. Templates e-mail encore FR.
         Lab : <code>?route=admin_liturgy_lab</code> ; suivi : <code>admin_multilang_roadmap</code>.
-        Reste : ToS Evangelizo (e-mail/TTS/PDF larges) + templates / TTS localisés.
+        Reste : ToS Evangelizo (e-mail/TTS/PDF larges) + templates e-mail localisés.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Multi-langues — interface du site (chrome UI)</strong></td>
+      <td><span class="lv-st-todo">À faire (plus tard)</span></td>
+      <td>
+        <strong>Décision actuelle :</strong> le contenu de l’application elle-même
+        (navigation, libellés, pages À propos / compte / admin, messages UX)
+        reste <strong>uniquement en français</strong> pour le moment.
+        Les contenus liturgiques / synthèse / audio / PDF suivent déjà <code>pref_langue</code> ;
+        le chrome UI, non.
+        <strong>Chantier futur :</strong> i18n de l’interface selon la
+        <code>pref_langue</code> du compte (session + feuille <code>users</code>) —
+        catalogues de chaînes (FR pivot → DE / EN / ES / IT), bascule à la connexion,
+        fallback FR si clé manquante. Hors scope immédiat : ne pas bloquer lectures / génération multi-langues.
       </td>
     </tr>
     <tr>
