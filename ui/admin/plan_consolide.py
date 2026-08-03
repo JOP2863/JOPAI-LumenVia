@@ -281,13 +281,12 @@ div[class*="wrap_active"] button {
         Règle produit : uniquement des API qui livrent les <strong>textes complets</strong> de la messe dans la langue
         (pas de traduction IA/maison à partir de l’AELF ; exclus : évangile-seul, calendrier-seul / Romcal).
         Priorité langues : <strong>FR → DE → EN → ES → IT</strong>.
-        Socle déjà en place : <code>pref_langue</code> (ISO majuscules) + table <code>langues_pays</code> (<strong>LGP</strong>),
-        chemins GCS <code>Syntheses/&#123;LANG&#125;/</code>, <code>Audio/&#123;LANG&#125;/</code>, etc.
-        <strong>Lab admin</strong> (<code>?route=admin_liturgy_lab</code>) : sonde une semaine × sources × langues.
-        <strong>Suivi temporaire</strong> (<code>?route=admin_multilang_roadmap</code>) +
-        <code>data/multilang_progress.json</code>.
-        Reste : valider licences + adapters DE/EN/ES/IT, brancher génération / dimanche / e-mail / TTS sur <code>pref_langue</code>
-        (aujourd’hui encore FR via AELF).
+        Socle : <code>pref_langue</code> + LGP + chemins GCS <code>&#123;LANG&#125;/</code>.
+        <strong>FR</strong> : AELF production. <strong>EN</strong> : adapter Universalis (<code>core/universalis.py</code>,
+        JSONP <code>Mass_R1/Ps/R2/G</code>) — candidat technique OK, <em>licence / horizon dates</em> à valider avant prod
+        (e-mail, TTS). DE/ES/IT : endpoints lab en 404 → exclus jusqu’à vraie API.
+        Lab + export JSON : <code>?route=admin_liturgy_lab</code> ; suivi : <code>admin_multilang_roadmap</code>.
+        Reste : ToS Universalis, brancher <code>pref_langue</code> sur dimanche/e-mail/TTS, trouver sources DE/ES/IT.
       </td>
     </tr>
     <tr>
@@ -483,8 +482,8 @@ div[class*="wrap_active"] button {
   <dd>Repasser sur le PDF mensuel et la couverture si tu veux un gabarit « fascicule » multi-pages.</dd>
   <dd>PWA : choix d’hébergement et socle technique pour exposer le manifest au navigateur.</dd>
   <dd>
-    Multi-langues : lab API (textes complets uniquement) → première langue non-FR en production →
-    consommation <code>pref_langue</code> (dimanche / e-mail / TTS) — page suivi temporaire à retirer ensuite.
+    Multi-langues : EN Universalis (adapter + ToS) → DE/ES/IT (trouver API) →
+    consommation <code>pref_langue</code> (dimanche / e-mail / TTS).
   </dd>
 </dl>
 

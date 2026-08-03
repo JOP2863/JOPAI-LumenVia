@@ -391,6 +391,59 @@ def render_admin_liturgy_multilang_lab() -> None:
     week = _week_dates(anchor)
     st.info("Semaine sondée : " + " · ".join(d.isoformat() for d in week))
 
+    with st.expander("Adapter Universalis EN (spike)", expanded=True):
+        st.caption(
+            "Parse JSONP → contrat `AelfTexts` via `core/universalis.py` + `fetch_liturgy_day(..., pref_langue='EN')`. "
+            "Horizon limité : au-delà de quelques jours → erreur `UniversalisHorizonError`."
+        )
+        u_date = st.date_input(
+            "Date Universalis",
+            value=date.today(),
+            key="lab_univ_date",
+        )
+        if st.button("Tester l’adapter Universalis", key="lab_univ_run"):
+            from core.liturgy_day import fetch_liturgy_day
+            from core.universalis import copyright_notice, fetch_universalis_mass, is_full_mass
+
+            overlay = loading_overlay("Universalis…")
+            try:
+                ident, texts, payload = fetch_universalis_mass(u_date.isoformat())
+                st.success(
+                    f"{ident.jour_liturgique_nom or ident.date} · "
+                    f"messe complète = {'oui' if is_full_mass(texts) else 'non'}"
+                )
+                st.markdown(
+                    f"- L1 : {len(texts.premiere_lecture or '')} car. · ref `{texts.premiere_lecture_ref or '—'}`\n"
+                    f"- Ps : {len(texts.psaume or '')} car. · ref `{texts.psaume_ref or '—'}`\n"
+                    f"- L2 : {len(texts.deuxieme_lecture or '')} car. · ref `{texts.deuxieme_lecture_ref or '—'}`\n"
+                    f"- Év : {len(texts.evangile or '')} car. · ref `{texts.evangile_ref or '—'}`\n"
+                    f"- Copyright : {copyright_notice(payload)[:280]}"
+                )
+                # Vérifie aussi la facade
+                _i2, _t2, sid = fetch_liturgy_day(u_date.isoformat(), pref_langue="EN")
+                st.caption(f"Facade `fetch_liturgy_day` → source_id=`{sid}`")
+                sample = {
+                    "date": ident.date,
+                    "fete": ident.fete,
+                    "premiere_lecture_ref": texts.premiere_lecture_ref,
+                    "psaume_ref": texts.psaume_ref,
+                    "deuxieme_lecture_ref": texts.deuxieme_lecture_ref,
+                    "evangile_ref": texts.evangile_ref,
+                    "excerpt_gospel": (texts.evangile or "")[:400],
+                    "copyright": copyright_notice(payload),
+                    "top_keys": sorted(payload.keys()),
+                }
+                st.text_area(
+                    "JSON adapter (copier)",
+                    value=json.dumps(sample, ensure_ascii=False, indent=2),
+                    height=180,
+                    key="lab_univ_json",
+                )
+            except Exception as ex:
+                st.error(f"{type(ex).__name__}: {ex}")
+            finally:
+                overlay.empty()
+
     run = st.button("Lancer la sonde (semaine × sources)", type="primary", key="lab_ml_run")
 
     prog_slot = st.empty()

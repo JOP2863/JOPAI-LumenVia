@@ -191,8 +191,12 @@ def _default_progress() -> dict:
             "pref_langue_users",
             "lab_page",
             "gcs_lang_paths",
+            "validate_aelf_fr",
+            "spike_en",
+            "adapter_contract",
+            "adapter_first_non_fr",
         ],
-        "current_step_id": "validate_aelf_fr",
+        "current_step_id": "license_checklist",
         "notes": "",
     }
 

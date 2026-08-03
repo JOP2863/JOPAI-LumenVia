@@ -1,12 +1,16 @@
 {
   "completed_ids": [
+    "adapter_contract",
+    "adapter_first_non_fr",
     "gcs_lang_paths",
     "lab_page",
     "lang_priority_fr_de_en_es_it",
     "pref_langue_users",
     "rule_full_mass_only",
-    "rule_no_house_translation"
+    "rule_no_house_translation",
+    "spike_en",
+    "validate_aelf_fr"
   ],
-  "current_step_id": "validate_aelf_fr",
-  "notes": "Socle : pref_langue + LGP + chemins GCS. Lab + page suivi livrés. Spikes DE/EN/ES/IT à valider (textes complets + licence)."
+  "current_step_id": "license_checklist",
+  "notes": "Lab 2026-08-03 : AELF OK ; Universalis EN = candidate (adapter core/universalis.py, horizon JSONP court). DE/ES/IT/USCCB exclus (404/403). Prochaine étape : checklist licence Universalis puis brancher pref_langue EN."
 }

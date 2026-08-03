@@ -40,67 +40,74 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         status="production",
         provides_full_mass_texts=True,
         endpoint_template="https://api.aelf.org/v1/messes/{date}/france",
-        notes="Source canonique LumenVia actuelle. Informations : /v1/informations/{date}/france.",
+        notes="Source canonique LumenVia. Adapter : core/aelf.py. Informations : /v1/informations/{date}/france.",
         license_note="Usage app conforme à l’API publique AELF (pas de clé).",
     ),
     LiturgySourceSpec(
         id="universalis_mass",
-        label="Universalis — JSON messe",
+        label="Universalis — JSONP messe",
         lang="EN",
-        status="unproven",
-        provides_full_mass_texts=False,
+        status="candidate",
+        provides_full_mass_texts=True,
         endpoint_template="https://universalis.com/{date_compact}/jsonpmass.js",
-        notes="Candidat EN : à valider (JSONP/JSON, textes complets, licence commerciale).",
-        license_note="Vérifier ToS Universalis avant prod / TTS / e-mail.",
+        notes=(
+            "Adapter : core/universalis.py → AelfTexts (Mass_R1/Ps/R2/G). "
+            "Horizon JSONP court (souvent ~4 j) : au-delà → redirect n-otherdates.htm. "
+            "Afficher le copyright du payload. Prod e-mail/TTS : valider ToS Universalis."
+        ),
+        license_note=(
+            "Universalis Publishing Ltd — copyright dans le JSON obligatoire à afficher ; "
+            "usage commercial / redistribution à confirmer avant prod."
+        ),
     ),
     LiturgySourceSpec(
         id="usccb_readings",
         label="USCCB — lectures (NABRE)",
         lang="EN",
-        status="unproven",
+        status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://bible.usccb.org/bible/readings/{date_compact}.cfm",
-        notes="Souvent HTML ; spike : existe-t-il un JSON officiel messe complète ?",
-        license_note="NABRE — droits USCCB à vérifier.",
+        notes="Lab 2026-08 : 404 / 403 (bot-check Varnish). Pas d’API JSON publique messe complète.",
+        license_note="NABRE — droits USCCB.",
     ),
     LiturgySourceSpec(
         id="katholisch_readings",
         label="Katholisch.de — readings API (déclaré)",
         lang="DE",
-        status="unproven",
+        status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://www.katholisch.de/api/liturgy/readings/{date}",
-        notes="Endpoint à prouver (HTTP + JSON messe complète). Alternatives : liturgie.de.",
+        notes="Lab 2026-08 : HTTP 404 (page Wartungsarbeiten). Endpoint inventé — à remplacer si API réelle trouvée.",
         license_note="Droits épiscopat DE à confirmer.",
     ),
     LiturgySourceSpec(
         id="liturgie_de_api",
         label="Deutsches Liturgisches Institut (déclaré)",
         lang="DE",
-        status="unproven",
+        status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://www.liturgie.de/api",
-        notes="URL racine — spike pour trouver l’endpoint messe du jour.",
+        notes="Lab 2026-08 : HTTP 404 sur /api. Pas d’endpoint messe trouvé.",
         license_note="À confirmer.",
     ),
     LiturgySourceSpec(
         id="comunita_it",
         label="Comunita.it — liturgia (déclaré)",
         lang="IT",
-        status="unproven",
+        status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://comunita.it/api/liturgia/{date}",
-        notes="À prouver : JSON Prima Lettura / Salmo / Vangelo complets.",
+        notes="Lab 2026-08 : HTTP 404. Chercher source CEI / autre API IT messe complète.",
         license_note="CEI / droits IT à confirmer.",
     ),
     LiturgySourceSpec(
         id="cee_liturgia",
         label="CEE Espagne — liturgia (déclaré)",
         lang="ES",
-        status="unproven",
+        status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://www.conferenciaepiscopal.es/api/liturgia/{date}",
-        notes="À prouver : messe complète ES.",
+        notes="Lab 2026-08 : HTTP 404. Chercher API CEE / autre source ES messe complète.",
         license_note="CEE — droits à confirmer.",
     ),
     LiturgySourceSpec(
@@ -110,7 +117,7 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         status="excluded",
         provides_full_mass_texts=False,
         endpoint_template="https://evangeli.net/evangelio/api/daily-reading/es/{date}",
-        notes="Exclu pour LumenVia : typiquement évangile (+commentaire), pas lectionnaire complet.",
+        notes="Exclu : typiquement évangile (+commentaire), pas lectionnaire complet.",
         license_note="N/A tant qu’exclu.",
     ),
     LiturgySourceSpec(
@@ -138,7 +145,6 @@ def sources_by_priority(*, include_excluded: bool = False) -> list[LiturgySource
             if not include_excluded and s.status == "excluded":
                 continue
             out.append(s)
-    # Orphelins hors priorité (aucun aujourd’hui)
     known = {s.id for s in out}
     for s in LITURGY_SOURCES:
         if s.id in known:

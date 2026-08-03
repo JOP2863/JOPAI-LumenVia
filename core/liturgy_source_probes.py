@@ -266,6 +266,86 @@ def probe_liturgy_source(spec: LiturgySourceSpec, *, date_iso: str, timeout_s: f
                 final_url=url,
             )
 
+    if spec.id == "universalis_mass":
+        from core.universalis import (
+            UniversalisError,
+            UniversalisHorizonError,
+            copyright_notice,
+            fetch_universalis_mass,
+            is_full_mass,
+        )
+
+        t0 = time.perf_counter()
+        try:
+            _ident, texts, payload = fetch_universalis_mass(date_iso)
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            full, blocks, chars, excerpt = _heuristic_full_mass_from_aelf(texts)
+            # Affiner avec le contrat adapter
+            if is_full_mass(texts):
+                full = True
+                blocks = {**blocks, "lecture_1": True, "psaume": True, "evangile": True}
+            keys = ", ".join(sorted(str(k) for k in payload.keys()))
+            notice = copyright_notice(payload)[:160]
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=True,
+                http_status=200,
+                full_mass_heuristic=full,
+                blocks_found=blocks,
+                chars_total=chars,
+                excerpt=(excerpt + (" | © " + notice if notice else ""))[:400],
+                raw_kind="universalis",
+                url=url,
+                elapsed_ms=elapsed,
+                content_type="application/javascript (JSONP)",
+                content_length=chars,
+                final_url=url,
+                top_keys=keys,
+                body_sha_prefix=_body_prefix_fingerprint(excerpt),
+            )
+        except UniversalisHorizonError as ex:
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=False,
+                http_status=200,
+                error=str(ex)[:240],
+                raw_kind="universalis_horizon",
+                url=url,
+                elapsed_ms=elapsed,
+                final_url=url,
+            )
+        except UniversalisError as ex:
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=False,
+                error=str(ex)[:240],
+                raw_kind="universalis",
+                url=url,
+                elapsed_ms=elapsed,
+                final_url=url,
+            )
+        except Exception as ex:
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            return LiturgyProbeResult(
+                source_id=spec.id,
+                lang=spec.lang,
+                date=date_iso,
+                ok=False,
+                error=f"{type(ex).__name__}: {ex}"[:240],
+                raw_kind="universalis",
+                url=url,
+                elapsed_ms=elapsed,
+                final_url=url,
+            )
+
     t0 = time.perf_counter()
     try:
         r = requests.get(
