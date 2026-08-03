@@ -36,6 +36,7 @@ _DEFAULT_TABLE_ACRONYMS: dict[str, str] = {
     "feedback_insights": "FBIN",
     "Voix_Audio": "VOIX",
     "liturgy_illustrations": "ILUS",
+    "langues_pays": "LGP",
 }
 
 # Noms logiques autorisés dans le code applicatif (jamais d’acronyme seul en dur).
@@ -542,6 +543,23 @@ def liturgy_illustrations_table_spec() -> TableSpec:
     )
 
 
+def langues_pays_table_spec() -> TableSpec:
+    """Référentiel ISO : langues (639-1) et pays (3166-1 alpha-2) — onglet **LGP**."""
+    return TableSpec(
+        name="langues_pays",
+        columns=with_concat(
+            [
+                *BASE_COLUMNS,
+                "code",  # 2 lettres
+                "domaine",  # langue | pays
+                "libelle",
+                "norme",  # ISO-639-1 | ISO-3166-1
+                "bcp47",  # ex. fr-FR (langues) ; vide pour pays
+            ]
+        ),
+    )
+
+
 def default_tables() -> list[TableSpec]:
     return [
         TableSpec(
@@ -576,13 +594,15 @@ def default_tables() -> list[TableSpec]:
                     "first_name",
                     "last_name",
                     "phone_e164",
-                    "country",
+                    "country",  # ISO 3166-1 alpha-2 (ex. FR) — nationalité / pays
+                    "pref_langue",  # ISO 639-1 en majuscules (ex. FR) — UI, e-mails, contenus
                     "source",
                     "password_salt_b64",
                     "password_hash_b64",
                 ]
             ),
         ),
+        langues_pays_table_spec(),
         TableSpec(
             name="subscriptions",
             columns=with_concat(

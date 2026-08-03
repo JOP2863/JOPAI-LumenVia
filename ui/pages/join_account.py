@@ -10,6 +10,19 @@ import streamlit as st
 
 from core.auth import hash_password, verify_password
 from core.config import load_config
+from core.locale_codes import (
+    DEFAULT_COUNTRY,
+    DEFAULT_PREF_LANGUE,
+    DOMAINE_LANGUE,
+    DOMAINE_PAYS,
+    fallback_langue_options,
+    fallback_pays_options,
+    normalize_country,
+    normalize_pref_langue,
+    options_from_langues_pays_rows,
+    user_country,
+    user_pref_langue,
+)
 from core.sheets_db import (
     append_immutable_row,
     build_gspread_client,
@@ -22,6 +35,38 @@ from core.sheets_db import (
 from core.subscriptions_util import latest_subscription_record, subscription_is_active
 from ui.admin_secrets import admin_login_and_password
 from ui.components import loading_overlay
+
+
+def _locale_select_options(*, gs: object, cfg: object) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Options (code, libellé) pour country / pref_langue depuis LGP, sinon graine locale."""
+    rows: list[dict] = []
+    try:
+        from ui.streamlit_caches import adm_sheets_fetch_cached, service_account_json_fingerprint
+
+        sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+        rows = list(adm_sheets_fetch_cached(cfg.gsheet_id, "langues_pays", 0, sa_json) or [])
+    except Exception:
+        try:
+            rows = list(
+                fetch_records(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="langues_pays",
+                    limit=0,
+                    use_cache=True,
+                )
+                or []
+            )
+        except Exception:
+            rows = []
+    langues = options_from_langues_pays_rows(rows, domaine=DOMAINE_LANGUE) or fallback_langue_options()
+    pays = options_from_langues_pays_rows(rows, domaine=DOMAINE_PAYS) or fallback_pays_options()
+    return langues, pays
+
+
+def _sync_session_locale_from_user(row: dict | None) -> None:
+    st.session_state["pref_langue"] = user_pref_langue(row)
+    st.session_state["country"] = user_country(row)
 
 
 def render_join() -> None:
@@ -128,6 +173,17 @@ def render_join() -> None:
             elif not rp:
                 st.warning("Aucune fiche utilisateur active trouvée pour cet e-mail.")
             else:
+                langues_opts, pays_opts = _locale_select_options(gs=gs, cfg=cfg)
+                lang_codes = [c for c, _ in langues_opts]
+                pays_codes = [c for c, _ in pays_opts]
+                cur_lang = user_pref_langue(rp)
+                cur_country = user_country(rp)
+                if cur_lang not in lang_codes:
+                    langues_opts = [(cur_lang, cur_lang)] + langues_opts
+                    lang_codes = [c for c, _ in langues_opts]
+                if cur_country not in pays_codes:
+                    pays_opts = [(cur_country, cur_country)] + pays_opts
+                    pays_codes = [c for c, _ in pays_opts]
                 with st.form("acct_edit_profile"):
                     e_fn = st.text_input("Prénom", value=str(rp.get("first_name") or "").strip(), key="acct_edit_fn")
                     e_ln = st.text_input("Nom", value=str(rp.get("last_name") or "").strip(), key="acct_edit_ln")
@@ -136,6 +192,25 @@ def render_join() -> None:
                         value=str(rp.get("phone_e164") or "").strip(),
                         key="acct_edit_ph",
                         placeholder="+33612345678",
+                    )
+                    e_country = st.selectbox(
+                        "Nationalité / pays",
+                        options=pays_codes,
+                        index=pays_codes.index(cur_country) if cur_country in pays_codes else 0,
+                        format_func=lambda c: next((lab for code, lab in pays_opts if code == c), c),
+                        key="acct_edit_country",
+                        help="Code pays ISO 3166-1 (2 lettres majuscules), ex. FR — colonne `country`.",
+                    )
+                    e_lang = st.selectbox(
+                        "Langue de consultation LumenVia",
+                        options=lang_codes,
+                        index=lang_codes.index(cur_lang) if cur_lang in lang_codes else 0,
+                        format_func=lambda c: next((lab for code, lab in langues_opts if code == c), c),
+                        key="acct_edit_pref_langue",
+                        help=(
+                            "ISO 639-1 en majuscules (ex. FR). Détermine la langue de l’interface, "
+                            "des e-mails et des contenus (synthèse, audios, fascicule)."
+                        ),
                     )
                     save_pf = st.form_submit_button(
                         "Enregistrer mes informations", type="primary", use_container_width=True
@@ -153,6 +228,8 @@ def render_join() -> None:
                                 next_ver = int(str(rp.get("version") or "1")) + 1
                             except ValueError:
                                 next_ver = 2
+                            country_n = normalize_country(e_country)
+                            lang_n = normalize_pref_langue(e_lang)
                             _supersede_users_by_email(em_acct)
                             append_immutable_row(
                                 gspread_client=gs,
@@ -164,13 +241,17 @@ def render_join() -> None:
                                     "first_name": e_fn.strip(),
                                     "last_name": e_ln.strip(),
                                     "phone_e164": e_ph.strip(),
-                                    "country": str(rp.get("country") or "FR").strip() or "FR",
+                                    "country": country_n,
+                                    "pref_langue": lang_n,
                                     "source": str(rp.get("source") or "compte").strip() or "compte",
                                     "password_salt_b64": str(rp.get("password_salt_b64") or ""),
                                     "password_hash_b64": str(rp.get("password_hash_b64") or ""),
                                     "version": next_ver,
                                 },
                                 version=next_ver,
+                            )
+                            _sync_session_locale_from_user(
+                                {"pref_langue": lang_n, "country": country_n}
                             )
                             st.success("Informations enregistrées.")
                             st.rerun()
@@ -298,6 +379,7 @@ def render_join() -> None:
                                     ).hexdigest()[:24]
                                     st.session_state.auth_email_lc = email_login
                                     st.session_state.pop("admin_authenticated", None)
+                                    _sync_session_locale_from_user(rec)
                                     st.success("Connecté.")
                                     st.rerun()
                         finally:
@@ -492,7 +574,8 @@ def render_join() -> None:
                                 "first_name": first_name_su.strip(),
                                 "last_name": last_name_su.strip(),
                                 "phone_e164": phone_e164_su.strip(),
-                                "country": "FR",
+                                "country": DEFAULT_COUNTRY,
+                                "pref_langue": DEFAULT_PREF_LANGUE,
                                 "password_salt_b64": salt_b64,
                                 "password_hash_b64": hash_b64,
                             },
@@ -517,6 +600,12 @@ def render_join() -> None:
                                 )
                         st.session_state.auth_user_entity_id = new_uid
                         st.session_state.auth_email_lc = email_signup
+                        _sync_session_locale_from_user(
+                            {
+                                "pref_langue": DEFAULT_PREF_LANGUE,
+                                "country": DEFAULT_COUNTRY,
+                            }
+                        )
                         st.success("Compte créé et connecté.")
                         st.rerun()
                     finally:
@@ -661,7 +750,8 @@ def render_join() -> None:
                         "first_name": first_name.strip(),
                         "last_name": last_name.strip(),
                         "phone_e164": phone_e164.strip(),
-                        "country": str(country or "").strip(),
+                        "country": str(country or DEFAULT_COUNTRY).strip() or DEFAULT_COUNTRY,
+                        "pref_langue": DEFAULT_PREF_LANGUE,
                         "source": "newsletter",
                     },
                 )
@@ -824,7 +914,8 @@ def render_reset_password() -> None:
                     "first_name": str(u0.get("first_name") or "").strip(),
                     "last_name": str(u0.get("last_name") or "").strip(),
                     "phone_e164": str(u0.get("phone_e164") or "").strip(),
-                    "country": str(u0.get("country") or "FR").strip() or "FR",
+                    "country": str(u0.get("country") or DEFAULT_COUNTRY).strip() or DEFAULT_COUNTRY,
+                    "pref_langue": user_pref_langue(u0),
                     "password_salt_b64": salt_b64,
                     "password_hash_b64": hash_b64,
                 },

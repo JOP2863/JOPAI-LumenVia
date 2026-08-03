@@ -297,8 +297,10 @@ def _admin_pick_gcs_path_for_upload(target: dict, mime_type: str) -> str:
             if str(a).lower().endswith((".jpg", ".jpeg")):
                 return str(a).strip()
     ds = str(target.get("date") or "").strip()
-    y = ds[:4] if len(ds) >= 4 else "2026"
-    return f"Images/illustrations/{y}/{ds}.png"
+    from core.content_locale_paths import illustration_primary_path
+    from core.locale_codes import DEFAULT_PREF_LANGUE
+
+    return illustration_primary_path(ds, ".png", pref_langue=DEFAULT_PREF_LANGUE)
 
 
 def _guess_image_mime_from_gcs_path(path: str) -> str:

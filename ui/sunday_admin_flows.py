@@ -12,6 +12,13 @@ import streamlit as st
 
 from core.aelf_reading_meta import pdf_liturgy_reading_kwargs
 from core.audio_utils import normalize_audio_bytes
+from core.content_locale_paths import (
+    audio_readings_path,
+    audio_synth_path,
+    fascicule_pdf_path,
+    synthesis_text_path,
+)
+from core.locale_codes import DEFAULT_PREF_LANGUE
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
 from core.synthesis_vertex_prompt import (
@@ -384,7 +391,9 @@ def _run_incremental_sunday_outputs(
                         duration_readings_tts_s = round(time.perf_counter() - rt0, 3)
                         readings_tts_route = last_tts_route()
                     day_for_path_inc = str(getattr(identity, "date", "") or "").strip()[:10]
-                    readings_path = f"AudioLectures/{day_for_path_inc}/{gen_eid}.{r_ext}"
+                    readings_path = audio_readings_path(
+                        day_for_path_inc, gen_eid, r_ext, pref_langue=DEFAULT_PREF_LANGUE
+                    )
                     ru0 = time.perf_counter()
                     upload_bytes(
                         gcs=gcs,
@@ -417,7 +426,7 @@ def _run_incremental_sunday_outputs(
                 except Exception as ex:
                     issues.append(f"Audio des lectures non publié : {ex}")
 
-    fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+    fasc_path = fascicule_pdf_path(date_str, pref_langue=DEFAULT_PREF_LANGUE)
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
     pdf_on_cloud = bool(bucket and blob_exists(gcs=gcs, bucket_name=bucket, path=fasc_path))
     need_pdf = bool(also_pdf_if_missing and synth and bucket and not pdf_on_cloud)
@@ -834,7 +843,7 @@ def _run_generate_sunday_flow(
 
     gen_entity_id = sha256(f"{date_str}|{zone_key}|{source_hash}".encode("utf-8")).hexdigest()[:24]
 
-    text_path = f"Syntheses/{date_str}/{gen_entity_id}.txt"
+    text_path = synthesis_text_path(date_str, gen_entity_id, pref_langue=DEFAULT_PREF_LANGUE)
     _flow_overlay_step(
         _overlay,
         "2/4 — Enregistrement texte + audio synthèse…",
@@ -946,7 +955,9 @@ def _run_generate_sunday_flow(
             )
 
     if audio_ok:
-        audio_path = f"Audio/{date_str}/{gen_entity_id}.{audio_ext}"
+        audio_path = audio_synth_path(
+            date_str, gen_entity_id, audio_ext, pref_langue=DEFAULT_PREF_LANGUE
+        )
         uat0 = time.perf_counter()
         upload_bytes(
             gcs=gcs,
@@ -1045,7 +1056,9 @@ def _run_generate_sunday_flow(
                     perf["readings_tts_s"] = round(time.perf_counter() - rt0, 3)
                     readings_tts_route = last_tts_route()
                 day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
-                readings_path = f"AudioLectures/{day_for_path}/{gen_entity_id}.{r_ext}"
+                readings_path = audio_readings_path(
+                    day_for_path, gen_entity_id, r_ext, pref_langue=DEFAULT_PREF_LANGUE
+                )
                 ru0 = time.perf_counter()
                 upload_bytes(
                     gcs=gcs,
@@ -1220,7 +1233,7 @@ def _run_generate_sunday_flow(
                 accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
                 back_cover_highlight_cell_index=highlight_idx,
             )
-            fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+            fasc_path = fascicule_pdf_path(date_str, pref_langue=DEFAULT_PREF_LANGUE)
             upload_bytes(
                 gcs=gcs,
                 bucket_name=str(cfg.gcs_bucket_name).strip(),

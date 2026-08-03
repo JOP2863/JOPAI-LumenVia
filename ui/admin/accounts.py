@@ -95,7 +95,14 @@ def render_admin_accounts() -> None:
                     ).strip()
                 rows_in.append({"email": em, "first_name": fn, "last_name": ln, "phone_e164": ph})
 
-            country = st.selectbox("Pays", options=["FR"], index=0, key=f"adm_addsub_country_{nonce}")
+            country = st.selectbox("Pays / nationalité", options=["FR"], index=0, key=f"adm_addsub_country_{nonce}")
+            pref_langue = st.selectbox(
+                "Langue de consultation",
+                options=["FR"],
+                index=0,
+                key=f"adm_addsub_pref_langue_{nonce}",
+                help="ISO 639-1 en majuscules — table langues_pays (LGP).",
+            )
             length_pref = st.selectbox(
                 "Préférence de longueur",
                 options=["150", "250", "400"],
@@ -185,7 +192,8 @@ def render_admin_accounts() -> None:
                                         "first_name": r["first_name"],
                                         "last_name": r["last_name"],
                                         "phone_e164": r.get("phone_e164") or "",
-                                        "country": str(country or "").strip(),
+                                        "country": str(country or "").strip().upper() or "FR",
+                                        "pref_langue": str(pref_langue or "FR").strip().upper() or "FR",
                                         # Aligné avec “Nous rejoindre”
                                         "source": "newsletter",
                                     }

@@ -42,7 +42,7 @@ def pick_latest_live_email_template(
     *,
     template_key: str,
     channel: str = "email",
-    language_in: tuple[str, ...] | None = ("fr", "fr-fr", "france", ""),
+    language_in: tuple[str, ...] | None = ("fr", "fr-fr", "france", "FR", ""),
 ) -> dict[str, Any] | None:
     """Parmi les lignes dont le **statut** est encore **Actif** (voir ``email_template_row_is_live``), retourne
     la plus récente selon ``version`` puis ``created_at`` (la colonne ``active`` n’intervient pas).

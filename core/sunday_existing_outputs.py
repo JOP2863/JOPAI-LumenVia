@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from core.audio_utils import normalize_audio_bytes
+from core.content_locale_paths import fascicule_pdf_path_candidates, illustration_path_candidates
 from core.illustration_thumbs import THUMB_GCS_PREFIX
+from core.locale_codes import DEFAULT_PREF_LANGUE
 from core.sheets_db import fetch_records
 from core.storage import blob_exists, download_bytes
 from core.weekly_email_urls import is_readings_audio_gcs_path as _is_readings_audio_gcs_path
@@ -249,8 +251,7 @@ def fetch_liturgy_illustration_display_bytes(*, gcs: object, cfg: object, date_s
         return download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=thumb_path)
     except Exception:
         pass
-    for ext in (".webp", ".png", ".jpg", ".jpeg"):
-        path = f"Images/illustrations/{year}/{date_str}{ext}"
+    for path in illustration_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE):
         try:
             return download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
         except Exception:
@@ -260,9 +261,7 @@ def fetch_liturgy_illustration_display_bytes(*, gcs: object, cfg: object, date_s
 
 def fetch_liturgy_illustration_full_bytes(*, gcs: object, cfg: object, date_str: str) -> bytes | None:
     """Image pleine résolution (ex. couverture PDF), sans passer par la vignette."""
-    year = date_str[:4]
-    for ext in (".webp", ".png", ".jpg", ".jpeg"):
-        path = f"Images/illustrations/{year}/{date_str}{ext}"
+    for path in illustration_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE):
         try:
             return download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
         except Exception:
@@ -272,8 +271,9 @@ def fetch_liturgy_illustration_full_bytes(*, gcs: object, cfg: object, date_str:
 
 def fetch_existing_fascicule_pdf_bytes(*, gcs: object, cfg: object, date_str: str) -> bytes | None:
     """PDF déjà généré et stocké sous Fascicules/ (si présent)."""
-    path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
-    try:
-        return download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
-    except Exception:
-        return None
+    for path in fascicule_pdf_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE):
+        try:
+            return download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=path)
+        except Exception:
+            continue
+    return None

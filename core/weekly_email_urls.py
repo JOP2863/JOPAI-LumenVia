@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import time
 
+from core.content_locale_paths import fascicule_pdf_path_candidates, illustration_path_candidates
 from core.gcp_clients import build_gcs_client
 from core.gcs_signed_urls import gcs_first_signed_url, gcs_signed_url
+from core.locale_codes import DEFAULT_PREF_LANGUE
 from core.sheets_db import fetch_records, sheet_row_status_is_live
 
 _WEEKLY_URLS_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
@@ -120,13 +122,16 @@ def weekly_email_signed_urls(
             )
         except Exception:
             pass
-    p_pdf = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
-    try:
-        out["url_pdf"] = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_pdf) or ""
-    except Exception:
-        pass
-    year = date_str[:4]
-    cand = [f"Images/illustrations/{year}/{date_str}{ext}" for ext in (".webp", ".png", ".jpg", ".jpeg")]
+    p_pdf_cands = fascicule_pdf_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE)
+    for p_pdf in p_pdf_cands:
+        try:
+            url = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p_pdf) or ""
+            if url:
+                out["url_pdf"] = url
+                break
+        except Exception:
+            pass
+    cand = illustration_path_candidates(date_str, pref_langue=DEFAULT_PREF_LANGUE)
     try:
         out["url_illustration"] = (
             gcs_first_signed_url(gcs=gcs, bucket_name=bucket, candidate_paths=cand) or ""

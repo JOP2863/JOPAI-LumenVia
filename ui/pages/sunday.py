@@ -12,6 +12,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from core.content_locale_paths import fascicule_pdf_path
+from core.locale_codes import DEFAULT_PREF_LANGUE
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
@@ -850,7 +852,7 @@ def render_sunday() -> None:
                     )
                     st.session_state[pdf_key] = pdf_b
                     try:
-                        fasc_path = f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf"
+                        fasc_path = fascicule_pdf_path(date_str, pref_langue=DEFAULT_PREF_LANGUE)
                         upload_bytes(
                             gcs=gcs_top,
                             bucket_name=str(cfg.gcs_bucket_name).strip(),
