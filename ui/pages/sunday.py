@@ -17,6 +17,7 @@ from core.liturgy_day import coerce_liturgy_pref_langue, supported_liturgy_langs
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
+from core.pdf_locale import about_markdown_for_lang, pdf_cover_date_line, pdf_cover_meta_line
 from core.aelf_reading_meta import pdf_liturgy_reading_kwargs
 from core.readings_cache_loader import (
     load_liturgy_from_readings_cache,
@@ -34,9 +35,9 @@ from core.sunday_calendar_status import compute_month_content_status
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import loading_overlay
 from ui.liturgy_render import render_liturgy_block
-from ui.pages.about import _ABOUT_MARKDOWN
 from ui.sunday_admin_flows import (
     _append_pdf_export_row,
+    _pdf_illustration_description_localized,
     _run_generate_sunday_flow,
     _run_incremental_sunday_outputs,
 )
@@ -986,22 +987,28 @@ def render_sunday() -> None:
                     pdf_b = build_liturgy_sunday_pdf_bytes(
                         image_bytes=img_b,
                         week_title=week_title_pdf,
-                        date_line=ap._french_long_date_label(date_str),
-                        meta_line=(
-                            f"{ap._liturgy_display_label(getattr(identity, 'periode', None))} · "
-                            f"Cycle {ap._cycle_year_display(getattr(identity, 'annee', None))} · "
-                            f"{ap._liturgy_display_label(getattr(identity, 'couleur', None))}"
+                        date_line=pdf_cover_date_line(date_str, pref_langue),
+                        meta_line=pdf_cover_meta_line(
+                            periode=getattr(identity, "periode", None),
+                            annee=getattr(identity, "annee", None),
+                            couleur=getattr(identity, "couleur", None),
+                            pref_langue=pref_langue,
                         ),
                         **pdf_liturgy_reading_kwargs(texts),
                         synthesis_text=synth_for_pdf,
                         audio_listen_url=aud_url,
                         audio_listen_note=aud_note,
                         audio_readings_listen_url=readings_pdf_cover,
-                        illustration_description=ilus_desc_pdf or None,
-                        about_markdown=_ABOUT_MARKDOWN,
+                        illustration_description=_pdf_illustration_description_localized(
+                            text_fr=ilus_desc_pdf or "",
+                            pref_langue=pref_langue,
+                            cfg=cfg,
+                        ),
+                        about_markdown=about_markdown_for_lang(pref_langue),
                         back_cover_image_bytes=back_cover_b,
                         accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
                         back_cover_highlight_cell_index=highlight_idx,
+                        pref_langue=pref_langue,
                     )
                     st.session_state[pdf_key] = pdf_b
                     try:

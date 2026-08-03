@@ -17,20 +17,28 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from core.dev_notice import LUMENVIA_DEVELOPMENT_NOTICE
+from core.pdf_locale import pdf_ui
 
 # Footer marque JOPAI© — charte : JOP (gras) + AI (italique) + © (exposant)
 _JOPAI_PETROLE = colors.HexColor("#0b2745")
 _JOPAI_TURQUOISE = colors.HexColor("#0d9488")
-_JOPAI_FOOTER_TEXT_REST = " LumenVia - 2026 | TOUS DROITS RESERVES"
+_JOPAI_FOOTER_TEXT_REST_DEFAULT = " LumenVia - 2026 | TOUS DROITS RESERVES"
 _DEV_NOTICE_GRAY = colors.HexColor("#7F8C8D")
 
 
-def draw_lumenvia_pdf_dev_notice(c: canvas.Canvas, page_width: float, page_height: float) -> None:
+def draw_lumenvia_pdf_dev_notice(
+    c: canvas.Canvas,
+    page_width: float,
+    page_height: float,
+    *,
+    pref_langue: object | None = None,
+) -> None:
     """Mention développement : italique ~8 pt, au-dessus du bandeau marque, alignée à droite (chaque page)."""
 
     hbar = 9.0 * mm
     pad_r = 5 * mm
-    txt = str(LUMENVIA_DEVELOPMENT_NOTICE or "").strip()
+    ui = pdf_ui(pref_langue)
+    txt = str(ui.get("dev_notice") or LUMENVIA_DEVELOPMENT_NOTICE or "").strip()
     if not txt:
         return
     c.saveState()
@@ -89,7 +97,13 @@ def _wrap_cover_lines_for_canvas(
     return lines
 
 
-def draw_jopai_footer_bar(c: canvas.Canvas, page_width: float, page_height: float) -> None:
+def draw_jopai_footer_bar(
+    c: canvas.Canvas,
+    page_width: float,
+    page_height: float,
+    *,
+    pref_langue: object | None = None,
+) -> None:
     """Bandeau bas pleine largeur + texte marque immuable."""
     hbar = 9.0 * mm
     c.saveState()
@@ -101,7 +115,7 @@ def draw_jopai_footer_bar(c: canvas.Canvas, page_width: float, page_height: floa
     jop = "JOP"
     ai = "AI"
     copy = "©"
-    rest = _JOPAI_FOOTER_TEXT_REST
+    rest = pdf_ui(pref_langue).get("footer_rights") or _JOPAI_FOOTER_TEXT_REST_DEFAULT
     w_jop = c.stringWidth(jop, "Helvetica-Bold", 7.8)
     w_ai = c.stringWidth(ai, "Helvetica-Oblique", 7.8)
     w_copy = c.stringWidth(copy, "Helvetica", 5.6)
@@ -121,7 +135,7 @@ def draw_jopai_footer_bar(c: canvas.Canvas, page_width: float, page_height: floa
     c.setFont("Helvetica-Oblique", 7.2)
     c.drawString(x0 + w_jop + w_ai + w_copy, base_y, rest)
     c.restoreState()
-    draw_lumenvia_pdf_dev_notice(c, page_width, page_height)
+    draw_lumenvia_pdf_dev_notice(c, page_width, page_height, pref_langue=pref_langue)
 
 
 def build_liturgy_cover_pdf_bytes(
@@ -135,6 +149,7 @@ def build_liturgy_cover_pdf_bytes(
     illustration_description: str | None = None,
     accent_hex: str | None = None,
     footer: str | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     """
     Retourne un PDF d’une page A4 (couverture).
@@ -145,6 +160,8 @@ def build_liturgy_cover_pdf_bytes(
     - ``illustration_description`` : légende sous les liens audio (petit corps italique).
     - ``footer`` : ignoré (conservé pour compatibilité) ; le pied de page est toujours la marque **JOP AI Production**.
     """
+    del footer  # compat
+    ui = pdf_ui(pref_langue)
     buf = BytesIO()
     w, h = A4
     c = canvas.Canvas(buf, pagesize=A4)
@@ -226,6 +243,8 @@ def build_liturgy_cover_pdf_bytes(
     # Audio : liens cliquables sur la couverture (lectures au-dessus de la synthèse si les deux sont présents).
     ru = (audio_readings_listen_url or "").strip()
     su = (audio_listen_url or "").strip()
+    label_readings = ui["listen_readings"]
+    label_synthesis = ui["listen_synthesis"]
 
     def _cover_audio_link(*, label: str, url: str, y_pdf: float) -> None:
         c.setFont("Helvetica-Bold", 10)
@@ -240,14 +259,14 @@ def build_liturgy_cover_pdf_bytes(
     _audio_y_second = _audio_y_first - 16 * mm
     last_audio_baseline = _audio_y_first
     if ru and su:
-        _cover_audio_link(label="Écouter les lectures", url=ru, y_pdf=_audio_y_first)
-        _cover_audio_link(label="Écouter la synthèse audio", url=su, y_pdf=_audio_y_second)
+        _cover_audio_link(label=label_readings, url=ru, y_pdf=_audio_y_first)
+        _cover_audio_link(label=label_synthesis, url=su, y_pdf=_audio_y_second)
         last_audio_baseline = _audio_y_second
     elif ru:
-        _cover_audio_link(label="Écouter les lectures", url=ru, y_pdf=_audio_y_first)
+        _cover_audio_link(label=label_readings, url=ru, y_pdf=_audio_y_first)
         last_audio_baseline = _audio_y_first
     elif su:
-        _cover_audio_link(label="Écouter la synthèse audio", url=su, y_pdf=_audio_y_first)
+        _cover_audio_link(label=label_synthesis, url=su, y_pdf=_audio_y_first)
         last_audio_baseline = _audio_y_first
 
     desc = (illustration_description or "").strip()
@@ -272,7 +291,7 @@ def build_liturgy_cover_pdf_bytes(
             c.drawCentredString(w / 2, y_cursor, ln[:500])
             y_cursor -= leading
 
-    draw_jopai_footer_bar(c, w, h)
+    draw_jopai_footer_bar(c, w, h, pref_langue=pref_langue)
 
     c.showPage()
     c.save()

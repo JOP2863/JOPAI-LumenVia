@@ -46,7 +46,8 @@ def _footer_every_page(canvas: object, doc: object) -> None:
         canvas.restoreState()
     except Exception:
         pass
-    draw_jopai_footer_bar(canvas, A4[0], A4[1])
+    lg = getattr(doc, "_lv_pref_langue", None)
+    draw_jopai_footer_bar(canvas, A4[0], A4[1], pref_langue=lg)
 
 
 def _to_para_html(text: str | None) -> str:
@@ -220,10 +221,12 @@ def build_liturgy_body_pdf_bytes(
     pref_langue: object | None = None,
 ) -> bytes:
     """Pages suivantes : lectures + chapitres (Synthèse, Passerelle)."""
+    from core.pdf_locale import pdf_ui
     from core.prompt_locale import catechese_title, pdf_titles
 
     titles = pdf_titles(pref_langue)
     cate_chapter = catechese_title(pref_langue)
+    ui = pdf_ui(pref_langue)
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -233,9 +236,10 @@ def build_liturgy_body_pdf_bytes(
         topMargin=12 * mm,
         bottomMargin=16 * mm,
     )
-    # Hack simple : stocke l’accent sur doc pour le callback footer.
+    # Hack simple : stocke l’accent / langue sur doc pour le callback footer.
     try:
         doc._lv_accent_hex = str(accent_hex or "").strip() or "#D4AF37"
+        doc._lv_pref_langue = pref_langue
     except Exception:
         pass
     styles = getSampleStyleSheet()
@@ -386,7 +390,7 @@ def build_liturgy_body_pdf_bytes(
     about_raw = (about_markdown or "").strip()
     if about_raw:
         story.append(PageBreak())
-        story.append(Paragraph("À propos de JOPAI LumenVia", chapter))
+        story.append(Paragraph(xml_escape(ui["about_title"]), chapter))
         story.append(Spacer(1, 6))
 
         # On transforme le Markdown en texte propre, puis on compose des paragraphes/bullets.
@@ -456,7 +460,9 @@ def build_liturgy_body_pdf_bytes(
                 )
                 continue
             # Citation / phrase courte -> italique centré
-            if "Ta Parole est une lampe" in blk:
+            quote_needle = (ui.get("about_quote_needle") or "Ta Parole est une lampe").strip()
+            closing_needle = (ui.get("about_closing_needle") or "Puisse cet outil").strip()
+            if quote_needle and quote_needle in blk:
                 q = xml_escape(blk.strip("“”\"' ").strip())
                 q_style = ParagraphStyle(name="LVAboutQuote", parent=body, alignment=TA_CENTER)
                 try:
@@ -468,7 +474,7 @@ def build_liturgy_body_pdf_bytes(
                 inner.append(Spacer(1, 5 * mm))
                 continue
             # Phrase de clôture « À propos »
-            if blk.strip().startswith("Puisse cet outil"):
+            if closing_needle and blk.strip().startswith(closing_needle):
                 inner.append(
                     Paragraph(
                         _to_para_html(blk),
@@ -520,11 +526,7 @@ def build_liturgy_body_pdf_bytes(
         try:
             story.append(
                 Paragraph(
-                    xml_escape(
-                        "Ce canevas déploie les 51 étapes de notre marche liturgique. Chaque vignette est une fenêtre ouverte sur la Parole, "
-                        "une escale visuelle pour méditer les mystères de la semaine. Suivez ce fil de lumière, de dimanche en dimanche, "
-                        "pour habiter le temps avec espérance"
-                    ),
+                    xml_escape(ui["back_cover_note"]),
                     back_note,
                 )
             )
@@ -662,6 +664,7 @@ def build_liturgy_sunday_pdf_bytes(
         audio_readings_listen_url=audio_readings_listen_url,
         illustration_description=illustration_description,
         accent_hex=accent_hex,
+        pref_langue=pref_langue,
     )
     body = build_liturgy_body_pdf_bytes(
         premiere_lecture=premiere_lecture,

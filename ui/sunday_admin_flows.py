@@ -22,6 +22,9 @@ from core.locale_codes import DEFAULT_PREF_LANGUE
 from core.liturgy_day import coerce_liturgy_pref_langue
 from core.gcp_clients import build_gcs_client
 from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
+from core.pdf_locale import about_markdown_for_lang, pdf_cover_date_line, pdf_cover_meta_line
+from core.prompt_locale import coerce_aip_langue
+from core.prompt_translate import translate_plain_fr_to
 from core.synthesis_vertex_prompt import (
     CATECHESE_BRIDGE_TARGET_WORDS,
     build_sunday_vertex_synthesis_prompt,
@@ -47,7 +50,33 @@ from core.sunday_gemini_tts import (
 from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import update_loading_overlay
-from ui.pages.about import _ABOUT_MARKDOWN
+
+
+def _pdf_illustration_description_localized(
+    *,
+    text_fr: str,
+    pref_langue: object | None,
+    cfg: object,
+) -> str | None:
+    """Traduit le commentaire ILUS (FR) pour la légende PDF ; aucun appel si FR ou vide."""
+    src = (text_fr or "").strip()
+    if not src:
+        return None
+    lg = coerce_aip_langue(pref_langue)
+    if lg == DEFAULT_PREF_LANGUE:
+        return src
+    vertex = None
+    try:
+        sa = getattr(cfg, "gcp_service_account", None)
+        if sa:
+            vertex = VertexGeminiClient(service_account_info=sa)
+    except Exception:
+        vertex = None
+    try:
+        out = translate_plain_fr_to(src, target_lang=lg, vertex_client=vertex)
+        return (out or src).strip() or src
+    except Exception:
+        return src
 
 
 def _flow_overlay_step(
@@ -563,19 +592,24 @@ def _run_incremental_sunday_outputs(
                 pdf_b = build_liturgy_sunday_pdf_bytes(
                     image_bytes=img_b,
                     week_title=week_title_pdf,
-                    date_line=ap._french_long_date_label(date_str),
-                    meta_line=(
-                        f"{ap._liturgy_display_label(getattr(identity, 'periode', None))} · "
-                        f"Cycle {ap._cycle_year_display(getattr(identity, 'annee', None))} · "
-                        f"{ap._liturgy_display_label(getattr(identity, 'couleur', None))}"
+                    date_line=pdf_cover_date_line(date_str, pref_langue),
+                    meta_line=pdf_cover_meta_line(
+                        periode=getattr(identity, "periode", None),
+                        annee=getattr(identity, "annee", None),
+                        couleur=getattr(identity, "couleur", None),
+                        pref_langue=pref_langue,
                     ),
                     **pdf_liturgy_reading_kwargs(texts),
                     synthesis_text=synth_for_pdf,
                     audio_listen_url=aud_url,
                     audio_listen_note=aud_note,
                     audio_readings_listen_url=readings_pdf_signed,
-                    illustration_description=ilus_desc_pdf or None,
-                    about_markdown=_ABOUT_MARKDOWN,
+                    illustration_description=_pdf_illustration_description_localized(
+                        text_fr=ilus_desc_pdf or "",
+                        pref_langue=pref_langue,
+                        cfg=cfg,
+                    ),
+                    about_markdown=about_markdown_for_lang(pref_langue),
                     back_cover_image_bytes=back_cover_b,
                     accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
                     back_cover_highlight_cell_index=highlight_idx,
@@ -1262,19 +1296,24 @@ def _run_generate_sunday_flow(
             pdf_b = build_liturgy_sunday_pdf_bytes(
                 image_bytes=img_b,
                 week_title=week_title_pdf,
-                date_line=ap._french_long_date_label(date_str),
-                meta_line=(
-                    f"{ap._liturgy_display_label(getattr(identity, 'periode', None))} · "
-                    f"Cycle {ap._cycle_year_display(getattr(identity, 'annee', None))} · "
-                    f"{ap._liturgy_display_label(getattr(identity, 'couleur', None))}"
+                date_line=pdf_cover_date_line(date_str, pref_langue),
+                meta_line=pdf_cover_meta_line(
+                    periode=getattr(identity, "periode", None),
+                    annee=getattr(identity, "annee", None),
+                    couleur=getattr(identity, "couleur", None),
+                    pref_langue=pref_langue,
                 ),
                 **pdf_liturgy_reading_kwargs(texts),
                 synthesis_text=gen.text,
                 audio_listen_url=aud_url,
                 audio_listen_note=aud_note,
                 audio_readings_listen_url=readings_cover_signed,
-                illustration_description=ilus_desc_pdf or None,
-                about_markdown=_ABOUT_MARKDOWN,
+                illustration_description=_pdf_illustration_description_localized(
+                    text_fr=ilus_desc_pdf or "",
+                    pref_langue=pref_langue,
+                    cfg=cfg,
+                ),
+                about_markdown=about_markdown_for_lang(pref_langue),
                 back_cover_image_bytes=back_cover_b,
                 accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
                 back_cover_highlight_cell_index=highlight_idx,
