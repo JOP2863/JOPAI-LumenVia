@@ -115,10 +115,9 @@ def fascicule_pdf_path_candidates(date_str: str, *, pref_langue: object | None =
     out: list[str] = []
     for lg in _lang_path_variants(lang):
         out.append(f"Fascicules/{lg}/{date_str}/lumenvia_dimanche_{date_str}.pdf")
-    out.append(f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf")
-    if lang != DEFAULT_PREF_LANGUE:
-        for lg in _lang_path_variants(DEFAULT_PREF_LANGUE):
-            out.append(f"Fascicules/{lg}/{date_str}/lumenvia_dimanche_{date_str}.pdf")
+    # Legacy sans préfixe langue (FR historique uniquement).
+    if lang == DEFAULT_PREF_LANGUE:
+        out.append(f"Fascicules/{date_str}/lumenvia_dimanche_{date_str}.pdf")
     return _uniq(out)
 
 

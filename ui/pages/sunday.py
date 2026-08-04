@@ -445,10 +445,14 @@ def render_sunday() -> None:
     def _zone_matches_pref(ident: object | None, *, lg: str, want_zone: str) -> bool:
         if ident is None:
             return False
+        from core.readings_cache_loader import rdc_zone_aliases_for_pref_langue
+
         z = str(getattr(ident, "zone", None) or "").strip().lower()
+        aliases = {a.lower() for a in rdc_zone_aliases_for_pref_langue(lg)}
+        aliases.add(want_zone.lower())
         if lg == "FR":
-            return z in ("", "france") or z == want_zone.lower()
-        return z == want_zone.lower() or z.startswith("evangelizo_")
+            return z in ("", "france") or z in aliases
+        return z in aliases
 
     with st.spinner("Récupération des lectures…"):
         identity = None
@@ -466,7 +470,7 @@ def render_sunday() -> None:
                 invalidate_adm_sheets_fetch_cache()
             except Exception:
                 pass
-        # 1) Cache Sheets RDC — strictement la zone de la langue choisie.
+        # 1) Cache Sheets RDC — zone pays (+ alias historiques evangelizo_*).
         if cfg.gcp_service_account and cfg.gsheet_id:
             try:
                 gs = build_gspread_client(cfg.gcp_service_account)
@@ -507,22 +511,27 @@ def render_sunday() -> None:
                 st.session_state["_sunday_liturgy_loaded_lang"] = pref_langue
                 if not _texts_nonempty(texts):
                     raise RuntimeError(f"Lectures vides pour {pref_langue} / {date_str}")
-                snap_zone = str(getattr(identity, "zone", None) or rdc_zone)
+                from core.readings_cache_loader import rdc_source_for_pref_langue
+                from dataclasses import replace as _dc_replace
+
+                snap_zone = rdc_zone
+                # Toujours écrire / exposer la zone pays canonique.
+                if str(getattr(identity, "zone", None) or "") != rdc_zone:
+                    try:
+                        identity = _dc_replace(identity, zone=rdc_zone)
+                    except Exception:
+                        pass
                 persist_aelf_snapshot(date_str, snap_zone, identity, texts)
                 if cfg.gcp_service_account and cfg.gsheet_id:
                     try:
                         gs2 = build_gspread_client(cfg.gcp_service_account)
-                        z_write = str(getattr(identity, "zone", None) or rdc_zone)
+                        z_write = rdc_zone
                         row = readings_cache_row_from_texts(
                             ds=date_str[:10],
                             zone=z_write,
                             identity=identity,
                             texts=texts,
-                            source=(
-                                "aelf_api"
-                                if liturgy_source_id == "aelf_france"
-                                else f"{liturgy_source_id}_live"
-                            ),
+                            source=rdc_source_for_pref_langue(pref_langue),
                         )
                         row["entity_id"] = sha256(
                             f"read|{date_str[:10]}|{z_write}|{utc_now_iso()}".encode("utf-8")
@@ -786,9 +795,9 @@ def render_sunday() -> None:
                     st.download_button(
                         label="Télécharger le PDF du dimanche",
                         data=pdf_bytes_for_user,
-                        file_name=f"lumenvia_dimanche_{date_str}.pdf",
+                        file_name=f"lumenvia_dimanche_{date_str}_{pref_langue}.pdf",
                         mime="application/pdf",
-                        key=f"dl_sunday_top_{date_str}",
+                        key=f"dl_sunday_top_{date_str}_{pref_langue}",
                         type="secondary",
                         use_container_width=True,
                     )
@@ -1011,6 +1020,7 @@ def render_sunday() -> None:
                         pref_langue=pref_langue,
                     )
                     st.session_state[pdf_key] = pdf_b
+                    st.session_state.pop(f"liturgy_sunday_pdf_{date_str}", None)
                     try:
                         fasc_path = fascicule_pdf_path(date_str, pref_langue=pref_langue)
                         upload_bytes(
@@ -1033,9 +1043,12 @@ def render_sunday() -> None:
                                 )
                             except Exception:
                                 pass
-                        st.success("PDF enregistré.")
+                        st.success("PDF enregistré — tu peux le télécharger ci-dessus.")
+                        st.rerun()
                     except Exception as ex:
                         st.warning(f"Impossible d’enregistrer le PDF sur Cloud (Fascicules/) : {ex}")
+                        # Session OK même si GCS échoue — rerun pour afficher le bouton.
+                        st.rerun()
                 finally:
                     ov_pdf.empty()
             st.divider()

@@ -180,8 +180,8 @@ def render_admin_readings_cache() -> None:
     st.title("Cache lectures (Sheets)")
     st.caption(
         "Précharge les lectures dans `readings_cache` (RDC) **sans doublons**, "
-        "comme pour le français : **FR = AELF** (`zone=france`) · "
-        "**DE / EN / ES / IT = Evangelizo** (`zone=evangelizo_*`). "
+        "comme pour le français : **FR = AELF** (`zone=france`, `source=AELF`) · "
+        "**DE / EN / ES / IT = Evangelizo** (`zone=allemagne|amerique|espagne|italie`, `source=Evangelizo`). "
         "La page Dimanche lit d’abord ce cache, puis l’API."
     )
     st.caption(
@@ -286,19 +286,29 @@ def render_admin_readings_cache() -> None:
             skipped_horizon = 0
             errors_preview: list[str] = []
 
+            from core.readings_cache_loader import (
+                rdc_source_for_pref_langue,
+                rdc_zone_aliases_for_pref_langue,
+            )
+
             for lg0 in langs:
                 lg = coerce_liturgy_pref_langue(lg0)
                 zone = rdc_zone_for_pref_langue(lg)
-                source_tag = "aelf_api_prefetch" if lg == "FR" else f"evangelizo_prefetch_{lg}"
+                zone_aliases = {z.lower() for z in rdc_zone_aliases_for_pref_langue(lg)}
+                source_tag = rdc_source_for_pref_langue(lg)
                 existing_dates = {
                     str(r.get("date") or "").strip()
                     for r in existing
-                    if _readings_row_is_usable(r, zone=zone, year=int(year))
+                    if str(r.get("zone") or "").strip().lower() in zone_aliases
+                    and _readings_row_is_usable(r, zone=str(r.get("zone") or zone), year=int(year))
                 }
                 unavailable_dates = {
                     str(r.get("date") or "").strip()
                     for r in existing
-                    if _readings_row_is_source_unavailable(r, zone=zone, year=int(year))
+                    if str(r.get("zone") or "").strip().lower() in zone_aliases
+                    and _readings_row_is_source_unavailable(
+                        r, zone=str(r.get("zone") or zone), year=int(year)
+                    )
                 }
                 candidates = [
                     d
@@ -316,7 +326,7 @@ def render_admin_readings_cache() -> None:
                     skipped_horizon += horizon_skip_n
                 skipped_ok += len(existing_dates & target_iso)
                 st.write(
-                    f"**{lg}** (`{zone}`) — déjà OK : **{len(existing_dates & target_iso)}** · "
+                    f"**{lg}** (`{zone}`, source={source_tag}) — déjà OK : **{len(existing_dates & target_iso)}** · "
                     f"indispo. : **{len(unavailable_dates & target_iso)}** · "
                     + (
                         f"hors horizon Evangelizo : **{horizon_skip_n}** · "
@@ -329,13 +339,14 @@ def render_admin_readings_cache() -> None:
                     ds = d.isoformat()
                     try:
                         identity, texts, source_id = fetch_liturgy_day(ds, pref_langue=lg)
-                        z_write = str(getattr(identity, "zone", None) or zone)
+                        del source_id  # registry id — RDC stocke AELF / Evangelizo
+                        z_write = zone
                         row = _readings_cache_row(
                             ds=ds,
                             zone=z_write,
                             identity=identity,
                             texts=texts,
-                            source=source_tag if lg == "FR" else f"{source_id}_prefetch",
+                            source=source_tag,
                         )
                         if lg == "FR":
                             dirty = [

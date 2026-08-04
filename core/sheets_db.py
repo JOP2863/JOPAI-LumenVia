@@ -909,6 +909,7 @@ def default_tables() -> list[TableSpec]:
                 [
                     *BASE_COLUMNS,
                     "date",
+                    "source",
                     "zone",
                     "periode",
                     "semaine",
@@ -930,7 +931,6 @@ def default_tables() -> list[TableSpec]:
                     "evangile",
                     "evangile_intro",
                     "evangile_ref",
-                    "source",
                     "error",
                 ]
             ),
@@ -1033,16 +1033,28 @@ def _missing_spec_columns(first_row: list[str], spec_columns: list[str]) -> list
 
 def _insert_missing_header_columns(first_row: list[str], missing: list[str]) -> list[str]:
     """
-    Insère les nouveaux noms de colonnes juste avant ``concat`` (s'il est présent),
-    au lieu de les coller après toute la ligne 1 (ce qui dupliquait par ex. ``zone``).
+    Insère les nouveaux noms de colonnes à une position cohérente avec le schéma :
+    - ``source`` juste après ``date`` s’il manque ;
+    - sinon juste avant ``concat`` (s’il est présent) ;
+    - sinon en fin de ligne 1.
     """
     if not missing:
         return list(first_row)
     labels = [str(c or "").strip() for c in first_row]
+    remaining = list(missing)
+
+    # Placement préférentiel : source juste après date.
+    if "source" in remaining and "date" in labels:
+        date_idx = labels.index("date")
+        labels = labels[: date_idx + 1] + ["source"] + labels[date_idx + 1 :]
+        remaining = [c for c in remaining if c != "source"]
+
+    if not remaining:
+        return labels
     if "concat" in labels:
         concat_idx = labels.index("concat")
-        return list(first_row[:concat_idx]) + list(missing) + list(first_row[concat_idx:])
-    return list(first_row) + list(missing)
+        return labels[:concat_idx] + remaining + labels[concat_idx:]
+    return labels + remaining
 
 
 def repair_worksheet_duplicate_headers(ws: gspread.Worksheet) -> list[str]:

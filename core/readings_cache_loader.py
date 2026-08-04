@@ -9,22 +9,57 @@ from core.aelf import AelfDayIdentity, AelfTexts
 from core.locale_codes import DEFAULT_PREF_LANGUE, normalize_pref_langue
 from core.sheets_db import fetch_records, sheet_row_status_is_live
 
-# Zone AELF historique (FR). Hors FR : zone = identité Evangelizo (evangelizo_de, …).
+# Zones RDC = pays (libellé simple). FR historique = france.
 RDC_ZONE_FRANCE = "france"
+
+# Langue produit → zone pays (écriture canonique).
+PRODUCT_LANG_TO_RDC_ZONE: dict[str, str] = {
+    "FR": "france",
+    "DE": "allemagne",
+    "IT": "italie",
+    "ES": "espagne",
+    "EN": "amerique",  # calendrier Evangelizo AM (US)
+}
+
+# Anciennes clés encore présentes dans des lignes RDC déjà écrites.
+_LEGACY_ZONE_ALIASES: dict[str, tuple[str, ...]] = {
+    "france": ("france",),
+    "allemagne": ("allemagne", "evangelizo_de"),
+    "italie": ("italie", "evangelizo_it"),
+    "espagne": ("espagne", "evangelizo_sp", "evangelizo_es_sp"),
+    "amerique": ("amerique", "evangelizo_am", "evangelizo_en_am"),
+}
 
 
 def rdc_zone_for_pref_langue(pref_langue: object | None) -> str:
-    """Clé ``zone`` RDC pour une langue produit (FR → france, sinon evangelizo_*)."""
+    """Clé ``zone`` RDC canonique (pays) pour une langue produit."""
     lg = normalize_pref_langue(pref_langue)
-    if lg == DEFAULT_PREF_LANGUE or lg == "FR":
-        return RDC_ZONE_FRANCE
-    # Aligné sur core.evangelizo.payload_to_identity / PRODUCT_LANG_TO_EVANGELIZO
-    from core.evangelizo import PRODUCT_LANG_TO_EVANGELIZO
+    return PRODUCT_LANG_TO_RDC_ZONE.get(lg) or RDC_ZONE_FRANCE
 
-    e_lang = PRODUCT_LANG_TO_EVANGELIZO.get(lg)
-    if e_lang:
-        return f"evangelizo_{e_lang.lower()}"
-    return RDC_ZONE_FRANCE
+
+def rdc_zone_aliases_for_pref_langue(pref_langue: object | None) -> tuple[str, ...]:
+    """Zones acceptées en lecture (canonique + historiques Evangelizo)."""
+    canon = rdc_zone_for_pref_langue(pref_langue)
+    return _LEGACY_ZONE_ALIASES.get(canon, (canon,))
+
+
+def rdc_source_for_pref_langue(pref_langue: object | None) -> str:
+    """Valeur colonne ``source`` : AELF (FR) ou Evangelizo (autres)."""
+    lg = normalize_pref_langue(pref_langue)
+    return "AELF" if lg == DEFAULT_PREF_LANGUE or lg == "FR" else "Evangelizo"
+
+
+def normalize_rdc_source(raw: object | None, *, pref_langue: object | None = None) -> str:
+    """Normalise d’anciens tags (`aelf_api`, `evangelizo_de_prefetch`, …) → AELF / Evangelizo."""
+    s = str(raw or "").strip()
+    low = s.lower()
+    if low in ("aelf", "aelf_api", "aelf_api_prefetch", "aelf_france") or low.startswith("aelf"):
+        return "AELF"
+    if "evangelizo" in low or low in ("evangelizo",):
+        return "Evangelizo"
+    if pref_langue is not None:
+        return rdc_source_for_pref_langue(pref_langue)
+    return s or "AELF"
 
 
 def _cache_date_key(raw: object) -> str:
@@ -60,6 +95,7 @@ def _normalize_cached_multiline(s: str | None) -> str | None:
 
     raw = strip_aelf_lectionary_rubrics((s or "").replace("\r\n", "\n").replace("\r", "\n").strip())
     return raw or None
+
 
 def _row_has_readings(row: dict) -> bool:
     for k in ("premiere_lecture", "psaume", "deuxieme_lecture", "evangile"):
@@ -102,7 +138,7 @@ def readings_cache_row_from_texts(
     zone: str,
     identity,
     texts,
-    source: str = "aelf_api_prefetch",
+    source: str = "AELF",
 ) -> dict[str, str]:
     """Ligne ``readings_cache`` prête pour ``append_immutable_row`` (AELF ou Evangelizo)."""
 
@@ -114,6 +150,7 @@ def readings_cache_row_from_texts(
 
     return {
         "date": ds,
+        "source": normalize_rdc_source(source),
         "zone": zone,
         "periode": getattr(identity, "periode", None) or "",
         "semaine": getattr(identity, "semaine", None) or "",
@@ -135,15 +172,14 @@ def readings_cache_row_from_texts(
         "evangile": _txt(getattr(texts, "evangile", None)),
         "evangile_intro": _txt(getattr(texts, "evangile_intro", None)),
         "evangile_ref": _txt(getattr(texts, "evangile_ref", None)),
-        "source": source,
         "error": "",
     }
 
 
 def readings_cache_row_from_aelf_texts(*, ds: str, zone: str, identity, texts) -> dict[str, str]:
-    """Alias historique — source ``aelf_api_prefetch``."""
+    """Alias historique — source ``AELF``."""
     return readings_cache_row_from_texts(
-        ds=ds, zone=zone, identity=identity, texts=texts, source="aelf_api_prefetch"
+        ds=ds, zone=zone, identity=identity, texts=texts, source="AELF"
     )
 
 
@@ -153,11 +189,15 @@ def load_aelf_from_readings_cache(
     spreadsheet_id: str,
     date_str: str,
     zone: str = "france",
+    zone_aliases: tuple[str, ...] | None = None,
 ) -> tuple[AelfDayIdentity, AelfTexts] | None:
-    """Dernière ligne RDC exploitable pour (date, zone), ou ``None``."""
+    """Dernière ligne RDC exploitable pour (date, zone[+alias]), ou ``None``."""
     day = _cache_date_key(date_str)
     if not day:
         return None
+    wanted = {str(z).strip().lower() for z in (zone_aliases or (zone,)) if str(z).strip()}
+    wanted.add(str(zone or "").strip().lower())
+    wanted.discard("")
     try:
         rows = fetch_records(
             gspread_client=gs,
@@ -172,7 +212,7 @@ def load_aelf_from_readings_cache(
         r
         for r in rows
         if _cache_date_key(r.get("date")) == day
-        and str(r.get("zone") or "").strip() == zone
+        and str(r.get("zone") or "").strip().lower() in wanted
         and sheet_row_status_is_live(r.get("status"))
         and not str(r.get("error") or "").strip()
         and _row_has_readings(r)
@@ -180,9 +220,10 @@ def load_aelf_from_readings_cache(
     if not hits:
         return None
     best = sorted(hits, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
+    # Zone renvoyée = canonique demandée (pas l’alias legacy de la ligne).
     identity = AelfDayIdentity(
         date=str(best.get("date") or day)[:10],
-        zone=str(best.get("zone") or zone),
+        zone=str(zone or best.get("zone") or "") or "france",
         periode=str(best.get("periode") or "") or None,
         semaine=str(best.get("semaine") or "") or None,
         annee=str(best.get("annee") or "") or None,
@@ -200,10 +241,12 @@ def load_liturgy_from_readings_cache(
     date_str: str,
     pref_langue: object | None = None,
 ) -> tuple[AelfDayIdentity, AelfTexts] | None:
-    """RDC pour une ``pref_langue`` produit (FR=france, DE/EN/ES/IT=evangelizo_*)."""
+    """RDC pour une ``pref_langue`` produit (zone pays + alias historiques)."""
+    canon = rdc_zone_for_pref_langue(pref_langue)
     return load_aelf_from_readings_cache(
         gs=gs,
         spreadsheet_id=spreadsheet_id,
         date_str=date_str,
-        zone=rdc_zone_for_pref_langue(pref_langue),
+        zone=canon,
+        zone_aliases=rdc_zone_aliases_for_pref_langue(pref_langue),
     )

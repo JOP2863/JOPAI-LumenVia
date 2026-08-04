@@ -632,6 +632,7 @@ def _run_incremental_sunday_outputs(
                     duration_build_s=round(time.perf_counter() - tpdf0, 3),
                 )
                 st.session_state[pdf_key] = pdf_b
+                st.session_state.pop(f"liturgy_sunday_pdf_{date_str}", None)
                 done.append("fascicule PDF")
         except Exception as ex:
             issues.append(f"Fascicule PDF non produit : {ex}")
@@ -1336,7 +1337,9 @@ def _run_generate_sunday_flow(
                 gcs_path=fasc_path,
                 duration_build_s=round(time.perf_counter() - tpdf0, 3),
             )
-            st.session_state[f"liturgy_sunday_pdf_{date_str}"] = pdf_b
+            st.session_state[f"liturgy_sunday_pdf_{date_str}_{pref_langue}"] = pdf_b
+            # Nettoie l’ancienne clé sans langue (téléchargement sinon introuvable).
+            st.session_state.pop(f"liturgy_sunday_pdf_{date_str}", None)
             perf["pdf_auto_s"] = round(time.perf_counter() - tpdf0, 3)
         except Exception as e:
             st.warning(f"PDF non généré automatiquement : {e}")

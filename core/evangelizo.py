@@ -198,20 +198,256 @@ def parse_evangelizo_xml(raw: str) -> dict[str, Any]:
 
 
 def payload_to_aelf_texts(payload: dict[str, Any]) -> AelfTexts:
+    # ``*_lt`` = titre long (intro lue) ; ``*_st`` = référence courte.
     return AelfTexts(
         premiere_lecture=payload.get("reading_text1") or None,
         psaume=payload.get("reading_text2") or None,
         deuxieme_lecture=payload.get("reading_text3") or None,
         evangile=payload.get("reading_gospel") or None,
-        premiere_lecture_intro=None,
-        premiere_lecture_ref=payload.get("reading_text1_st") or payload.get("reading_text1_lt") or None,
-        psaume_intro=None,
-        psaume_ref=payload.get("reading_text2_st") or payload.get("reading_text2_lt") or None,
-        deuxieme_lecture_intro=None,
-        deuxieme_lecture_ref=payload.get("reading_text3_st") or payload.get("reading_text3_lt") or None,
-        evangile_intro=None,
-        evangile_ref=payload.get("reading_gospel_st") or payload.get("reading_gospel_lt") or None,
+        premiere_lecture_intro=payload.get("reading_text1_lt") or None,
+        premiere_lecture_ref=payload.get("reading_text1_st") or None,
+        psaume_intro=payload.get("reading_text2_lt") or None,
+        psaume_ref=payload.get("reading_text2_st") or None,
+        deuxieme_lecture_intro=payload.get("reading_text3_lt") or None,
+        deuxieme_lecture_ref=payload.get("reading_text3_st") or None,
+        evangile_intro=payload.get("reading_gospel_lt") or None,
+        evangile_ref=payload.get("reading_gospel_st") or None,
     )
+
+
+_ORDINAL_EN: dict[str, int] = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "eleventh": 11,
+    "twelfth": 12,
+    "thirteenth": 13,
+    "fourteenth": 14,
+    "fifteenth": 15,
+    "sixteenth": 16,
+    "seventeenth": 17,
+    "eighteenth": 18,
+    "nineteenth": 19,
+    "twentieth": 20,
+    "twenty-first": 21,
+    "twenty-second": 22,
+    "twenty-third": 23,
+    "twenty-fourth": 24,
+    "twenty-fifth": 25,
+    "twenty-sixth": 26,
+    "twenty-seventh": 27,
+    "twenty-eighth": 28,
+    "twenty-ninth": 29,
+    "thirtieth": 30,
+    "thirty-first": 31,
+    "thirty-second": 32,
+    "thirty-third": 33,
+    "thirty-fourth": 34,
+}
+
+_ROMAN: dict[str, int] = {
+    "I": 1,
+    "II": 2,
+    "III": 3,
+    "IV": 4,
+    "V": 5,
+    "VI": 6,
+    "VII": 7,
+    "VIII": 8,
+    "IX": 9,
+    "X": 10,
+    "XI": 11,
+    "XII": 12,
+    "XIII": 13,
+    "XIV": 14,
+    "XV": 15,
+    "XVI": 16,
+    "XVII": 17,
+    "XVIII": 18,
+    "XIX": 19,
+    "XX": 20,
+    "XXI": 21,
+    "XXII": 22,
+    "XXIII": 23,
+    "XXIV": 24,
+    "XXV": 25,
+    "XXVI": 26,
+    "XXVII": 27,
+    "XXVIII": 28,
+    "XXIX": 29,
+    "XXX": 30,
+    "XXXI": 31,
+    "XXXII": 32,
+    "XXXIII": 33,
+    "XXXIV": 34,
+}
+
+
+def _advent_sunday(year: int) -> date:
+    """1er dimanche de l’Avent = dimanche entre le 27 nov. et le 3 déc."""
+    from datetime import timedelta
+
+    # Dimanche le plus proche de / sur le 30 novembre, dans [27 nov ; 3 déc].
+    for day in range(27, 34):
+        if day <= 30:
+            d = date(year, 11, day)
+        else:
+            d = date(year, 12, day - 30)
+        if d.weekday() == 6:  # Sunday
+            return d
+    return date(year, 11, 30)
+
+
+def gospel_cycle_letter(date_iso: object) -> str | None:
+    """Cycle A/B/C du lectionnaire dominical (année de Noël de l’année liturgique)."""
+    d = date_iso if isinstance(date_iso, date) else _parse_iso_date(date_iso)
+    if d is None:
+        return None
+    advent = _advent_sunday(d.year)
+    christmas_year = d.year if d >= advent else d.year - 1
+    # Advent 2022 → année A ; 2023 → B ; 2024 → C ; 2025 → A…
+    return {0: "A", 1: "B", 2: "C"}.get(christmas_year % 3)
+
+
+def infer_meta_from_evangelizo_title(
+    title: str,
+    *,
+    evangelizo_lang: str,
+    date_iso: str,
+) -> dict[str, str | None]:
+    """
+    Déduit periode / semaine / couleur / annee depuis ``liturgic_t`` (+ cycle A/B/C calendaire).
+
+    Evangelizo ne fournit pas ces champs : on les infère du titre localisé.
+    """
+    t = (title or "").strip()
+    low = t.lower()
+    lang = str(evangelizo_lang or "").strip().upper()
+
+    periode: str | None = None
+    couleur: str | None = None
+    # Détection saison (libellé dans la langue du feed).
+    if any(
+        x in low
+        for x in (
+            "ordinary time",
+            "jahreskreis",
+            "tiempo ordinario",
+            "tempo ordinario",
+            "temps ordinaire",
+        )
+    ):
+        periode = {
+            "DE": "Jahreskreis",
+            "AM": "Ordinary Time",
+            "EN": "Ordinary Time",
+            "SP": "Tiempo Ordinario",
+            "ES": "Tiempo Ordinario",
+            "IT": "Tempo Ordinario",
+            "FR": "Temps Ordinaire",
+        }.get(lang, "Temps Ordinaire")
+        couleur = {
+            "DE": "Grün",
+            "AM": "Green",
+            "EN": "Green",
+            "SP": "Verde",
+            "ES": "Verde",
+            "IT": "Verde",
+            "FR": "Vert",
+        }.get(lang, "Vert")
+    elif any(x in low for x in ("advent", "adventzeit", "adviento", "avvento", "avent")):
+        periode = {
+            "DE": "Advent",
+            "AM": "Advent",
+            "SP": "Adviento",
+            "IT": "Avvento",
+            "FR": "Avent",
+        }.get(lang, "Avent")
+        couleur = {
+            "DE": "Violett",
+            "AM": "Violet",
+            "SP": "Morado",
+            "IT": "Viola",
+            "FR": "Violet",
+        }.get(lang, "Violet")
+    elif any(x in low for x in ("lent", "fastenzeit", "cuaresma", "quaresima", "carême", "careme")):
+        periode = {
+            "DE": "Fastenzeit",
+            "AM": "Lent",
+            "SP": "Cuaresma",
+            "IT": "Quaresima",
+            "FR": "Carême",
+        }.get(lang, "Carême")
+        couleur = {
+            "DE": "Violett",
+            "AM": "Violet",
+            "SP": "Morado",
+            "IT": "Viola",
+            "FR": "Violet",
+        }.get(lang, "Violet")
+    elif any(x in low for x in ("easter", "oster", "pascua", "pasqua", "pâques", "paques")):
+        periode = {
+            "DE": "Osterzeit",
+            "AM": "Easter Time",
+            "SP": "Tiempo Pascual",
+            "IT": "Tempo Pasquale",
+            "FR": "Temps Pascal",
+        }.get(lang, "Temps Pascal")
+        couleur = {
+            "DE": "Weiß",
+            "AM": "White",
+            "SP": "Blanco",
+            "IT": "Bianco",
+            "FR": "Blanc",
+        }.get(lang, "Blanc")
+    elif any(x in low for x in ("christmas", "weihnachten", "navidad", "natale", "noël", "noel")):
+        periode = {
+            "DE": "Weihnachten",
+            "AM": "Christmas",
+            "SP": "Navidad",
+            "IT": "Natale",
+            "FR": "Noël",
+        }.get(lang, "Noël")
+        couleur = {
+            "DE": "Weiß",
+            "AM": "White",
+            "SP": "Blanco",
+            "IT": "Bianco",
+            "FR": "Blanc",
+        }.get(lang, "Blanc")
+
+    semaine: str | None = None
+    m = re.search(
+        r"\b(\d{1,2})\s*[ºªo°.]?\s*(?:sonntag|domingo|domenica|dimanche|sunday)\b",
+        low,
+    )
+    if not m:
+        m = re.search(r"\b(?:sonntag|domingo|domenica|dimanche|sunday)\s+(\d{1,2})\b", low)
+    if m:
+        semaine = m.group(1)
+    if not semaine:
+        m = re.search(r"\b([ivxlc]{1,7})\s+(?:domenica|domingo|dimanche)\b", t, flags=re.I)
+        if m:
+            semaine = str(_ROMAN.get(m.group(1).upper()) or "") or None
+    if not semaine:
+        for word, num in _ORDINAL_EN.items():
+            if word in low:
+                semaine = str(num)
+                break
+
+    return {
+        "periode": periode,
+        "semaine": semaine,
+        "couleur": couleur,
+        "annee": gospel_cycle_letter(date_iso),
+    }
 
 
 def payload_to_identity(
@@ -220,16 +456,31 @@ def payload_to_identity(
     date_iso: str,
     evangelizo_lang: str,
 ) -> AelfDayIdentity:
+    from core.readings_cache_loader import PRODUCT_LANG_TO_RDC_ZONE
+
     title = str(payload.get("liturgic_t") or "").strip()
+    saint = str(payload.get("saint") or "").strip()
+    # Code Reader → langue produit pour zone pays
+    reader_to_product = {"DE": "DE", "AM": "EN", "SP": "ES", "IT": "IT", "FR": "FR"}
+    product = reader_to_product.get(str(evangelizo_lang or "").strip().upper(), "FR")
+    zone = PRODUCT_LANG_TO_RDC_ZONE.get(product) or f"evangelizo_{str(evangelizo_lang).lower()}"
+
+    meta = infer_meta_from_evangelizo_title(
+        title, evangelizo_lang=evangelizo_lang, date_iso=date_iso
+    )
+    # Fête = titre liturgique ; jour = saint du jour si distinct, sinon même titre.
+    fete = title or saint or None
+    jour = saint if saint and saint.lower() != (title or "").lower() else (title or saint or None)
+
     return AelfDayIdentity(
         date=str(date_iso or "")[:10],
-        zone=f"evangelizo_{evangelizo_lang.lower()}",
-        periode=None,
-        semaine=None,
-        annee=None,
-        couleur=None,
-        fete=title or None,
-        jour_liturgique_nom=title or None,
+        zone=zone,
+        periode=meta.get("periode"),
+        semaine=meta.get("semaine"),
+        annee=meta.get("annee"),
+        couleur=meta.get("couleur"),
+        fete=fete,
+        jour_liturgique_nom=jour,
     )
 
 
