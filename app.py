@@ -57,17 +57,10 @@ from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url, t
 from ui.streamlit_caches import (
     adm_feedback_sheet_fetch_cached as _adm_feedback_sheet_fetch_cached,
     cached_aelf,
+    cached_liturgy_day,
     load_prompt_templates_cached as _load_prompt_templates_cached,
     load_voix_rules_cached as _load_voix_rules_cached,
 )
-
-try:
-    from ui.streamlit_caches import cached_liturgy_day
-except ImportError:  # Cloud / déploiement partiel sans le symbole encore
-    def cached_liturgy_day(date_str: str, *, pref_langue: str = "FR"):  # type: ignore[misc]
-        from core.liturgy_day import fetch_liturgy_day
-
-        return fetch_liturgy_day(date_str, pref_langue=pref_langue)
 
 
 from ui.route_dispatch import dispatch_route

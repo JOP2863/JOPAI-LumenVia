@@ -657,8 +657,9 @@ def render_emailing_manual_broadcast(
             try:
                 from core.liturgy_day import coerce_liturgy_pref_langue
                 from core.locale_codes import user_pref_langue
+                from ui.streamlit_caches import cached_liturgy_day
 
-                ident0, _texts0, _sid = ap.cached_liturgy_day(date_str, pref_langue="FR")
+                ident0, _texts0, _sid = cached_liturgy_day(date_str, pref_langue="FR")
             except Exception:
                 try:
                     ident0, _texts0 = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
@@ -722,7 +723,9 @@ def render_emailing_manual_broadcast(
                     ).strip()
                 if urec_lang != "FR":
                     try:
-                        ident_l, _t_l, _s = ap.cached_liturgy_day(date_str, pref_langue=urec_lang)
+                        from ui.streamlit_caches import cached_liturgy_day
+
+                        ident_l, _t_l, _s = cached_liturgy_day(date_str, pref_langue=urec_lang)
                         values2["nom_du_dimanche"] = resolve_email_nom_du_dimanche(
                             identity=ident_l,
                             date_str=date_str,

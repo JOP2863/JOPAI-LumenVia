@@ -106,6 +106,7 @@ def migrate_alias_tables_and_rename(*, gc, gsheet_id: str) -> None:
         "Voix_Audio": "Règles de voix TTS Gemini (synthèse / lectures)",
         "liturgy_illustrations": "Visuels dominicaux (GCS, descriptions / légendes IA ou manuel)",
         "langues_pays": "Référentiel langues (ISO 639-1) et pays (ISO 3166-1) — codes 2 lettres",
+        "audio_ambiance": "Clips d’ambiance TTS (intro / outro / bed) — licences libres",
         "CMPG": "Campagnes d’envoi (scheduler)",
         "RUNS": "Exécutions (scheduler)",
         "RSTN": "Retours / mini-questionnaires post-envoi",

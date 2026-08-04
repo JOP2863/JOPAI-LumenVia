@@ -526,7 +526,9 @@ def render_sunday() -> None:
                         _cached_liturgy_day_raw.clear()
                     except Exception:
                         pass
-                identity, texts, liturgy_source_id = ap.cached_liturgy_day(
+                from ui.streamlit_caches import cached_liturgy_day
+
+                identity, texts, liturgy_source_id = cached_liturgy_day(
                     date_str, pref_langue=pref_langue
                 )
                 st.session_state["_sunday_liturgy_loaded_lang"] = pref_langue

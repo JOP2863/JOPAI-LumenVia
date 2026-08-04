@@ -189,7 +189,9 @@ def render_admin_emailing() -> None:
 
         # Identité liturgique (FR = AELF via facade)
         try:
-            ident0, _texts0, _sid = ap.cached_liturgy_day(date_str, pref_langue="FR")
+            from ui.streamlit_caches import cached_liturgy_day
+
+            ident0, _texts0, _sid = cached_liturgy_day(date_str, pref_langue="FR")
         except Exception:
             try:
                 ident0, _texts0 = ap.cached_aelf(date_str, zone="france", _identity_schema=4)

@@ -23,6 +23,7 @@ from core.sheets_db import (
     SHEETS_ROW_STATUS_INACTIVE,
     append_immutable_row,
     build_gspread_client,
+    ensure_logical_table,
     invalidate_fetch_records_cache,
     open_spreadsheet,
     sheet_row_status_is_live,
@@ -84,15 +85,60 @@ Utiliser **CC0**, **domaine public** ou **CC-BY** (attribution obligatoire dans 
         return
 
     sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+
+    def _load_aamb_rows() -> list[dict]:
+        return adm_sheets_fetch_cached(cfg.gsheet_id, "audio_ambiance", 0, sa_json)
+
+    def _worksheet_missing(exc: BaseException) -> bool:
+        name = type(exc).__name__
+        msg = str(exc or "").strip()
+        if name in ("WorksheetNotFound", "APIError"):
+            return True
+        # gspread lève souvent WorksheetNotFound avec message = titre seul (« AAMB »).
+        if msg in ("AAMB", "audio_ambiance"):
+            return True
+        low = msg.casefold()
+        return "not found" in low or "worksheet" in low and "exist" in low
+
     try:
-        rows = adm_sheets_fetch_cached(cfg.gsheet_id, "audio_ambiance", 0, sa_json)
+        rows = _load_aamb_rows()
     except Exception as ex:
-        st.error(
-            f"Lecture AAMB impossible : {ex}. "
-            "Crée la table via `python tools/init_sheets_db.py` si besoin "
-            "(ajoute aussi la colonne `preferred` si l’onglet existait déjà)."
+        if not _worksheet_missing(ex):
+            st.error(
+                f"Lecture AAMB impossible : {ex}. "
+                "Vérifie la connexion Sheets / le compte de service."
+            )
+            return
+        st.warning(
+            "L’onglet **AAMB** (`audio_ambiance`) n’existe pas encore dans le classeur — "
+            "création automatique (une seule fois)."
         )
-        return
+        ov = loading_overlay("Création de la table AAMB…")
+        try:
+            gs = build_gspread_client(cfg.gcp_service_account)
+            ensure_logical_table(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                logical_name="audio_ambiance",
+                description="Clips d’ambiance TTS (intro / outro / bed) — licences libres",
+            )
+            invalidate_fetch_records_cache(
+                spreadsheet_id=cfg.gsheet_id, table="audio_ambiance"
+            )
+            invalidate_adm_sheets_fetch_cache()
+            rows = _load_aamb_rows()
+            st.success("Table **AAMB** créée — tu peux uploader des clips.")
+        except Exception as ex2:
+            st.error(
+                f"Création AAMB impossible : {ex2}. "
+                "Lance `python tools/init_sheets_db.py` puis réouvre cette page."
+            )
+            if st.button("Réessayer la création AAMB", key="aamb_retry_create"):
+                st.rerun()
+            return
+        finally:
+            ov.empty()
+
     active = list_active_clips(rows)
 
     c1, c2, c3 = st.columns(3)

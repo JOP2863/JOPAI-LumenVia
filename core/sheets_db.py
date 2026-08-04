@@ -1017,6 +1017,68 @@ def ensure_table(
     _ensure_header(ws, table.columns)
 
 
+def ensure_alias_mapping(
+    *,
+    gspread_client: gspread.Client,
+    spreadsheet_id: str,
+    logical_name: str,
+    acronym: str,
+    description: str = "",
+) -> bool:
+    """
+    Ajoute une ligne Actif dans AliasTables si le mapping logique→acronyme manque.
+    Retourne True si une ligne a été ajoutée.
+    """
+    logical = str(logical_name or "").strip()
+    acr = str(acronym or "").strip().upper()
+    if not logical or not acr:
+        return False
+    sh = open_spreadsheet(gspread_client, spreadsheet_id, use_cache=False)
+    try:
+        ws_alias = sh.worksheet("AliasTables")
+    except Exception:
+        return False
+    try:
+        rows = ws_alias.get_all_records(numericise_ignore=["all"])
+    except Exception:
+        rows = []
+    for r in rows:
+        full = _row_cell(r, "Nom Complet Table", "nom_complet_table", "Nom complet table")
+        mapped = _row_cell(r, "Acronyme Table", "acronyme_table", "Acronyme").upper()
+        if full == logical or mapped == acr:
+            return False
+    next_id = 1
+    for r in rows:
+        raw = _row_cell(r, "#ID", "row_id", "ID")
+        if raw.isdigit():
+            next_id = max(next_id, int(raw) + 1)
+    ws_alias.append_row(
+        [str(next_id), "Actif", "1", logical, acr, str(description or "").strip()],
+        value_input_option="RAW",
+    )
+    return True
+
+
+def ensure_logical_table(
+    *,
+    gspread_client: gspread.Client,
+    spreadsheet_id: str,
+    logical_name: str,
+    description: str = "",
+) -> None:
+    """Crée l’onglet (acronyme) + header schéma + entrée AliasTables si besoin."""
+    spec = get_table_spec(logical_name)
+    ensure_table(gspread_client=gspread_client, spreadsheet_id=spreadsheet_id, table=spec)
+    acr = _DEFAULT_TABLE_ACRONYMS.get(logical_name) or logical_name
+    ensure_alias_mapping(
+        gspread_client=gspread_client,
+        spreadsheet_id=spreadsheet_id,
+        logical_name=logical_name,
+        acronym=acr,
+        description=description,
+    )
+
+
 def _column_name_key(name: object) -> str:
     return str(name or "").strip().casefold()
 
