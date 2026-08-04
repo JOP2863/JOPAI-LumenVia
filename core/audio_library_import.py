@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -242,20 +243,46 @@ def _resolve_freesound(page_url: str, *, api_key: str | None) -> tuple[str, str]
     )
 
 
-def download_media_bytes(url: str, *, timeout_s: float = 90.0) -> bytes:
-    r = requests.get(
-        url,
-        headers={"User-Agent": _UA, "Accept": "*/*"},
-        timeout=timeout_s,
-        allow_redirects=True,
-    )
-    r.raise_for_status()
-    data = r.content
-    if not data:
-        raise RuntimeError("Téléchargement vide")
-    if data[:15].lstrip().lower().startswith(b"<!doctype") or data[:6].lower() == b"<html":
-        raise RuntimeError("Réponse HTML au lieu d’un fichier audio")
-    return data
+def download_media_bytes(
+    url: str,
+    *,
+    timeout_s: float = 90.0,
+    max_retries: int = 5,
+) -> bytes:
+    last_err: Exception | None = None
+    for attempt in range(max(1, int(max_retries))):
+        try:
+            r = requests.get(
+                url,
+                headers={"User-Agent": _UA, "Accept": "*/*"},
+                timeout=timeout_s,
+                allow_redirects=True,
+            )
+            if r.status_code == 429:
+                wait_s = min(8.0 * (2**attempt), 60.0)
+                ra = (r.headers or {}).get("Retry-After")
+                try:
+                    if ra:
+                        wait_s = max(wait_s, float(ra))
+                except Exception:
+                    pass
+                time.sleep(wait_s)
+                last_err = requests.HTTPError(f"429 Too Many Requests for {url}")
+                continue
+            r.raise_for_status()
+            data = r.content
+            if not data:
+                raise RuntimeError("Téléchargement vide")
+            if data[:15].lstrip().lower().startswith(b"<!doctype") or data[:6].lower() == b"<html":
+                raise RuntimeError("Réponse HTML au lieu d’un fichier audio")
+            return data
+        except Exception as ex:
+            last_err = ex
+            if attempt < max_retries - 1:
+                time.sleep(min(3.0 * (2**attempt), 30.0))
+                continue
+            break
+    raise RuntimeError(f"Téléchargement échoué : {last_err}")
 
 
 def _find_ffmpeg() -> str | None:
@@ -351,6 +378,8 @@ def import_catalog_to_aamb(
             continue
         try:
             media_url, ext = resolve_download_url(item.url, freesound_api_key=freesound_api_key)
+            # Wikimedia / Freesound : espacer les téléchargements pour limiter les 429.
+            time.sleep(1.5)
             raw = download_media_bytes(media_url)
             need_wav = item.role in ("intro", "outro", "bed")
             try:

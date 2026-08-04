@@ -10,10 +10,11 @@
       "langue": "ALL",
       "duration_hint_s": 6,
       "licence": "CC-BY",
+      "licence_label": "CC-BY 4.0",
       "attribution": "InspectorJ (freesound.org)",
       "url": "https://freesound.org/s/411089/",
       "temps_liturgique": "Neutre",
-      "notes": "Cloche d'église douce (frappe métallique amortie)."
+      "notes": "Cloche d'église douce (frappe métallique amortie). Licence affichée : CC-BY 4.0."
     },
     {
       "id": "warm_organ_resolution",
@@ -23,6 +24,7 @@
       "langue": "ALL",
       "duration_hint_s": 5,
       "licence": "CC0",
+      "licence_label": "CC0",
       "attribution": "",
       "url": "https://freesound.org/s/171521/",
       "temps_liturgique": "Neutre",
@@ -36,10 +38,11 @@
       "langue": "ALL",
       "duration_hint_s": 45,
       "licence": "CC0",
+      "licence_label": "CC0",
       "attribution": "",
       "url": "https://freesound.org/s/411461/",
       "temps_liturgique": "Neutre",
-      "notes": "Nappe neutre sous TTS (~−28 dB)."
+      "notes": "Nappe synthétique/organique ultra-neutre, sans rythme, parfaite sous TTS à -28dB."
     },
     {
       "id": "short_tubular_chime",
@@ -49,10 +52,11 @@
       "langue": "ALL",
       "duration_hint_s": 4,
       "licence": "CC0",
+      "licence_label": "CC0",
       "attribution": "",
       "url": "https://freesound.org/s/108615/",
       "temps_liturgique": "Neutre / Pascal",
-      "notes": "Carillon discret."
+      "notes": "Carillon discret pour capter l'attention sans surprendre."
     },
     {
       "id": "pange_lingua",
@@ -62,10 +66,11 @@
       "langue": "ALL",
       "duration_hint_s": 205,
       "licence": "CC-BY-SA",
+      "licence_label": "CC-BY-SA 3.0 / GFDL",
       "attribution": "Gareth Hughes (Wikimedia Commons)",
       "url": "https://commons.wikimedia.org/wiki/File:Pange_Lingua_Latin_in_Latin.ogg",
       "temps_liturgique": "Carême / Jeudi Saint",
-      "notes": "Chant traditionnel complet en latin."
+      "notes": "Chant traditionnel complet chanté en latin. Licence affichée : CC-BY-SA 3.0 / GFDL."
     },
     {
       "id": "victimae_paschali",
@@ -75,10 +80,11 @@
       "langue": "ALL",
       "duration_hint_s": 102,
       "licence": "domaine_public",
+      "licence_label": "Domaine Public",
       "attribution": "",
       "url": "https://commons.wikimedia.org/wiki/File:Ostersequenz.ogg",
       "temps_liturgique": "Temps Pascal",
-      "notes": "Séquence pascale, voix d'homme."
+      "notes": "Séquence pascale classique, voix d'homme."
     },
     {
       "id": "bach_toccata_bwv565",
@@ -88,10 +94,11 @@
       "langue": "ALL",
       "duration_hint_s": 510,
       "licence": "domaine_public",
+      "licence_label": "Domaine Public",
       "attribution": "",
       "url": "https://commons.wikimedia.org/wiki/File:Toccata_et_Fugue_BWV565.ogg",
       "temps_liturgique": "Temps Ordinaire",
-      "notes": "Grand orgue, version libre de concert."
+      "notes": "Grand orgue, version libre de droits de concert."
     },
     {
       "id": "church_interior_ambience",
@@ -101,10 +108,11 @@
       "langue": "ALL",
       "duration_hint_s": 180,
       "licence": "CC0",
+      "licence_label": "CC0",
       "attribution": "",
       "url": "https://freesound.org/s/42112/",
       "temps_liturgique": "Neutre",
-      "notes": "Silence de nef + résonance."
+      "notes": "Reconstitution du silence de la nef (bruits de fond doux + résonance)."
     },
     {
       "id": "soft_bell_fade_out",
@@ -114,10 +122,11 @@
       "langue": "ALL",
       "duration_hint_s": 7,
       "licence": "CC0",
+      "licence_label": "CC0",
       "attribution": "",
       "url": "https://freesound.org/s/523411/",
       "temps_liturgique": "Neutre",
-      "notes": "Extinction progressive pour clore le TTS."
+      "notes": "Extinction très progressive, idéale pour clore le TTS."
     },
     {
       "id": "rorate_caeli",
@@ -127,10 +136,11 @@
       "langue": "ALL",
       "duration_hint_s": 142,
       "licence": "domaine_public",
+      "licence_label": "CC0 / Domaine Public",
       "attribution": "",
       "url": "https://commons.wikimedia.org/wiki/File:Rorate_Caeli_~_Gregorian_Chant.ogg",
       "temps_liturgique": "Avent",
-      "notes": "Plain-chant pour l'Avent."
+      "notes": "Plain-chant traditionnel pour l'Avent. Licence affichée : CC0 / Domaine Public."
     },
     {
       "id": "soft_contemplative_organ",
@@ -140,10 +150,11 @@
       "langue": "ALL",
       "duration_hint_s": 90,
       "licence": "CC0",
-      "attribution": "",
-      "url": "https://freesound.org/s/612882/",
+      "licence_label": "CC0",
+      "attribution": "musesdelight (freesound.org)",
+      "url": "https://freesound.org/s/188939/",
       "temps_liturgique": "Temps Ordinaire",
-      "notes": "Harmonies douces d'orgue."
+      "notes": "Harmonies douces d'orgue d'église (remplace l'ID Freesound 612882 introuvable)."
     },
     {
       "id": "kyrie_orbis_factor",
@@ -153,6 +164,7 @@
       "langue": "ALL",
       "duration_hint_s": 111,
       "licence": "domaine_public",
+      "licence_label": "Domaine Public",
       "attribution": "",
       "url": "https://commons.wikimedia.org/wiki/File:Kyrie_55,_Vatican_ad_lib._VI,_Cambrai.ogg",
       "temps_liturgique": "Carême / Temps Ordinaire",
