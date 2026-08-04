@@ -37,6 +37,7 @@ _DEFAULT_TABLE_ACRONYMS: dict[str, str] = {
     "Voix_Audio": "VOIX",
     "liturgy_illustrations": "ILUS",
     "langues_pays": "LGP",
+    "audio_ambiance": "AAMB",
 }
 
 # Noms logiques autorisés dans le code applicatif (jamais d’acronyme seul en dur).
@@ -932,6 +933,24 @@ def default_tables() -> list[TableSpec]:
                     "evangile_intro",
                     "evangile_ref",
                     "error",
+                ]
+            ),
+        ),
+        TableSpec(
+            name="audio_ambiance",
+            columns=with_concat(
+                [
+                    *BASE_COLUMNS,
+                    "title",
+                    "role",  # intro | outro | bed
+                    "cible",  # lectures | synthese | both
+                    "langue",  # ALL | FR | DE | EN | ES | IT
+                    "licence",  # CC0 | CC-BY | domaine_public | autre
+                    "attribution",
+                    "gcs_path",
+                    "duration_s",
+                    "preferred",  # oui | (vide) — priorité dans le mix TTS
+                    "notes",
                 ]
             ),
         ),

@@ -502,8 +502,15 @@ def attribution_plain() -> str:
     return "Source: L’Évangile au Quotidien (Evangelizo) — https://levangileauquotidien.org/"
 
 
-def format_xml_url(*, date_iso: str, evangelizo_lang: str) -> str:
+def normalize_evangelizo_reader_lang(evangelizo_lang: object | None) -> str:
+    """Code Reader Evangelizo ; remap défensif ISO produit ``ES``→``SP``, ``EN``→``AM``."""
     lang = str(evangelizo_lang or "").strip().upper()
+    # Filet si un appelant passe encore le code produit au lieu du code Reader.
+    return PRODUCT_LANG_TO_EVANGELIZO.get(lang, lang)
+
+
+def format_xml_url(*, date_iso: str, evangelizo_lang: str) -> str:
+    lang = normalize_evangelizo_reader_lang(evangelizo_lang)
     return (
         f"{EVANGELIZO_READER_URL}"
         f"?date={_date_compact(date_iso)}"
@@ -521,7 +528,7 @@ def fetch_evangelizo_mass(
     """
     Récupère la messe Evangelizo (XML) pour ``date_iso`` et un code langue Reader.
     """
-    lang = str(evangelizo_lang or "").strip().upper()
+    lang = normalize_evangelizo_reader_lang(evangelizo_lang)
     if not lang:
         raise EvangelizoError("Code langue Evangelizo manquant")
     if not skip_horizon_check and not is_within_evangelizo_horizon(date_iso):

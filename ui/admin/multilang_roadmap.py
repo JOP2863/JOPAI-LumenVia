@@ -13,6 +13,8 @@ from core.liturgy_sources_registry import LANG_PRIORITY
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PROGRESS_PATH = _REPO_ROOT / "data" / "multilang_progress.json"
 _UNIVERSALIS_LICENSE_PATH = _REPO_ROOT / "data" / "universalis_license_checklist.json"
+_EVANGELIZO_LICENSE_PATH = _REPO_ROOT / "data" / "evangelizo_license_checklist.json"
+_AUDIO_LICENSE_PATH = _REPO_ROOT / "data" / "audio_ambiance_license_checklist.json"
 
 
 @dataclass(frozen=True)
@@ -66,27 +68,27 @@ MULTILANG_PHASES: tuple[tuple[str, tuple[MultilangStep, ...]], ...] = (
             MultilangStep(
                 "spike_de",
                 "Valider au moins une API DE (textes complets + licence)",
-                "Evangelizo Reader lang=DE — ToS encore à checklist",
+                "Evangelizo Reader lang=DE — production ; canaux larges checklist",
             ),
             MultilangStep(
                 "spike_en",
                 "Valider au moins une API EN (Universalis / USCCB / autre)",
-                "Universalis + Evangelizo AM",
+                "Evangelizo AM = produit ; Universalis = Lab",
             ),
             MultilangStep(
                 "spike_es",
                 "Valider au moins une API ES messe complète",
-                "Evangelizo Reader lang=SP (pas ES)",
+                "Evangelizo Reader lang=SP (pas ES) — production",
             ),
             MultilangStep(
                 "spike_it",
                 "Valider au moins une API IT messe complète",
-                "Evangelizo Reader lang=IT",
+                "Evangelizo Reader lang=IT — production",
             ),
             MultilangStep(
                 "license_checklist",
                 "Checklist licence / ToS par source retenue (web, e-mail, TTS, PDF)",
-                "Universalis fait ; Evangelizo ToS à faire",
+                "Universalis + Evangelizo + ambiances audio (data/*.json)",
             ),
         ),
     ),
@@ -325,10 +327,10 @@ def _multilang_controls_fragment() -> None:
                 st.rerun(scope="fragment")
 
 
-def load_universalis_license() -> dict:
+def _load_json_checklist(path: Path) -> dict:
     try:
-        if _UNIVERSALIS_LICENSE_PATH.is_file():
-            data = json.loads(_UNIVERSALIS_LICENSE_PATH.read_text(encoding="utf-8"))
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 return data
     except Exception:
@@ -336,19 +338,11 @@ def load_universalis_license() -> dict:
     return {}
 
 
-def _render_universalis_license_panel() -> None:
-    data = load_universalis_license()
-    if not data:
-        st.warning("Checklist licence Universalis introuvable (`data/universalis_license_checklist.json`).")
-        return
+def load_universalis_license() -> dict:
+    return _load_json_checklist(_UNIVERSALIS_LICENSE_PATH)
 
-    st.subheader("Licence Universalis — checklist")
-    gate = "fermée" if not data.get("production_gate_open") else "ouverte"
-    st.caption(
-        f"Revue {data.get('reviewed_at') or '—'} · gate production **{gate}** · "
-        f"{data.get('summary_fr') or ''}"
-    )
 
+def _render_license_items_table(data: dict) -> None:
     rows_md = ["| Canal / item | Verdict | Notes |", "|---|---|---|"]
     for it in data.get("items") or []:
         if not isinstance(it, dict):
@@ -358,6 +352,21 @@ def _render_universalis_license_panel() -> None:
             f"{(it.get('notes') or '').replace('|', '/')} |"
         )
     st.markdown("\n".join(rows_md))
+
+
+def _render_universalis_license_panel() -> None:
+    data = load_universalis_license()
+    if not data:
+        st.warning("Checklist licence Universalis introuvable (`data/universalis_license_checklist.json`).")
+        return
+
+    st.subheader("Licence Universalis — checklist (Lab / secours EN)")
+    gate = "fermée" if not data.get("production_gate_open") else "ouverte"
+    st.caption(
+        f"Revue {data.get('reviewed_at') or '—'} · gate production **{gate}** · "
+        f"{data.get('summary_fr') or ''}"
+    )
+    _render_license_items_table(data)
 
     policy = data.get("lumenvia_policy") or {}
     until = policy.get("until_written_permission") or []
@@ -382,9 +391,46 @@ def _render_universalis_license_panel() -> None:
         st.caption("Références : " + " · ".join(str(u) for u in (data.get("sources_consulted") or [])))
 
     st.info(
-        "Checklist **cochée** (analyse faite). Gate production **fermée** jusqu’à réponse éditeur — "
-        "adapter Lab/admin OK ; e-mail / TTS / PDF EN Universalis interdits pour l’instant."
+        "Universalis n’est **pas** la route produit EN (Evangelizo AM l’est). "
+        "Gate Universalis **fermée** pour e-mail / TTS / PDF EN via Universalis."
     )
+
+
+def _render_evangelizo_license_panel() -> None:
+    data = _load_json_checklist(_EVANGELIZO_LICENSE_PATH)
+    if not data:
+        st.warning("Checklist Evangelizo introuvable (`data/evangelizo_license_checklist.json`).")
+        return
+    st.subheader("Licence Evangelizo — checklist (DE / EN / ES / IT)")
+    st.caption(f"Revue {data.get('reviewed_at') or '—'} · {data.get('summary_fr') or ''}")
+    _render_license_items_table(data)
+    stance = str(data.get("product_stance_fr") or "").strip()
+    if stance:
+        st.info(stance)
+    refs = data.get("sources_consulted") or []
+    if refs:
+        st.caption("Références : " + " · ".join(str(u) for u in refs))
+
+
+def _render_audio_ambiance_license_panel() -> None:
+    data = _load_json_checklist(_AUDIO_LICENSE_PATH)
+    if not data:
+        st.warning("Checklist audio introuvable (`data/audio_ambiance_license_checklist.json`).")
+        return
+    st.subheader("Ambiances audio libres de droits — checklist")
+    st.caption(f"Revue {data.get('reviewed_at') or '—'} · {data.get('summary_fr') or ''}")
+    _render_license_items_table(data)
+    banks = data.get("recommended_banks") or []
+    if banks:
+        st.markdown("**Banques recommandées :**")
+        for b in banks:
+            if isinstance(b, dict):
+                st.markdown(
+                    f"- [{b.get('name')}]({b.get('url')}) — {(b.get('notes') or '')}"
+                )
+    stance = str(data.get("product_stance_fr") or "").strip()
+    if stance:
+        st.info(stance)
 
 
 def render_admin_multilang_roadmap() -> None:
@@ -412,14 +458,18 @@ def render_admin_multilang_roadmap() -> None:
         """
 | Livré / en cours | Cible |
 |---|---|
-| Facade + dimanche `pref_langue` (AELF FR / Evangelizo) | Synthèse IA hors FR (prompts) |
-| E-mail : URLs + titre par `pref_langue` destinataire | Templates ETPL multilingues |
-| Admin génération : sélecteur langue + GCS `{LANG}/` | TTS annonces localisées |
-| Checklist Universalis (secours) | Attente réponse (non bloquant) |
-| Evangelizo Lab 7/7 | ToS Evangelizo canaux larges |
+| Facade + dimanche `pref_langue` (AELF FR / Evangelizo) | Templates e-mail localisés |
+| E-mail : URLs + titre par `pref_langue` destinataire | Confirmation écrite Evangelizo canaux larges |
+| Admin génération : sélecteur langue + GCS `{LANG}/` | Attribution CC-BY visible côté auditeur (V2) |
+| Evangelizo = production DE/EN/ES/IT | Universalis reste Lab / secours |
+| Atelier audio (CC0 / DP / CC-BY) | Mix ambiance sur TTS |
         """.strip()
     )
 
+    st.divider()
+    _render_evangelizo_license_panel()
+    st.divider()
+    _render_audio_ambiance_license_panel()
     st.divider()
     _render_universalis_license_panel()
     st.divider()

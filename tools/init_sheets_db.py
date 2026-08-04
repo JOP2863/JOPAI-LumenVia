@@ -48,6 +48,7 @@ def _suggest_aliases() -> dict[str, str]:
         "Voix_Audio": "VOIX",
         "liturgy_illustrations": "ILUS",
         "langues_pays": "LGP",
+        "audio_ambiance": "AAMB",
         # AliasTables garde son nom long (table maître)
     }
 

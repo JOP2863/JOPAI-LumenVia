@@ -21,12 +21,17 @@ from core.pdf_locale import about_markdown_for_lang, pdf_cover_date_line, pdf_co
 from core.aelf_reading_meta import pdf_liturgy_reading_kwargs
 from core.readings_cache_loader import (
     load_liturgy_from_readings_cache,
+    rdc_zone_aliases_for_pref_langue,
     rdc_zone_for_pref_langue,
     readings_cache_row_from_texts,
 )
 from core.sheets_db import append_immutable_row, build_gspread_client, utc_now_iso
 from core.storage import download_bytes, upload_bytes, upload_text
-from core.local_aelf_cache import load_aelf_snapshot, persist_aelf_snapshot
+from core.local_aelf_cache import (
+    load_aelf_snapshot,
+    load_aelf_snapshot_for_zones,
+    persist_aelf_snapshot,
+)
 from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
 from core.liturgy_theme import inject_liturgical_accent_style, liturgical_accent_hex
 from core.gcs_signed_urls import gcs_signed_url
@@ -193,8 +198,9 @@ def _lookup_sunday_audio_voices(
 
 def render_sunday() -> None:
     import app as ap
+    from core.sunday_view_locale import lang_flag
+
     st.title("La Lumière du Dimanche")
-    zone = "france"
     cfg = load_config()
 
     def _normalize_aelf_text_for_cache(s: str | None) -> str:
@@ -251,6 +257,58 @@ def render_sunday() -> None:
         "Sélectionnez une date au calendrier pour préparer ou revivre la synthèse illustrée du dimanche correspondant.",
         value=default,
     )
+    chosen = _sunday_of_week(chosen_any)
+    if chosen_any != chosen:
+        d_fr = html_escape(ap._french_day_month_year(chosen.isoformat()))
+        st.caption(f"Le dimanche **{d_fr}**")
+    date_str = chosen.isoformat()
+
+    account_pref = coerce_liturgy_pref_langue(st.session_state.get("pref_langue"))
+    _lang_opts = list(supported_liturgy_langs())
+    _lang_labels = {
+        "FR": f"{lang_flag('FR')} FR — français (AELF)",
+        "DE": f"{lang_flag('DE')} DE — Deutsch (Evangelizo)",
+        "EN": f"{lang_flag('EN')} EN — English (Evangelizo)",
+        "ES": f"{lang_flag('ES')} ES — español (Evangelizo)",
+        "IT": f"{lang_flag('IT')} IT — italiano (Evangelizo)",
+    }
+    if "sunday_view_pref_langue" not in st.session_state:
+        st.session_state["sunday_view_pref_langue"] = account_pref
+    elif st.session_state.get("sunday_view_pref_langue") not in _lang_opts:
+        st.session_state["sunday_view_pref_langue"] = account_pref
+    pref_langue = st.selectbox(
+        "Langue des lectures",
+        options=_lang_opts,
+        format_func=lambda lg: _lang_labels.get(lg, lg),
+        key="sunday_view_pref_langue",
+        help=(
+            "Les lectures s’affichent dans cette langue : cache Sheets (RDC) d’abord, "
+            "sinon récupération à la volée (AELF pour FR, Evangelizo pour les autres) puis écriture RDC. "
+            "Défaut : préférence du compte (FR)."
+        ),
+    )
+    pref_langue = coerce_liturgy_pref_langue(pref_langue)
+    zone = rdc_zone_for_pref_langue(pref_langue)
+    st.caption(f"{lang_flag(pref_langue)} Zone liturgique : **{zone}** · lectures en **{pref_langue}**")
+    if pref_langue != "FR":
+        from core.evangelizo import (
+            EVANGELIZO_HORIZON_DAYS,
+            evangelizo_horizon_bounds,
+            is_within_evangelizo_horizon,
+        )
+
+        if is_within_evangelizo_horizon(date_str):
+            st.caption(
+                f"Hors FR : Evangelizo à la volée (fenêtre ±{EVANGELIZO_HORIZON_DAYS} j) "
+                "si absent du cache RDC — puis écriture RDC automatique."
+            )
+        else:
+            lo, hi = evangelizo_horizon_bounds()
+            st.warning(
+                f"Date hors fenêtre Evangelizo (±{EVANGELIZO_HORIZON_DAYS} j : "
+                f"{lo.isoformat()} → {hi.isoformat()}). "
+                "Sans ligne RDC déjà préchargée pour cette langue, les lectures ne pourront pas être récupérées."
+            )
 
     @st.cache_data(ttl=900, show_spinner=False, max_entries=48)
     def _month_content_status(
@@ -278,7 +336,7 @@ def render_sunday() -> None:
             bucket_name=bucket_name,
         )
 
-    # Mini-calendrier HTML : dimanches encerclés si contenu déjà présent
+    # Mini-calendrier HTML : dimanches encerclés si contenu déjà présent (zone = langue)
     if cfg.gcp_service_account and cfg.gsheet_id:
         try:
             try:
@@ -334,7 +392,7 @@ def render_sunday() -> None:
             html = f"""
 <div style="margin:0.35rem auto 0.15rem;max-width:min(420px,100%);width:100%;box-sizing:border-box;">
   <div style="text-align:center;color:#6b5918;font-weight:700;margin-bottom:0.25rem;font-size:0.95rem;">
-    Dimanches déjà générés — {mois_fr} {chosen_any.year}
+    {lang_flag(pref_langue)} Dimanches déjà générés — {mois_fr} {chosen_any.year}
   </div>
   <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid rgba(212,175,55,0.30);background:rgba(255,255,255,0.62);padding:0.25rem 0.25rem 0.35rem;">
     <table style="width:100%;min-width:260px;border-collapse:collapse;text-align:center;font-size:0.85rem;table-layout:fixed;">
@@ -366,62 +424,12 @@ def render_sunday() -> None:
 </style>
             """.strip()
             with st.expander(
-                f"Voir les contenus déjà disponibles — {mois_fr} {chosen_any.year}",
+                f"{lang_flag(pref_langue)} Voir les contenus déjà disponibles — {mois_fr} {chosen_any.year}",
                 expanded=bool(qp_open_cal),
             ):
                 st.markdown(html, unsafe_allow_html=True)
         except Exception:
             pass
-    chosen = _sunday_of_week(chosen_any)
-    if chosen_any != chosen:
-        d_fr = html_escape(ap._french_day_month_year(chosen.isoformat()))
-        st.caption(f"Le dimanche **{d_fr}**")
-    date_str = chosen.isoformat()
-
-    account_pref = coerce_liturgy_pref_langue(st.session_state.get("pref_langue"))
-    _lang_opts = list(supported_liturgy_langs())
-    _lang_labels = {
-        "FR": "FR — français (AELF)",
-        "DE": "DE — Deutsch (Evangelizo)",
-        "EN": "EN — English (Evangelizo)",
-        "ES": "ES — español (Evangelizo)",
-        "IT": "IT — italiano (Evangelizo)",
-    }
-    if "sunday_view_pref_langue" not in st.session_state:
-        st.session_state["sunday_view_pref_langue"] = account_pref
-    elif st.session_state.get("sunday_view_pref_langue") not in _lang_opts:
-        st.session_state["sunday_view_pref_langue"] = account_pref
-    pref_langue = st.selectbox(
-        "Langue des lectures",
-        options=_lang_opts,
-        format_func=lambda lg: _lang_labels.get(lg, lg),
-        key="sunday_view_pref_langue",
-        help=(
-            "Les lectures s’affichent dans cette langue : cache Sheets (RDC) d’abord, "
-            "sinon récupération à la volée (AELF pour FR, Evangelizo pour les autres) puis écriture RDC. "
-            "Défaut : préférence du compte (FR)."
-        ),
-    )
-    pref_langue = coerce_liturgy_pref_langue(pref_langue)
-    if pref_langue != "FR":
-        from core.evangelizo import (
-            EVANGELIZO_HORIZON_DAYS,
-            evangelizo_horizon_bounds,
-            is_within_evangelizo_horizon,
-        )
-
-        if is_within_evangelizo_horizon(date_str):
-            st.caption(
-                f"Hors FR : Evangelizo à la volée (fenêtre ±{EVANGELIZO_HORIZON_DAYS} j) "
-                "si absent du cache RDC — puis écriture RDC automatique."
-            )
-        else:
-            lo, hi = evangelizo_horizon_bounds()
-            st.warning(
-                f"Date hors fenêtre Evangelizo (±{EVANGELIZO_HORIZON_DAYS} j : "
-                f"{lo.isoformat()} → {hi.isoformat()}). "
-                "Sans ligne RDC déjà préchargée pour cette langue, les lectures ne pourront pas être récupérées."
-            )
 
     gcs_top: object | None = None
     if cfg.gcp_service_account and cfg.gcs_bucket_name:
@@ -445,7 +453,7 @@ def render_sunday() -> None:
     offline = False
     cached_at = ""
     liturgy_source_id = "aelf_france"
-    rdc_zone = rdc_zone_for_pref_langue(pref_langue)
+    rdc_zone = zone
     load_err: Exception | None = None
 
     def _texts_nonempty(t: object | None) -> bool:
@@ -459,7 +467,6 @@ def render_sunday() -> None:
     def _zone_matches_pref(ident: object | None, *, lg: str, want_zone: str) -> bool:
         if ident is None:
             return False
-        from core.readings_cache_loader import rdc_zone_aliases_for_pref_langue
 
         z = str(getattr(ident, "zone", None) or "").strip().lower()
         aliases = {a.lower() for a in rdc_zone_aliases_for_pref_langue(lg)}
@@ -468,7 +475,7 @@ def render_sunday() -> None:
             return z in ("", "france") or z in aliases
         return z in aliases
 
-    with st.spinner("Récupération des lectures…"):
+    with st.spinner(f"{lang_flag(pref_langue)} Récupération des lectures…"):
         identity = None
         texts = None
         prev_lg_view = st.session_state.get("_sunday_liturgy_loaded_lang")
@@ -535,7 +542,11 @@ def render_sunday() -> None:
                         identity = _dc_replace(identity, zone=rdc_zone)
                     except Exception:
                         pass
-                persist_aelf_snapshot(date_str, snap_zone, identity, texts)
+                # Snapshot local : ne doit jamais faire échouer l’affichage des lectures.
+                try:
+                    persist_aelf_snapshot(date_str, snap_zone, identity, texts)
+                except Exception:
+                    pass
                 if cfg.gcp_service_account and cfg.gsheet_id:
                     try:
                         gs2 = build_gspread_client(cfg.gcp_service_account)
@@ -570,11 +581,11 @@ def render_sunday() -> None:
                         pass
             except Exception as aelf_err:
                 load_err = aelf_err
-                # Snapshot local : même zone / langue uniquement (pas de repli france hors FR).
-                snap_zone = rdc_zone
-                snap = load_aelf_snapshot(date_str, snap_zone)
-                if not snap and pref_langue == "FR":
-                    snap = load_aelf_snapshot(date_str, "france")
+                # Snapshot local : zone canonique + alias (pas de repli france hors FR).
+                snap_zones = [rdc_zone, *rdc_zone_aliases_for_pref_langue(pref_langue)]
+                if pref_langue == "FR":
+                    snap_zones.append("france")
+                snap = load_aelf_snapshot_for_zones(date_str, snap_zones)
                 if not snap:
                     has_published_bundle = False
                     if cfg.gcp_service_account and cfg.gsheet_id:
@@ -595,7 +606,8 @@ def render_sunday() -> None:
                     )
 
                     msg = (
-                        f"Impossible de récupérer les lectures en **{pref_langue}** pour le {date_str}."
+                        f"{lang_flag(pref_langue)} Impossible de récupérer les lectures en "
+                        f"**{pref_langue}** pour le {date_str}."
                     )
                     if pref_langue != "FR" and not is_within_evangelizo_horizon(date_str):
                         lo, hi = evangelizo_horizon_bounds()
@@ -614,9 +626,9 @@ def render_sunday() -> None:
                             "\n\n**Note :** une synthèse / un PDF peut exister sans remplacer les lectures."
                         )
                     st.error(msg)
-                    if st.session_state.get("admin_authenticated") and load_err is not None:
+                    if load_err is not None:
                         st.caption(
-                            f"Détail technique (admin) : {type(load_err).__name__} — {load_err}"
+                            f"Détail : {type(load_err).__name__} — {load_err}"
                         )
                     return
                 identity, texts, cached_at = snap

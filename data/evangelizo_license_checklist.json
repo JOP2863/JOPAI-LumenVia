@@ -1,0 +1,80 @@
+{
+  "schema": "lumenvia.evangelizo_license.v1",
+  "source_id": "evangelizo_reader_feed",
+  "reviewed_at": "2026-08-04",
+  "sources_consulted": [
+    "https://feed.evangelizo.org/",
+    "https://feed.evangelizo.org/v2/reader.php",
+    "https://www.evangelizo.org/",
+    "https://levangileauquotidien.org/"
+  ],
+  "publisher": "Evangelizo / L’Évangile au Quotidien",
+  "summary_fr": "Le Reader Feed v2 est explicitement destiné à afficher les textes Evangelizo sur un site externe (saint, lectures, XML). Copyright Evangelizo.org. Pas de licence open-source des contenus bibliques/liturgiques. Affichage web dans LumenVia = usage aligné avec la doc Reader ; e-mail, TTS et PDF des textes complets hors FR = redistribution élargie → confirmation écrite recommandée avant canaux larges.",
+  "items": [
+    {
+      "id": "web_reader_display",
+      "label": "Afficher les lectures DE/EN/ES/IT dans l’app (Streamlit)",
+      "status": "allowed_with_conditions",
+      "channel": "web",
+      "verdict": "ok_si_attribution",
+      "notes": "Doc Reader : « display daily reading in your website ». Créditer Evangelizo / L’Évangile au Quotidien + lien."
+    },
+    {
+      "id": "attribution",
+      "label": "Crédit visible (page / PDF / e-mail)",
+      "status": "required",
+      "channel": "all",
+      "verdict": "obligatoire",
+      "notes": "Mention source + URL levangileauquotidien.org ou evangelizo.org."
+    },
+    {
+      "id": "rdc_cache",
+      "label": "Cache Sheets RDC (copie serveur pour perf / hors-ligne court)",
+      "status": "allowed_with_conditions",
+      "channel": "infra",
+      "verdict": "ok_si_usage_app",
+      "notes": "Nécessaire au produit (quota, horizon ±30 j). Pas une redistribution publique du cache."
+    },
+    {
+      "id": "email_full_texts",
+      "label": "Inclure les textes complets hors FR dans un e-mail",
+      "status": "needs_written_ok",
+      "channel": "email",
+      "verdict": "à_confirmer",
+      "notes": "Redistribution à des tiers — hors simple affichage site. Contacter Evangelizo avant envoi massif des corps de lectures."
+    },
+    {
+      "id": "tts_audio",
+      "label": "TTS / audio des lectures Evangelizo",
+      "status": "needs_written_ok",
+      "channel": "tts",
+      "verdict": "à_confirmer",
+      "notes": "Œuvre dérivée sonore. Synthèse IA (commentaire) ≠ lecture littérale des textes sources."
+    },
+    {
+      "id": "pdf_export",
+      "label": "PDF fascicule avec textes de lectures hors FR",
+      "status": "needs_written_ok",
+      "channel": "pdf",
+      "verdict": "à_confirmer",
+      "notes": "Impression / téléchargement = reproduction. OK probable avec attribution pour usage personnel app ; mailing PDF = à confirmer."
+    },
+    {
+      "id": "no_house_translation",
+      "label": "Interdiction de « traduire » l’AELF pour simuler DE/EN/ES/IT",
+      "status": "forbidden",
+      "channel": "product",
+      "verdict": "interdit_produit",
+      "notes": "Règle LumenVia : uniquement textes natifs API (Evangelizo ici)."
+    },
+    {
+      "id": "fr_stays_aelf",
+      "label": "FR reste AELF (Evangelizo ne remplace pas le FR)",
+      "status": "required",
+      "channel": "product",
+      "verdict": "règle",
+      "notes": "AELF = production FR."
+    }
+  ],
+  "product_stance_fr": "Usage web + cache RDC : conforme à l’intention du Reader, avec attribution. Canaux e-mail / TTS littéral / PDF mailing hors FR : garder le checklist ouvert jusqu’à OK écrit. La synthèse IA et les ambiances audio libres ne sont pas des textes Evangelizo."
+}

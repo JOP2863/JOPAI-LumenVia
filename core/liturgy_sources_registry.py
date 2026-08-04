@@ -64,62 +64,65 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         id="evangelizo_de",
         label="Evangelizo — Reader Feed DE",
         lang="DE",
-        status="candidate",
+        status="production",
         provides_full_mass_texts=True,
         endpoint_template=(
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=DE"
         ),
         notes=(
             "Route produit DE via core/liturgy_day.py. Adapter : core/evangelizo.py. "
-            "Lab 2026-08 : 7/7 messe OK. Horizon ≈ 30 j. ToS à checklist avant e-mail/TTS/PDF."
+            "Horizon ≈ 30 j. Attribution obligatoire. "
+            "Checklist : data/evangelizo_license_checklist.json."
         ),
         license_note=(
-            "L’Évangile au Quotidien / Evangelizo — Reader destiné à l’affichage web ; "
-            "ToS / redistribution e-mail/TTS/PDF à confirmer avant prod canaux larges."
+            "Reader destiné à l’affichage web externe — OK app + RDC avec crédit. "
+            "E-mail / TTS littéral / PDF mailing : confirmation écrite recommandée."
         ),
     ),
     LiturgySourceSpec(
         id="evangelizo_en_am",
         label="Evangelizo — Reader Feed EN (AM)",
         lang="EN",
-        status="candidate",
+        status="production",
         provides_full_mass_texts=True,
         endpoint_template=(
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=AM"
         ),
         notes=(
-            "Route produit EN (code Reader AM). Lab 2026-08 : 7/7 messe OK. "
-            "Remplace Universalis comme source câblée. Horizon ≈ 30 j."
+            "Route produit EN (code Reader AM). Remplace Universalis comme source câblée. "
+            "Checklist : data/evangelizo_license_checklist.json."
         ),
-        license_note="Idem Evangelizo — valider ToS avant e-mail / TTS / PDF larges.",
+        license_note="Idem Evangelizo — affichage web OK avec attribution ; canaux larges à confirmer.",
     ),
     LiturgySourceSpec(
         id="evangelizo_es_sp",
         label="Evangelizo — Reader Feed ES (SP)",
         lang="ES",
-        status="candidate",
+        status="production",
         provides_full_mass_texts=True,
         endpoint_template=(
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=SP"
         ),
         notes=(
-            "Route produit ES (code Reader SP). Lab 2026-08 : 7/7. Adapter : core/evangelizo.py."
+            "Route produit ES (code Reader SP, pas ES). Adapter : core/evangelizo.py. "
+            "Checklist : data/evangelizo_license_checklist.json."
         ),
-        license_note="Idem Evangelizo — valider ToS avant e-mail / TTS / PDF larges.",
+        license_note="Idem Evangelizo — affichage web OK avec attribution ; canaux larges à confirmer.",
     ),
     LiturgySourceSpec(
         id="evangelizo_it",
         label="Evangelizo — Reader Feed IT",
         lang="IT",
-        status="candidate",
+        status="production",
         provides_full_mass_texts=True,
         endpoint_template=(
             "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=IT"
         ),
         notes=(
-            "Route produit IT. Lab 2026-08 : 7/7. Adapter : core/evangelizo.py."
+            "Route produit IT. Adapter : core/evangelizo.py. "
+            "Checklist : data/evangelizo_license_checklist.json."
         ),
-        license_note="Idem Evangelizo — valider ToS avant e-mail / TTS / PDF larges.",
+        license_note="Idem Evangelizo — affichage web OK avec attribution ; canaux larges à confirmer.",
     ),
     LiturgySourceSpec(
         id="usccb_readings",

@@ -147,7 +147,7 @@ def cached_aelf(date_str: str, zone: str = "france", *, _identity_schema: int = 
 
 
 @st.cache_data(show_spinner=False, ttl=900)
-def _cached_liturgy_day_raw(date_str: str, pref_langue: str, *, _schema: int = 2) -> tuple[dict, dict, str]:
+def _cached_liturgy_day_raw(date_str: str, pref_langue: str, *, _schema: int = 3) -> tuple[dict, dict, str]:
     """FR=AELF, DE/EN/ES/IT=Evangelizo — cache Streamlit (TTL 15 min).
 
     ``_schema`` : bumper pour invalider un cache après changement de mapping zone/identité.
@@ -165,6 +165,6 @@ def cached_liturgy_day(
 ) -> tuple[AelfDayIdentity, AelfTexts, str]:
     """Lectures du jour selon ``pref_langue`` (pas de traduction maison)."""
     lg = str(pref_langue or "FR").strip().upper() or "FR"
-    id_d, txt_d, source_id = _cached_liturgy_day_raw(date_str, lg, _schema=2)
+    id_d, txt_d, source_id = _cached_liturgy_day_raw(date_str, lg, _schema=3)
     return AelfDayIdentity(**id_d), AelfTexts(**txt_d), source_id
 

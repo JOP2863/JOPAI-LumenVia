@@ -51,7 +51,21 @@ def render_about() -> None:
         )
     if rest.strip():
         st.markdown(rest.strip())
-    st.subheader("Référence")
+    st.subheader("Références & sources")
     st.markdown(
-        'Source liturgique : [AELF](https://api.aelf.org/) (Association Épiscopale Liturgique pour les pays Francophones).'
+        """
+**Lectures liturgiques**
+
+| Langue | Source | Usage LumenVia |
+|--------|--------|----------------|
+| **FR** | [AELF](https://api.aelf.org/) (Association Épiscopale Liturgique pour les pays Francophones) | Source de production — textes de la messe via l’API publique (pas de clé). |
+| **DE / EN / ES / IT** | [Evangelizo — Reader Feed](https://feed.evangelizo.org/v2/reader.php) (*L’Évangile au Quotidien*) | Complément multi-langues : textes natifs complets (pas de traduction maison depuis l’AELF). Affichage dans l’app + cache RDC ; redistribution e-mail / TTS / PDF des textes hors FR soumise à confirmation des conditions Evangelizo. |
+
+**Audios**
+
+- **Voix** : synthèse vocale Google (Vertex / Gemini TTS) — lecture des textes déjà disponibles.
+- **Ambiance** (intro / outro / fond) : clips **libres de droits** déposés par l’équipe dans l’Atelier audio — licences **CC0**, **domaine public** ou **CC-BY** (attribution). Aucune musique commerciale non licenciée.
+
+Les illustrations et contenus générés par IA sont des aides à la méditation ; les textes liturgiques restent ceux des sources ci-dessus.
+        """.strip()
     )

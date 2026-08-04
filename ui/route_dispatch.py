@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.admin.accounts import render_admin_accounts
+from ui.admin.audio_atelier import render_admin_audio_atelier
 from ui.admin.cahier_charges import render_admin_cahier_charges
 from ui.admin.emailing import render_admin_emailing
 from ui.admin.feedback_insights import render_admin_feedback_insights
@@ -63,6 +64,14 @@ def dispatch_route(route: str) -> None:
                 st.rerun()
         else:
             render_admin_thumbs()
+    elif route == "admin_audio_atelier":
+        if not st.session_state.get("admin_authenticated"):
+            st.warning("Accès réservé — identifie-toi avec le compte administrateur.")
+            if st.button("Aller à la connexion admin", key="goto_admin_login_audio_atelier"):
+                st.session_state.route = "admin_login"
+                st.rerun()
+        else:
+            render_admin_audio_atelier()
     elif route == "admin_resources":
         if not st.session_state.get("admin_authenticated"):
             st.warning("Accès réservé — identifie-toi avec le compte administrateur.")

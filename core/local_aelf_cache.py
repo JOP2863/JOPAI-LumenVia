@@ -16,14 +16,20 @@ def _snapshot_path(date_str: str, zone: str) -> Path:
     return _CACHE_ROOT / f"aelf_{date_str}_{safe_zone}.json"
 
 
-def persist_aelf_snapshot(date_str: str, zone: str, identity: AelfDayIdentity, texts: AelfTexts) -> None:
-    p = _snapshot_path(date_str, zone)
+def persist_aelf_snapshot(date_str: str, zone: str, identity: AelfDayIdentity, texts: AelfTexts) -> bool:
+    """Écrit le snapshot local. Retourne False si le disque refuse (Cloud read-only, etc.)."""
     payload = {
         "cached_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "identity": asdict(identity),
         "texts": asdict(texts),
     }
-    p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    raw = json.dumps(payload, ensure_ascii=False)
+    try:
+        p = _snapshot_path(date_str, zone)
+        p.write_text(raw, encoding="utf-8")
+        return True
+    except OSError:
+        return False
 
 
 def load_aelf_snapshot(date_str: str, zone: str) -> tuple[AelfDayIdentity, AelfTexts, str] | None:
@@ -40,3 +46,19 @@ def load_aelf_snapshot(date_str: str, zone: str) -> tuple[AelfDayIdentity, AelfT
         return identity, texts, cached_at
     except Exception:
         return None
+
+
+def load_aelf_snapshot_for_zones(
+    date_str: str, zones: list[str] | tuple[str, ...]
+) -> tuple[AelfDayIdentity, AelfTexts, str] | None:
+    """Charge le premier snapshot trouvé parmi ``zones`` (canonique puis alias)."""
+    seen: set[str] = set()
+    for z in zones:
+        key = str(z or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        snap = load_aelf_snapshot(date_str, key)
+        if snap:
+            return snap
+    return None

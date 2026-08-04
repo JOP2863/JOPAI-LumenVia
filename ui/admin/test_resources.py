@@ -91,13 +91,13 @@ def _render_admin_ai_pipeline_matrix() -> None:
 |---|---|---|---|
 | **Synthèse (texte)** | Oui | **Vertex AI** (GCP) | `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-pro-latest`… — prompt = lectures AELF + `Paramètres_IA` |
 | **Audio de la synthèse** | Oui (TTS) | **Vertex TTS** → repli **API Gemini** | `gemini-2.5-flash-preview-tts`… — lit le texte de la synthèse (pas les consignes `audio_style_*`) |
-| **Lectures (texte)** | Non | **API AELF** / cache **`readings_cache`** (RDC) | Textes officiels du lectionnaire — pas de réécriture LLM |
+| **Lectures (texte)** | Non | **AELF** (FR) / **Evangelizo** (DE·EN·ES·IT) + cache **`readings_cache`** (RDC) | Textes officiels du lectionnaire — pas de réécriture LLM ni traduction maison |
 | **Audio des lectures** | Oui (TTS seul) | **Vertex TTS** → repli **API Gemini** | Même moteurs que la synthèse ; texte découpé par section liturgique (1re lecture, Psaume, Évangile…) |
 | **PDF du dimanche** | Non (assemblage) | **ReportLab** (Python) | Mise en page : illustration + lectures + synthèse + liens audio |
 | **Illustration (couverture)** | Oui *(à part)* | **Vertex** (image) | Générée sur la page admin illustrations, puis intégrée au PDF |
 
 Seuls la **synthèse écrite**, les **deux audios (TTS)** et éventuellement **l’illustration** passent par une IA.
-Les **lectures textuelles** viennent de l’**AELF** ; le **PDF** est un **montage** de contenus déjà produits.
+Les **lectures textuelles** viennent de l’**AELF** (FR) ou d’**Evangelizo** (autres langues) ; le **PDF** est un **montage** de contenus déjà produits.
 """
     )
     st.markdown("#### Stratégie audio (TTS) — Vertex ou API Gemini ?")
@@ -245,7 +245,12 @@ def _render_admin_infra_diagnostic(*, cfg: object) -> None:
             st.markdown("**AliasTables — tables métier**")
             alias_issues = audit_alias_tables(sh=sh)
             if not alias_issues:
-                st.success("AliasTables OK — 23 tables logiques résolues vers leurs acronymes.")
+                from core.sheets_db import KNOWN_LOGICAL_TABLES
+
+                st.success(
+                    f"AliasTables OK — {len(KNOWN_LOGICAL_TABLES)} tables logiques "
+                    "résolues vers leurs acronymes."
+                )
             else:
                 err_n = sum(1 for i in alias_issues if i.severity == "error")
                 warn_n = len(alias_issues) - err_n

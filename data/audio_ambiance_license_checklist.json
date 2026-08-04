@@ -1,0 +1,62 @@
+{
+  "schema": "lumenvia.audio_ambiance_license.v1",
+  "reviewed_at": "2026-08-04",
+  "summary_fr": "Les clips d’ambiance (intro / outro / bed) sont curatés manuellement dans l’Atelier audio. Seules les licences CC0, domaine public et CC-BY (avec attribution) sont acceptées en V1. Pas de musique commerciale, pas de « free for personal use only », pas de scraping de messes enregistrées sous droits d’auteur.",
+  "accepted_licenses": ["CC0", "domaine_public", "CC-BY"],
+  "rejected_in_v1": ["autre", "CC-BY-NC", "tous_droits_reserves", "licence_commerciale"],
+  "recommended_banks": [
+    {
+      "name": "Freesound",
+      "url": "https://freesound.org/",
+      "notes": "Filtrer explicitement CC0 ; vérifier chaque fiche avant upload."
+    },
+    {
+      "name": "Pixabay Music",
+      "url": "https://pixabay.com/music/",
+      "notes": "Contenu sous licence Pixabay Content License — vérifier usage commercial / attribution selon fiche."
+    },
+    {
+      "name": "Musopen",
+      "url": "https://musopen.org/",
+      "notes": "Enregistrements / partitions souvent domaine public ; vérifier la fiche."
+    },
+    {
+      "name": "CPDL",
+      "url": "https://www.cpdl.org/",
+      "notes": "Partitions / enregistrements sous licences variées (souvent libres) — lire la licence de chaque œuvre."
+    }
+  ],
+  "items": [
+    {
+      "id": "upload_curated_only",
+      "label": "Dépôt manuel admin uniquement (pas de scrape auto)",
+      "verdict": "obligatoire",
+      "notes": "Atelier audio V1 = bibliothèque curatée GCS + AAMB."
+    },
+    {
+      "id": "cc0_ok",
+      "label": "CC0 / domaine public dans TTS lectures + synthèse",
+      "verdict": "ok",
+      "notes": "Pas d’attribution obligatoire ; conserver la source dans le champ notes/attribution pour traçabilité."
+    },
+    {
+      "id": "cc_by_ok",
+      "label": "CC-BY avec attribution renseignée",
+      "verdict": "ok_si_attribution",
+      "notes": "Champ attribution obligatoire à l’upload ; idéalement exposer l’attribution côté auditeur (V2)."
+    },
+    {
+      "id": "no_commercial_unlicensed",
+      "label": "Interdiction musique commerciale non licenciée",
+      "verdict": "interdit",
+      "notes": "Y compris « free download » sans licence claire."
+    },
+    {
+      "id": "deactivate_not_delete",
+      "label": "Retrait = Inactif (traçabilité)",
+      "verdict": "règle_v1",
+      "notes": "Fichier GCS conservé ; plus mixé une fois Inactif."
+    }
+  ],
+  "product_stance_fr": "Les ambiances TTS sont utilisables en prod dès lors que chaque clip actif a une licence sûre documentée dans AAMB. Refuser « autre » sans preuve écrite."
+}

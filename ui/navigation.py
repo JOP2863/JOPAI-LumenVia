@@ -10,24 +10,26 @@ from ui.reading_comfort import inject_reading_comfort_css, render_reading_comfor
 
 
 # Pages Administration (sans « Quitter administration » ni toggle) — même ordre que la grille bureau.
+# label : icône discrète + libellé multi-lignes.
 _ADMIN_PAGES: tuple[tuple[str, str, str], ...] = (
-    ("step3", "Visuels\nliturgiques", "admin_step3"),
-    ("thumbs", "Vignettes\nCloud", "admin_thumbs"),
-    ("vision", "Texte\nimages", "admin_vision"),
-    ("readings_cache", "Cache\nlectures", "admin_readings_cache"),
-    ("lab_ml", "Lab\nlectures", "admin_liturgy_lab"),
-    ("ml_suivi", "Suivi\nmulti-langues", "admin_multilang_roadmap"),
-    ("accounts", "Comptes\ninscrits", "admin_accounts"),
-    ("emailing", "Emailing", "admin_emailing"),
-    ("feedback_ai", "Sondage\nsynthèse", "admin_feedback_insights"),
-    ("scheduler", "Planificateur", "admin_scheduler"),
-    ("res", "Test\nressources", "admin_resources"),
-    ("cdc", "Cahier\ndes\ncharges", "admin_cdc"),
-    ("plan", "Plan\nconsolidé", "admin_plan"),
-    ("refactor", "Refactor\ncode", "admin_refactor"),
-    ("recette", "Recette\ncontinue", "admin_recette_continue"),
-    ("granularity", "Radar\ngranularité", "admin_granularity"),
-    ("mobile_sim", "Simulateur\nmobile", "admin_mobile_sim"),
+    ("step3", "🖼️ Visuels\nliturgiques", "admin_step3"),
+    ("thumbs", "📷 Vignettes\nCloud", "admin_thumbs"),
+    ("vision", "🔤 Texte\nimages", "admin_vision"),
+    ("readings_cache", "📖 Cache\nlectures", "admin_readings_cache"),
+    ("audio_atelier", "🎵 Atelier\naudio", "admin_audio_atelier"),
+    ("lab_ml", "🧪 Lab\nlectures", "admin_liturgy_lab"),
+    ("ml_suivi", "🌐 Suivi\nmulti-langues", "admin_multilang_roadmap"),
+    ("accounts", "👤 Comptes\ninscrits", "admin_accounts"),
+    ("emailing", "✉️ Emailing", "admin_emailing"),
+    ("feedback_ai", "💬 Sondage\nsynthèse", "admin_feedback_insights"),
+    ("scheduler", "🗓️ Planificateur", "admin_scheduler"),
+    ("res", "🧰 Test\nressources", "admin_resources"),
+    ("cdc", "📋 Cahier\ndes\ncharges", "admin_cdc"),
+    ("plan", "🗺️ Plan\nconsolidé", "admin_plan"),
+    ("refactor", "🧩 Refactor\ncode", "admin_refactor"),
+    ("recette", "✅ Recette\ncontinue", "admin_recette_continue"),
+    ("granularity", "📡 Radar\ngranularité", "admin_granularity"),
+    ("mobile_sim", "📱 Simulateur\nmobile", "admin_mobile_sim"),
 )
 
 def _admin_pages_for_device() -> list[tuple[str, str, str]]:

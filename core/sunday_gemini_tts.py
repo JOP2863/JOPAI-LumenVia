@@ -673,6 +673,8 @@ def tts_spoken_audio_bytes(
     sunday_date: date | None = None,
     cible: str = "synthese",
     french_accent: str | None = None,
+    pref_langue: str | None = None,
+    apply_ambiance: bool = True,
 ) -> tuple[bytes, str, str]:
     """
     TTS morcelé (Vertex puis repli Gemini API) pour synthèse ou lectures.
@@ -681,6 +683,7 @@ def tts_spoken_audio_bytes(
     la synthèse provoquait des timeouts silencieux (plusieurs minutes sans fichier Audio/).
     ``french_accent`` : consigne d'accent francophone (sinon rotation déterministe
     dimanche + cible + voix).
+    ``apply_ambiance`` : intro/outro/bed depuis la bibliothèque AAMB si clips actifs.
     """
     if voice_name is None or not str(voice_name).strip():
         voice_name = DEFAULT_GEMINI_TTS_VOICE
@@ -737,7 +740,66 @@ def tts_spoken_audio_bytes(
         route = "gemini_api"
     _set_last_tts_route(route)
     b_out, mime_out, ext_out = normalize_audio_bytes(audio_bytes=joined, mime_type="audio/wav")
+    if apply_ambiance and mime_out == "audio/wav" and b_out[:4] == b"RIFF":
+        try:
+            b_out = _maybe_dress_with_ambiance(
+                b_out,
+                cfg=cfg,
+                cible=cible,
+                pref_langue=pref_langue,
+                sunday_date=sunday_date,
+            )
+        except Exception:
+            pass
     return b_out, mime_out, ext_out
+
+
+def _maybe_dress_with_ambiance(
+    speech_wav: bytes,
+    *,
+    cfg: object,
+    cible: str,
+    pref_langue: str | None,
+    sunday_date: date | None,
+) -> bytes:
+    from core.audio_ambiance import dress_tts_with_library, list_active_clips
+    from core.gcp_clients import build_gcs_client
+    from core.sheets_db import build_gspread_client, fetch_records
+
+    sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
+    sa = getattr(cfg, "gcp_service_account", None) or {}
+    if not sid or not bucket or not sa:
+        return speech_wav
+    try:
+        gs = build_gspread_client(sa)
+        rows = fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=sid,
+            table="audio_ambiance",
+            limit=0,
+            use_cache=True,
+        )
+    except Exception:
+        return speech_wav
+    clips = list_active_clips(rows)
+    if not clips:
+        return speech_wav
+    try:
+        gcs = build_gcs_client(sa)
+    except Exception:
+        return speech_wav
+    seed = f"{sunday_date.isoformat() if sunday_date else ''}|{cible}|{pref_langue or 'FR'}"
+    dressed, _meta = dress_tts_with_library(
+        speech_wav,
+        gcs=gcs,
+        bucket_name=bucket,
+        clips=clips,
+        cible=("lectures" if str(cible).lower().startswith("lect") else "synthese"),
+        pref_langue=str(pref_langue or "FR"),
+        seed=seed,
+    )
+    return dressed
 
 
 def tts_readings_audio_bytes(
@@ -749,6 +811,8 @@ def tts_readings_audio_bytes(
     gemini_api_key: str | None = None,
     sunday_date: date | None = None,
     french_accent: str | None = None,
+    pref_langue: str | None = None,
+    apply_ambiance: bool = True,
 ) -> tuple[bytes, str, str]:
     """Audio des lectures intégrales (découpage liturgique + pauses entre sections)."""
     return tts_spoken_audio_bytes(
@@ -760,6 +824,8 @@ def tts_readings_audio_bytes(
         sunday_date=sunday_date,
         cible="lectures",
         french_accent=french_accent,
+        pref_langue=pref_langue,
+        apply_ambiance=apply_ambiance,
     )
 
 

@@ -276,18 +276,33 @@ div[class*="wrap_active"] button {
     </tr>
     <tr>
       <td><strong>Multi-langues — lectures natives (pas de traduction maison)</strong></td>
-      <td><span class="lv-st-partiel">En cours</span></td>
+      <td><span class="lv-st-partiel">Livré v1</span></td>
       <td>
         Règle produit : uniquement des API qui livrent les <strong>textes complets</strong> de la messe dans la langue
         (pas de traduction IA/maison à partir de l’AELF ; exclus : évangile-seul, calendrier-seul / Romcal).
         Priorité langues : <strong>FR → DE → EN → ES → IT</strong>.
         Socle : <code>pref_langue</code> + LGP + chemins GCS <code>&#123;LANG&#125;/</code>.
         <strong>FR</strong> : AELF production (non remplacé).
-        <strong>DE / EN / ES / IT</strong> : Evangelizo via <code>cached_liturgy_day</code> —
-        page Dimanche + admin génération (sélecteur langue) + e-mail (URLs / titre par destinataire).
-        Universalis = Lab / secours. Templates e-mail encore FR.
-        Lab : <code>?route=admin_liturgy_lab</code> ; suivi : <code>admin_multilang_roadmap</code>.
-        Reste : ToS Evangelizo (e-mail/TTS/PDF larges) + templates e-mail localisés.
+        <strong>DE / EN / ES / IT</strong> : Evangelizo Reader Feed (<code>cached_liturgy_day</code>) —
+        page Dimanche (sélecteur + drapeaux) + admin génération + écriture RDC automatique ;
+        codes Reader : DE / AM (EN) / SP (ES) / IT ; horizon ±30&nbsp;j.
+        Universalis = Lab / secours (pas la route produit EN).
+        Checklist licences : <code>data/evangelizo_license_checklist.json</code> + Universalis.
+        Reste : confirmation écrite Evangelizo pour e-mail/TTS/PDF larges + templates e-mail localisés.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Atelier audio — ambiance TTS (intro / outro / bed)</strong></td>
+      <td><span class="lv-st-ok">Livré v1</span></td>
+      <td>
+        Tuile admin <strong>Atelier audio</strong> (<code>admin_audio_atelier</code>) : upload WAV → GCS <code>Audio/ambiance/</code>
+        + table <code>audio_ambiance</code> (<strong>AAMB</strong>).
+        Mix automatique à la génération TTS (lectures / synthèse) : intro → voix (± bed bas) → outro.
+        Choix : clips <strong>actifs</strong> filtrés par cible/langue ; bouton <strong>Mettre en priorité</strong> ;
+        retrait = statut <strong>Inactif</strong> (pas d’effacement GCS).
+        Licences acceptées : <strong>CC0</strong> / <strong>domaine public</strong> / <strong>CC-BY</strong> (attribution).
+        Checklist : <code>data/audio_ambiance_license_checklist.json</code>.
+        Reste V2 : formats hors WAV, preview du mix complet, attribution visible côté auditeur.
       </td>
     </tr>
     <tr>
