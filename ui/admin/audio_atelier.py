@@ -209,7 +209,116 @@ Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
     with c3:
         st.metric("Prioritaires", sum(1 for c in active if c.preferred))
 
-    st.subheader("Ajouter un clip")
+    st.subheader("Importer le catalogue curaté (12 pistes)")
+    from core.audio_library_import import (
+        load_seed_catalog,
+        import_catalog_to_aamb,
+        report_to_markdown,
+    )
+    import shutil
+
+    cat = load_seed_catalog()
+    st.caption(
+        f"Catalogue `data/audio_seed_catalog_v1.json` — **{len(cat)}** pistes "
+        "(intros / outros / beds + chants d’écoute). "
+        "Téléchargement → conversion WAV (ffmpeg) → GCS → AAMB. Idempotent (saute les déjà présents)."
+    )
+    ffmpeg_ok = bool(shutil.which("ffmpeg"))
+    if not ffmpeg_ok:
+        try:
+            from core.audio_library_import import _find_ffmpeg
+
+            ffmpeg_ok = bool(_find_ffmpeg())
+        except Exception:
+            ffmpeg_ok = False
+    if not ffmpeg_ok:
+        st.warning(
+            "**ffmpeg** non détecté : les intros/outros/beds (MP3/OGG) échoueront à la conversion. "
+            "Installe ffmpeg puis **redémarre Streamlit**. "
+            "Les chants d’écoute Wikimedia peuvent être stockés en OGG sans conversion."
+        )
+    force_reimport = st.checkbox(
+        "Forcer le ré-import (même si déjà Actif)",
+        value=False,
+        key="aamb_force_seed",
+    )
+    if st.button(
+        "Lancer l’import de la bibliothèque",
+        type="primary",
+        key="aamb_run_seed_import",
+    ):
+        ov = loading_overlay("Import bibliothèque audio…")
+        status_box = st.empty()
+        try:
+            # Assure colonnes source_url / preferred
+            gs = build_gspread_client(cfg.gcp_service_account)
+            ensure_logical_table(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                logical_name="audio_ambiance",
+                description="Clips d’ambiance TTS + écoute — licences libres",
+            )
+            gcs = build_gcs_client(cfg.gcp_service_account)
+            fs_key = ""
+            try:
+                fs_key = str(st.secrets.get("FREESOUND_API_KEY") or "").strip()
+            except Exception:
+                fs_key = ""
+
+            def _prog(msg: str) -> None:
+                status_box.caption(msg)
+
+            report = import_catalog_to_aamb(
+                gs=gs,
+                gcs=gcs,
+                spreadsheet_id=cfg.gsheet_id,
+                bucket_name=cfg.gcs_bucket_name,
+                existing_rows=rows,
+                freesound_api_key=fs_key or None,
+                force=bool(force_reimport),
+                progress=_prog,
+            )
+            invalidate_fetch_records_cache(
+                spreadsheet_id=cfg.gsheet_id, table="audio_ambiance"
+            )
+            invalidate_adm_sheets_fetch_cache()
+            st.session_state["aamb_last_import_report_md"] = report_to_markdown(report)
+            st.session_state["aamb_last_import_summary"] = (
+                report.ok_count,
+                report.skip_count,
+                report.error_count,
+            )
+            if report.error_count:
+                st.warning(
+                    f"Import terminé avec erreurs : OK {report.ok_count} · "
+                    f"ignorés {report.skip_count} · erreurs {report.error_count}."
+                )
+            else:
+                st.success(
+                    f"Import terminé : OK {report.ok_count} · ignorés {report.skip_count}."
+                )
+            st.rerun()
+        except Exception as ex:
+            st.error(f"Import impossible : {ex}")
+        finally:
+            ov.empty()
+
+    if st.session_state.get("aamb_last_import_report_md"):
+        ok, sk, er = st.session_state.get("aamb_last_import_summary") or (0, 0, 0)
+        with st.expander(
+            f"Rapport d’activité du dernier import (OK {ok} · skip {sk} · err {er})",
+            expanded=True,
+        ):
+            st.markdown(st.session_state["aamb_last_import_report_md"])
+            st.download_button(
+                "Télécharger le rapport (.md)",
+                data=st.session_state["aamb_last_import_report_md"].encode("utf-8"),
+                file_name="lumenvia_audio_import_report.md",
+                mime="text/markdown",
+                key="aamb_dl_report",
+            )
+
+    st.subheader("Ajouter un clip (manuel)")
     with st.form("aamb_upload_form", clear_on_submit=True):
         title = st.text_input("Titre", max_chars=120)
         col_a, col_b, col_c = st.columns(3)
@@ -218,9 +327,10 @@ Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
                 "Rôle",
                 options=list(ROLES),
                 format_func=lambda r: {
-                    "intro": "Intro (début)",
-                    "outro": "Outro (fin)",
-                    "bed": "Bed (fond bas)",
+                    "intro": "Intro (début TTS)",
+                    "outro": "Outro (fin TTS)",
+                    "bed": "Bed (fond TTS)",
+                    "ecoute": "Écoute (piste complète)",
                 }.get(r, r),
             )
         with col_b:
@@ -230,7 +340,8 @@ Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
                 format_func=lambda c: {
                     "lectures": "Lectures",
                     "synthese": "Synthèse",
-                    "both": "Les deux",
+                    "both": "Lectures + synthèse",
+                    "ecoute": "Écoute seule",
                 }.get(c, c),
             )
         with col_c:
@@ -239,7 +350,9 @@ Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
         with col_d:
             licence = st.selectbox("Licence", options=list(LICENCES))
         with col_e:
-            attribution = st.text_input("Attribution (obligatoire si CC-BY)", max_chars=200)
+            attribution = st.text_input(
+                "Attribution (si CC-BY / CC-BY-SA)", max_chars=200
+            )
         notes = st.text_input("Notes (optionnel)", max_chars=240)
         as_preferred = st.checkbox(
             "Mettre en priorité dès l’upload (ce rôle + cette cible)",
@@ -251,12 +364,12 @@ Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
     if submitted:
         if not up or not title.strip():
             st.error("Titre et fichier WAV requis.")
-        elif licence == "CC-BY" and not (attribution or "").strip():
-            st.error("CC-BY : renseignez l’attribution (auteur / source).")
+        elif licence in ("CC-BY", "CC-BY-SA") and not (attribution or "").strip():
+            st.error(f"{licence} : renseignez l’attribution (auteur / source).")
         elif licence == "autre":
             st.error(
                 "Licence « autre » non acceptée en V1 sans preuve écrite. "
-                "Choisissez CC0, domaine public ou CC-BY."
+                "Choisissez CC0, domaine public, CC-BY ou CC-BY-SA."
             )
         else:
             data = up.getvalue()

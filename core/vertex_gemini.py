@@ -221,8 +221,13 @@ class VertexGeminiClient:
         text: str,
         voice_name: str = "Kore",
         french_accent: str | None = None,
+        pref_langue: object | None = None,
     ) -> VertexAudioResult:
-        text = strict_verbatim_tts_prompt(spoken_text_for_tts(text), french_accent=french_accent)
+        text = strict_verbatim_tts_prompt(
+            spoken_text_for_tts(text, pref_langue=pref_langue),
+            french_accent=french_accent,
+            pref_langue=pref_langue,
+        )
         raw, used_location, used_model = self._generate_auto(
             preferred_models=[model],
             contents=[{"role": "user", "parts": [{"text": text}]}],
@@ -255,8 +260,13 @@ class VertexGeminiClient:
         text: str,
         voice_name: str = "Kore",
         french_accent: str | None = None,
+        pref_langue: object | None = None,
     ) -> VertexAudioResult:
-        text = strict_verbatim_tts_prompt(spoken_text_for_tts(text), french_accent=french_accent)
+        text = strict_verbatim_tts_prompt(
+            spoken_text_for_tts(text, pref_langue=pref_langue),
+            french_accent=french_accent,
+            pref_langue=pref_langue,
+        )
         raw, used_location, used_model = self._generate_auto(
             preferred_models=preferred_models,
             contents=[{"role": "user", "parts": [{"text": text}]}],

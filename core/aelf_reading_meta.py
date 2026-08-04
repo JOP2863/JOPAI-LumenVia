@@ -14,6 +14,7 @@ from core.prompt_locale import (
     tts_fallback_intro,
     tts_oral_section_label,
 )
+from core.tts_spoken_refs import spoken_biblical_ref_for_tts
 
 # Ligne injectée par ``plain_readings_for_tts`` : §intro§réf§
 _READINGS_TTS_META_LINE_RE = re.compile(r"^§([^§]*)§([^§]*)§\s*$")
@@ -160,6 +161,7 @@ def oral_reading_intro_phrase(
 
     intro = (intro_lue or "").strip()
     if intro:
+        intro = spoken_biblical_ref_for_tts(intro, lg)
         if not intro.endswith("."):
             intro += "."
         return f"{label}. {intro}"
@@ -169,6 +171,7 @@ def oral_reading_intro_phrase(
     if key == "psaume":
         reference = (ref or "").strip()
         if reference:
+            reference = spoken_biblical_ref_for_tts(reference, lg)
             if not reference.endswith("."):
                 reference += "."
             return f"{label}. {reference}"

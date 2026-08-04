@@ -950,6 +950,7 @@ def default_tables() -> list[TableSpec]:
                     "gcs_path",
                     "duration_s",
                     "preferred",  # oui | (vide) — priorité dans le mix TTS
+                    "source_url",  # URL d’origine (idempotence import)
                     "notes",
                 ]
             ),

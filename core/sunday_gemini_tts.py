@@ -22,10 +22,10 @@ from core.sunday_readings_tts import (
     liturgy_section_oral_announcement,
     normalize_liturgy_section_title,
     parse_synthesis_tts_sections,
-    pick_tts_french_accent,
+    pick_tts_speech_direction,
     spoken_text_for_tts,
 )
-from core.prompt_locale import canonical_reading_section_key
+from core.prompt_locale import canonical_reading_section_key, coerce_aip_langue
 from core.voix_audio import DEFAULT_GEMINI_TTS_VOICE
 
 # Modèles TTS — l'API Gemini (clé) et Vertex (GCP) n'exposent pas les mêmes noms.
@@ -115,6 +115,7 @@ def _liturgy_section_tts_pieces(
     max_chars: int,
     intro_lue: str | None = None,
     ref: str | None = None,
+    pref_langue: object | None = None,
 ) -> list[str]:
     """
     Morceaux TTS d'une section liturgique ou d'une sous-section de synthèse.
@@ -136,6 +137,7 @@ def _liturgy_section_tts_pieces(
         title or title_norm,
         intro_lue=intro_lue,
         ref=ref,
+        pref_langue=pref_langue,
     )
     body_chunks = _split_by_size_at_word(body, max_chars=max_chars)
     if not body_chunks:
@@ -155,7 +157,7 @@ def _liturgy_section_tts_pieces(
 
 
 def _liturgy_readings_tts_section_chunk_specs(
-    text: str, *, max_chars: int
+    text: str, *, max_chars: int, pref_langue: object | None = None
 ) -> list[tuple[list[str], int | None]]:
     """Par section liturgique : morceaux TTS + pause éventuelle après l'annonce."""
     specs: list[tuple[list[str], int | None]] = []
@@ -177,6 +179,7 @@ def _liturgy_readings_tts_section_chunk_specs(
                         max_chars=max_chars,
                         intro_lue=intro_lue,
                         ref=ref,
+                        pref_langue=pref_langue,
                     )
                     if pieces:
                         # Pause entre sections uniquement (plus entre annonce isolée et corps).
@@ -201,6 +204,7 @@ def _liturgy_readings_tts_section_chunk_specs(
                 max_chars=max_chars,
                 intro_lue=intro_lue,
                 ref=ref,
+                pref_langue=pref_langue,
             )
             intro_pause = None
         if pieces:
@@ -321,6 +325,7 @@ def _tts_chunks_to_wav(
     voice_name: str,
     chunks: list[str],
     french_accent: str | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     wav_parts_by_i: dict[int, bytes] = {}
     tts_errors: list[str] = []
@@ -334,6 +339,7 @@ def _tts_chunks_to_wav(
                     text=ch,
                     voice_name=voice_name,
                     french_accent=french_accent,
+                    pref_langue=pref_langue,
                 )
                 b, mt, _ = normalize_audio_bytes(
                     audio_bytes=tts_audio.audio_bytes, mime_type=tts_audio.mime_type
@@ -372,6 +378,7 @@ def _synthesize_chunks_to_wav(
     gemini_api_key: str | None,
     vertex_client: object | None,
     french_accent: str | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     if gemini_api_key:
         tts_api = GeminiTtsApiClient(api_key=str(gemini_api_key))
@@ -380,6 +387,7 @@ def _synthesize_chunks_to_wav(
             voice_name=voice_name,
             chunks=chunks,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
     if vertex_client is not None:
         return _tts_vertex_chunks_to_wav(
@@ -387,6 +395,7 @@ def _synthesize_chunks_to_wav(
             voice_name=voice_name,
             chunks=chunks,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
     raise RuntimeError(
         "Audio impossible : ajoute GEMINI_API_KEY dans les secrets "
@@ -402,6 +411,7 @@ def _tts_pieces_to_wav(
     gemini_api_key: str | None,
     vertex_client: object | None,
     french_accent: str | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     if not pieces:
         raise ValueError("Morceaux TTS vides")
@@ -412,6 +422,7 @@ def _tts_pieces_to_wav(
             gemini_api_key=gemini_api_key,
             vertex_client=vertex_client,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
         tail_wav = _synthesize_chunks_to_wav(
             chunks=pieces[1:],
@@ -419,6 +430,7 @@ def _tts_pieces_to_wav(
             gemini_api_key=gemini_api_key,
             vertex_client=vertex_client,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
         return join_wav_with_silence([head_wav, tail_wav], pause_ms=intro_pause_ms)
     return _synthesize_chunks_to_wav(
@@ -427,6 +439,7 @@ def _tts_pieces_to_wav(
         gemini_api_key=gemini_api_key,
         vertex_client=vertex_client,
         french_accent=french_accent,
+        pref_langue=pref_langue,
     )
 
 
@@ -438,6 +451,7 @@ def _tts_section_specs_to_wav(
     gemini_api_key: str | None,
     vertex_client: object | None,
     french_accent: str | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     section_wavs: list[bytes] = []
     for pieces, intro_pause_ms in specs:
@@ -451,6 +465,7 @@ def _tts_section_specs_to_wav(
                 gemini_api_key=gemini_api_key,
                 vertex_client=vertex_client,
                 french_accent=french_accent,
+                pref_langue=pref_langue,
             )
         )
     if not section_wavs:
@@ -550,6 +565,7 @@ def _tts_vertex_chunks_to_wav(
     voice_name: str,
     chunks: list[str],
     french_accent: str | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     if not chunks:
         raise ValueError("Texte vide")
@@ -559,6 +575,7 @@ def _tts_vertex_chunks_to_wav(
             text=chunks[0],
             voice_name=voice_name,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
         b, mt, _ = normalize_audio_bytes(
             audio_bytes=getattr(audio, "audio_bytes", b""),
@@ -577,6 +594,7 @@ def _tts_vertex_chunks_to_wav(
             text=ch,
             voice_name=voice_name,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
         b, mt, _ = normalize_audio_bytes(
             audio_bytes=getattr(audio, "audio_bytes", b""),
@@ -613,9 +631,12 @@ def _tts_chunked_bytes_from_spoken(
     gemini_api_key: str | None,
     vertex_client: object | None,
     french_accent: str | None = None,
+    pref_langue: object | None = None,
 ) -> bytes:
     if is_liturgy_readings_tts_text(spoken):
-        section_specs = _liturgy_readings_tts_section_chunk_specs(spoken, max_chars=1400)
+        section_specs = _liturgy_readings_tts_section_chunk_specs(
+            spoken, max_chars=1400, pref_langue=pref_langue
+        )
         if not section_specs:
             raise ValueError("Texte liturgique vide")
         return _tts_section_specs_to_wav(
@@ -625,6 +646,7 @@ def _tts_chunked_bytes_from_spoken(
             gemini_api_key=gemini_api_key,
             vertex_client=vertex_client,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
 
     synth_specs = _synthesis_tts_section_chunk_specs(spoken, max_chars=1400)
@@ -641,6 +663,7 @@ def _tts_chunked_bytes_from_spoken(
             gemini_api_key=gemini_api_key,
             vertex_client=vertex_client,
             french_accent=french_accent,
+            pref_langue=pref_langue,
         )
 
     chunks = chunk_text_for_tts(spoken, max_chars=1400)
@@ -650,6 +673,7 @@ def _tts_chunked_bytes_from_spoken(
         gemini_api_key=gemini_api_key,
         vertex_client=vertex_client,
         french_accent=french_accent,
+        pref_langue=pref_langue,
     )
 
 
@@ -681,18 +705,24 @@ def tts_spoken_audio_bytes(
 
     Les textes longs sont découpés (~1400 car.) : un seul appel Vertex sur toute
     la synthèse provoquait des timeouts silencieux (plusieurs minutes sans fichier Audio/).
-    ``french_accent`` : consigne d'accent francophone (sinon rotation déterministe
-    dimanche + cible + voix).
+    ``french_accent`` : consigne director explicite (sinon ``pick_tts_speech_direction``
+    selon ``pref_langue`` — accents FR, diction DE/EN/ES/IT hors FR).
     ``apply_ambiance`` : intro/outro/bed depuis la bibliothèque AAMB si clips actifs.
     """
     if voice_name is None or not str(voice_name).strip():
         voice_name = DEFAULT_GEMINI_TTS_VOICE
-    accent = (french_accent or "").strip() or pick_tts_french_accent(
+    lg = coerce_aip_langue(pref_langue)
+    accent = (french_accent or "").strip() or pick_tts_speech_direction(
+        pref_langue=lg,
         sunday_date=sunday_date,
         cible=cible,
         voice_name=str(voice_name),
     )
-    spoken = spoken_text_for_tts(text)
+    spoken = spoken_text_for_tts(
+        text,
+        liturgy_readings=(str(cible or "").strip().lower() == "lectures"),
+        pref_langue=lg,
+    )
     if not spoken:
         raise ValueError("Texte TTS vide")
     gemini_key = _resolve_tts_gemini_key(cfg=cfg, gemini_api_key=gemini_api_key)
@@ -710,6 +740,7 @@ def tts_spoken_audio_bytes(
                 gemini_api_key=None,
                 vertex_client=vertex_client,
                 french_accent=accent,
+                pref_langue=lg,
             )
             clear_vertex_tts_allowlist_blocked()
             route = "vertex_tts"
@@ -728,6 +759,7 @@ def tts_spoken_audio_bytes(
                 gemini_api_key=gemini_key,
                 vertex_client=None,
                 french_accent=accent,
+                pref_langue=lg,
             )
             route = "gemini_api (repli)" if vtx_err else "gemini_api"
         except Exception as ex:

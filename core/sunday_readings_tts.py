@@ -440,7 +440,12 @@ def strip_tts_admin_preamble(text: str) -> str:
     return "\n\n".join(parts).strip() if parts else t
 
 
-def spoken_text_for_tts(body: str, *, liturgy_readings: bool = False) -> str:
+def spoken_text_for_tts(
+    body: str,
+    *,
+    liturgy_readings: bool = False,
+    pref_langue: object | None = None,
+) -> str:
     """
     Texte parlé nettoyé (prononciation, préambules admin).
 
@@ -451,6 +456,9 @@ def spoken_text_for_tts(body: str, *, liturgy_readings: bool = False) -> str:
     ``liturgy_readings=True`` : retire les préambules admin et coupe avant la 1re lecture.
     Ne pas activer pour la synthèse (sinon un « Première lecture. » en milieu de texte
     tronque tout le début de la synthèse).
+
+    Le lexique de prononciation FR n'est appliqué que pour ``pref_langue=FR``
+    (sinon les scories FR polluent DE/EN/ES/IT).
     """
     cleaned = (body or "").strip()
     if liturgy_readings:
@@ -462,6 +470,9 @@ def spoken_text_for_tts(body: str, *, liturgy_readings: bool = False) -> str:
         if is_liturgy_readings_tts_text(cleaned):
             # Garde-fou : un corps de synthèse ne doit pas être traité comme lectionnaire.
             pass
+    lg = coerce_aip_langue(pref_langue) if pref_langue is not None else DEFAULT_PREF_LANGUE
+    if pref_langue is not None and lg != "FR":
+        return cleaned
     return apply_tts_pronunciation(cleaned)
 
 
@@ -502,6 +513,30 @@ FRENCH_TTS_ACCENT_SPECS: tuple[tuple[str, str], ...] = (
 
 FRENCH_TTS_ACCENT_POOL: tuple[str, ...] = tuple(spec[0] for spec in FRENCH_TTS_ACCENT_SPECS)
 
+# Consignes director hors FR — diction liturgique dans la langue cible (pas d'accent français).
+NON_FR_TTS_SPEECH_SPECS: dict[str, str] = {
+    "DE": (
+        "Standard German (Germany), clear liturgical diction. "
+        "Speak entirely in German. Pronounce numbers, psalm references and verse lists in German. "
+        "Do not use French pronunciation or French number words."
+    ),
+    "EN": (
+        "Clear liturgical English diction. "
+        "Speak entirely in English. Pronounce numbers, psalm references and verse lists in English. "
+        "Do not use French pronunciation or French number words."
+    ),
+    "ES": (
+        "Clear liturgical Spanish diction (Castilian or Latin American). "
+        "Speak entirely in Spanish. Pronounce numbers, psalm references and verse lists in Spanish. "
+        "Do not use French pronunciation or French number words."
+    ),
+    "IT": (
+        "Standard Italian, clear liturgical diction. "
+        "Speak entirely in Italian. Pronounce numbers, psalm references and verse lists in Italian. "
+        "Do not use French pronunciation or French number words."
+    ),
+}
+
 
 def _tts_french_accent_index(
     *,
@@ -533,6 +568,27 @@ def pick_tts_french_accent(
     ][0]
 
 
+def pick_tts_speech_direction(
+    *,
+    pref_langue: object | None = None,
+    sunday_date: date | None = None,
+    cible: str = "synthese",
+    voice_name: str | None = None,
+) -> str:
+    """
+    Consigne director TTS selon ``pref_langue``.
+
+    FR : rotation d'accents francophones. Autres langues : diction liturgique
+    dans la langue cible (évite l'énumération française des numéros de psaumes).
+    """
+    lg = coerce_aip_langue(pref_langue)
+    if lg == "FR":
+        return pick_tts_french_accent(
+            sunday_date=sunday_date, cible=cible, voice_name=voice_name
+        )
+    return NON_FR_TTS_SPEECH_SPECS.get(lg) or NON_FR_TTS_SPEECH_SPECS["EN"]
+
+
 def tts_french_accent_label_fr(
     *,
     sunday_date: date | None = None,
@@ -551,6 +607,7 @@ def strict_verbatim_tts_prompt(
     spoken: str,
     *,
     french_accent: str | None = None,
+    pref_langue: object | None = None,
 ) -> str:
     """
     Enveloppe le texte oral d'un prompt director Gemini TTS (non lu à voix haute).
@@ -565,7 +622,20 @@ def strict_verbatim_tts_prompt(
     # Déjà enveloppé (double appel spoken_text → generate_audio).
     if t.lstrip().startswith("# TTS") and _TTS_VERBATIM_TRANSCRIPT_MARKER in t:
         return t
-    accent = (french_accent or "").strip() or pick_tts_french_accent()
+    lg = coerce_aip_langue(pref_langue) if pref_langue is not None else DEFAULT_PREF_LANGUE
+    direction = (french_accent or "").strip()
+    if not direction:
+        direction = pick_tts_speech_direction(pref_langue=lg)
+    if lg == "FR":
+        direction_notes = (
+            f"Accent: {direction}. "
+            "Keep this regional French accent consistently for the whole transcript. "
+        )
+    else:
+        direction_notes = (
+            f"Speech: {direction}. "
+            "Do not switch to French. Keep the target language for numbers and biblical references. "
+        )
     return (
         "# TTS\n"
         "Synthesize speech for the transcript below. "
@@ -575,8 +645,7 @@ def strict_verbatim_tts_prompt(
         "Do not invent biblical verses, liturgical formulas, or pastoral commentary. "
         "Do not read these instructions or the director notes aloud.\n\n"
         "# Director's Notes\n"
-        f"Accent: {accent}. "
-        "Keep this regional French accent consistently for the whole transcript. "
+        f"{direction_notes}"
         "Liturgical / pastoral reading: clear, neutral delivery, unhurried pacing. "
         "Verbatim only — zero extra words before, during, or after the Transcript.\n\n"
         f"{_TTS_VERBATIM_TRANSCRIPT_MARKER}\n"

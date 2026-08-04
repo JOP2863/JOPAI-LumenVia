@@ -20,13 +20,16 @@ from core.sheets_db import sheet_row_status_is_live
 AUDIO_AMBIANCE_TABLE = "audio_ambiance"
 AMBIANCE_GCS_PREFIX = "Audio/ambiance"
 
-ROLES: tuple[str, ...] = ("intro", "outro", "bed")
-CIBLES: tuple[str, ...] = ("lectures", "synthese", "both")
+ROLES: tuple[str, ...] = ("intro", "outro", "bed", "ecoute")
+MIX_ROLES: tuple[str, ...] = ("intro", "outro", "bed")  # utilisés par le mix TTS
+CIBLES: tuple[str, ...] = ("lectures", "synthese", "both", "ecoute")
 LANGUES: tuple[str, ...] = ("ALL", "FR", "DE", "EN", "ES", "IT")
-LICENCES: tuple[str, ...] = ("CC0", "CC-BY", "domaine_public", "autre")
+LICENCES: tuple[str, ...] = ("CC0", "CC-BY", "CC-BY-SA", "domaine_public", "autre")
 
 # Licences acceptées pour un usage producteur sans risque majeur (hors « autre » à valider).
-LICENCES_SAFE: tuple[str, ...] = ("CC0", "CC-BY", "domaine_public")
+# CC-BY-SA OK pour écoute ; pour mix TTS préférer CC0/CC-BY/domaine_public.
+LICENCES_SAFE: tuple[str, ...] = ("CC0", "CC-BY", "CC-BY-SA", "domaine_public")
+LICENCES_SAFE_MIX: tuple[str, ...] = ("CC0", "CC-BY", "domaine_public")
 
 # Bed ~ −28 dB par rapport à la voix (gain linéaire ≈ 0.04).
 DEFAULT_BED_GAIN = 0.04
@@ -93,6 +96,8 @@ def list_active_clips(rows: list[dict[str, Any]]) -> list[AmbianceClip]:
 
 
 def _clip_matches(clip: AmbianceClip, *, cible: str, pref_langue: str) -> bool:
+    if clip.role not in MIX_ROLES:
+        return False
     c = (cible or "synthese").strip().lower()
     if clip.cible not in (c, "both"):
         return False
@@ -111,7 +116,7 @@ def pick_ambiance_set(
     """Choisit intro / outro / bed (priorité « preferred », sinon déterministe via ``seed``)."""
     pool = [c for c in clips if _clip_matches(c, cible=cible, pref_langue=pref_langue)]
     out: dict[str, AmbianceClip | None] = {"intro": None, "outro": None, "bed": None}
-    for role in ROLES:
+    for role in MIX_ROLES:
         cand = [c for c in pool if c.role == role]
         if not cand:
             continue
@@ -121,6 +126,9 @@ def pick_ambiance_set(
         use = exact or cand
         pinned = [c for c in use if c.preferred]
         use = pinned or use
+        # Ne pas mixer CC-BY-SA / autre dans le TTS si possible
+        safe = [c for c in use if (c.licence or "CC0") in LICENCES_SAFE_MIX]
+        use = safe or use
         h = hashlib.sha256(f"{seed}|{cible}|{role}|{lg}".encode("utf-8")).hexdigest()
         idx = int(h[:8], 16) % len(use)
         out[role] = use[idx]
