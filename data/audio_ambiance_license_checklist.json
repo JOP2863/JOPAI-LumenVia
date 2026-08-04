@@ -4,26 +4,53 @@
   "summary_fr": "Les clips d’ambiance (intro / outro / bed) sont curatés manuellement dans l’Atelier audio. Seules les licences CC0, domaine public et CC-BY (avec attribution) sont acceptées en V1. Pas de musique commerciale, pas de « free for personal use only », pas de scraping de messes enregistrées sous droits d’auteur.",
   "accepted_licenses": ["CC0", "domaine_public", "CC-BY"],
   "rejected_in_v1": ["autre", "CC-BY-NC", "tous_droits_reserves", "licence_commerciale"],
+  "workflow_fr": [
+    "Cherche un son court (2–8 s pour intro/outro ; 20–60 s ou boucle douce pour bed).",
+    "Vérifie la licence sur la fiche : CC0 / domaine public / CC-BY uniquement.",
+    "Télécharge le fichier ; convertis en WAV PCM 16-bit si besoin (Audacity : Fichier → Exporter → WAV).",
+    "Dans l’Atelier : upload + rôle + cible + langue + licence (+ attribution si CC-BY).",
+    "Préécoute, mets en priorité si tu l’aimes, sinon « Retirer de la bibliothèque »."
+  ],
   "recommended_banks": [
     {
-      "name": "Freesound",
+      "name": "Freesound — CC0 uniquement",
+      "url": "https://freesound.org/search/?f=license:%22Creative+Commons+0%22&q=church+bell+soft",
+      "notes": "Filtre licence = Creative Commons 0. Essaie aussi « ambient pad », « soft chime », « quiet organ »."
+    },
+    {
+      "name": "Freesound — accueil",
       "url": "https://freesound.org/",
-      "notes": "Filtrer explicitement CC0 ; vérifier chaque fiche avant upload."
+      "notes": "Toujours activer le filtre CC0 (ou CC-BY avec attribution). Éviter CC-BY-NC."
     },
     {
       "name": "Pixabay Music",
-      "url": "https://pixabay.com/music/",
-      "notes": "Contenu sous licence Pixabay Content License — vérifier usage commercial / attribution selon fiche."
+      "url": "https://pixabay.com/music/search/ambient/",
+      "notes": "Licence Pixabay Content — usage large souvent OK ; noter la source dans Attribution/Notes."
+    },
+    {
+      "name": "Pixabay Sound Effects",
+      "url": "https://pixabay.com/sound-effects/search/bell/",
+      "notes": "Effets courts (cloche, whoosh doux) pour intro/outro."
     },
     {
       "name": "Musopen",
-      "url": "https://musopen.org/",
-      "notes": "Enregistrements / partitions souvent domaine public ; vérifier la fiche."
+      "url": "https://musopen.org/music/",
+      "notes": "Classique / domaine public fréquent — vérifier la fiche de chaque enregistrement."
     },
     {
-      "name": "CPDL",
+      "name": "CPDL (Choral Public Domain Library)",
       "url": "https://www.cpdl.org/",
-      "notes": "Partitions / enregistrements sous licences variées (souvent libres) — lire la licence de chaque œuvre."
+      "notes": "Partitions & enregistrements souvent libres — lire la licence de chaque œuvre."
+    },
+    {
+      "name": "Wikimedia Commons — audio",
+      "url": "https://commons.wikimedia.org/wiki/Category:Audio_files_of_music",
+      "notes": "Filtrer Public domain / CC0 / CC-BY ; noter l’auteur pour CC-BY."
+    },
+    {
+      "name": "Mixkit — free sound effects",
+      "url": "https://mixkit.co/free-sound-effects/",
+      "notes": "Licence Mixkit (usage libre typique) — indiquer Mixkit dans Attribution/Notes."
     }
   ],
   "items": [

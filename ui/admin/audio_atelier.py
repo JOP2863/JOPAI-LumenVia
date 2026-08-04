@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from hashlib import sha256
+from pathlib import Path
 from uuid import uuid4
 
 import streamlit as st
@@ -37,6 +39,63 @@ from ui.streamlit_caches import (
     service_account_json_fingerprint,
 )
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_AUDIO_LICENSE_PATH = _REPO_ROOT / "data" / "audio_ambiance_license_checklist.json"
+
+
+def _load_audio_license_doc() -> dict:
+    try:
+        if _AUDIO_LICENSE_PATH.is_file():
+            data = json.loads(_AUDIO_LICENSE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def _render_source_banks_help() -> None:
+    """Liens vers banques libres + rappel du parcours téléchargement → upload."""
+    data = _load_audio_license_doc()
+    with st.expander("Où trouver des audios libres (télécharger → uploader ici)", expanded=True):
+        st.markdown(
+            """
+**Oui : tu récupères les sons à l’extérieur, puis tu les déposes ici.**  
+LumenVia ne télécharge rien tout seul — l’Atelier sert à **curater** des clips compatibles.
+
+**Parcours recommandé**
+1. Ouvre une banque ci-dessous (filtre **CC0** / domaine public / **CC-BY**).
+2. Choisis un son court : **intro/outro** ≈ 2–8 s · **bed** (fond) ≈ 20–60 s, très doux.
+3. Télécharge ; si ce n’est pas du WAV, convertis en **WAV PCM 16-bit** (ex. Audacity).
+4. Remonte dans le formulaire **Ajouter un clip** (licence + attribution si CC-BY).
+5. Préécoute → **Mettre en priorité** ou **Retirer** si ça ne plaît pas.
+            """.strip()
+        )
+        steps = data.get("workflow_fr") or []
+        if steps:
+            st.markdown("**Détail :**")
+            for i, line in enumerate(steps, start=1):
+                st.markdown(f"{i}. {line}")
+
+        banks = data.get("recommended_banks") or []
+        if banks:
+            st.markdown("**Liens utiles (licences vérifiées fiche par fiche) :**")
+            for b in banks:
+                if not isinstance(b, dict):
+                    continue
+                name = str(b.get("name") or "Banque").strip()
+                url = str(b.get("url") or "").strip()
+                notes = str(b.get("notes") or "").strip()
+                if url:
+                    st.markdown(f"- [{name}]({url})" + (f" — {notes}" if notes else ""))
+                elif name:
+                    st.markdown(f"- **{name}**" + (f" — {notes}" if notes else ""))
+
+        st.caption(
+            "Licences acceptées ici : **CC0**, **domaine public**, **CC-BY** (attribution obligatoire). "
+            "Refuse CC-BY-NC, « free for personal use only », et toute musique sans licence claire."
+        )
+
 
 def render_admin_audio_atelier() -> None:
     st.title("Atelier audio")
@@ -45,7 +104,9 @@ def render_admin_audio_atelier() -> None:
         "intro → voix (± bed très bas) → outro. Table Sheets `audio_ambiance` (AAMB) · GCS `Audio/ambiance/`."
     )
 
-    with st.expander("Comment ça marche — upload, choix, retrait", expanded=True):
+    _render_source_banks_help()
+
+    with st.expander("Comment ça marche — upload, choix, retrait", expanded=False):
         st.markdown(
             """
 **1. Uploader un clip**  
@@ -67,10 +128,6 @@ Le fichier part dans **GCS** (`Audio/ambiance/{id}.wav`) et une ligne **AAMB** e
 **4. Retirer un clip qui ne plaît pas**  
 Bouton **Retirer de la bibliothèque** → statut **Inactif** (plus jamais mixé).  
 Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
-
-**Licences**  
-Utiliser **CC0**, **domaine public** ou **CC-BY** (attribution obligatoire dans le champ).  
-Éviter « autre » sans preuve écrite. Banques typiques : Freesound (filtre CC0), Pixabay Music, Musopen, CPDL (partitions / enregistrements sous licence libre).
             """.strip()
         )
 
