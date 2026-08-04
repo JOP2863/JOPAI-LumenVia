@@ -81,7 +81,7 @@ def render_admin_emailing() -> None:
         resolve_email_nom_du_dimanche,
         inject_weekly_actualite_into_email_body,
         WEEKLY_ACTUALITE_LEAD,
-        DEFAULT_WEEKLY_ACTUALITE_MESSAGE,
+        PROPOSED_WEEKLY_ACTUALITE_MESSAGE,
         strip_redundant_cette_semaine_lead,
     )
 
@@ -149,11 +149,11 @@ def render_admin_emailing() -> None:
     with st.expander("Balises supportées", expanded=False):
         st.code("\n".join([f"{{{{{t}}}}}" for t in supported_tags()]), language="text")
 
-    # Message d’actualité : défaut code → sinon dernière valeur ETPL (status_note) → session.
+    # Message d’actualité : défaut proposé → sinon dernière valeur ETPL (status_note) → session.
     _actu_from_sheet = strip_redundant_cette_semaine_lead(
         str((current or {}).get("status_note") or "")
     )
-    _actu_default = _actu_from_sheet or DEFAULT_WEEKLY_ACTUALITE_MESSAGE
+    _actu_default = _actu_from_sheet or PROPOSED_WEEKLY_ACTUALITE_MESSAGE
     if "adm_email_message_actualite" not in st.session_state:
         st.session_state["adm_email_message_actualite"] = _actu_default
     else:
@@ -163,19 +163,43 @@ def render_admin_emailing() -> None:
             st.session_state["adm_email_message_actualite"] = _cleaned or _actu_default
 
     st.divider()
+    st.markdown("##### Mention de début d’e-mail (chaque semaine)")
+    st.caption(
+        "Texte affiché **juste après le bonjour**. À adapter chaque vendredi avant l’envoi. "
+        "À l’envoi, une ligne est écrite dans **RUNS** (`scheduler_runs`) avec la date du dimanche "
+        "et cette mention — **pas** dans OUTM (qui reste à la maille de chaque inscrit). "
+        "L’enregistrement du template conserve aussi une copie brouillon dans ETPL (`status_note`)."
+    )
     st.text_area(
         "Message d’actualité pour les destinataires (optionnel)",
-        height=120,
+        height=140,
         key="adm_email_message_actualite",
         placeholder="Ex. : ouverture des inscriptions au parcours…",
         help=(
-            f"Injecté juste après le bonjour lors de l’aperçu et de l’envoi. "
             f"Préfixe automatique : « {WEEKLY_ACTUALITE_LEAD.strip()} ». "
-            "Enregistré avec le template (colonne `status_note` ETPL) — "
-            "retrouvé à la prochaine ouverture de la page Emailing. "
             "Laisser vide pour ne rien ajouter au prochain envoi."
         ),
     )
+    c_prop, c_clear = st.columns(2)
+    with c_prop:
+        if st.button(
+            "Remplir avec le texte proposé (nouveautés)",
+            key="adm_email_actu_fill_proposed",
+            help="Multilingue, ambiance audio, etc.",
+        ):
+            st.session_state["adm_email_message_actualite"] = PROPOSED_WEEKLY_ACTUALITE_MESSAGE
+            st.rerun()
+    with c_clear:
+        if st.button("Vider la mention", key="adm_email_actu_clear"):
+            st.session_state["adm_email_message_actualite"] = ""
+            st.rerun()
+    with st.expander("Aperçu du paragraphe injecté", expanded=False):
+        from core.emailing import format_weekly_actualite_paragraph
+
+        _prev_para = format_weekly_actualite_paragraph(
+            str(st.session_state.get("adm_email_message_actualite") or "")
+        )
+        st.write(_prev_para or "_(aucune mention)_")
     note = str(st.session_state.get("adm_email_message_actualite") or "").strip()
     with st.expander("Dimanche de référence (aperçu + envoi manuel)", expanded=False):
         # Dimanche cible (par défaut : prochain dimanche)

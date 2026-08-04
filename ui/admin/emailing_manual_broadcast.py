@@ -30,6 +30,7 @@ from core.sheets_db import (
 )
 from core.emailing import (
     EmailTemplate,
+    append_weekly_email_run,
     french_day_month_year,
     inject_weekly_actualite_into_email_body,
     normalize_email_template_text,
@@ -607,7 +608,11 @@ def render_emailing_manual_broadcast(
             ok = 0
             err = 0
             debug_rows: list[dict[str, str]] = []
-
+            run_started_at = utc_now_iso()
+            mention_for_run = str(
+                st.session_state.get("adm_email_message_actualite") or ""
+            ).strip()
+            run_kind = "manual_broadcast" if bool(send_to_all) else "manual_dry_run"
 
             def _inject_illustration_placeholder(*, text: str, url_illustration: str, as_html: bool) -> str:
                 """
@@ -987,6 +992,33 @@ def render_emailing_manual_broadcast(
                 st.error(f"Échec : {err} erreur(s), aucun envoi réussi.")
             else:
                 st.warning(f"Terminé partiellement : {ok} envoi(s) OK, {err} erreur(s).")
+
+            # Suivi hebdo (RUNS) : une ligne pour la mention + date — pas de duplication OUTM.
+            if ok > 0 or err > 0:
+                try:
+                    append_weekly_email_run(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        date_dimanche=date_str,
+                        message_actualite=mention_for_run,
+                        recipients_ok=ok,
+                        recipients_err=err,
+                        run_kind=run_kind,
+                        campaign_key="weekly_friday_lumenvia",
+                        template_key=template_key,
+                        status_detail="done" if err == 0 else ("partial" if ok > 0 else "error"),
+                        started_at=run_started_at,
+                        error="" if err == 0 else f"{err} erreur(s) d’envoi",
+                    )
+                    st.caption(
+                        f"Suivi hebdo enregistré dans **RUNS** "
+                        f"(dimanche `{date_str}`"
+                        + (f", mention : {len(mention_for_run)} car." if mention_for_run else ", sans mention")
+                        + ")."
+                    )
+                except Exception as ex_run:
+                    st.warning(f"Envois OK/partiels, mais écriture RUNS impossible : {ex_run}")
+
             if debug_verbose and debug_rows:
                 st.markdown("**Debug (résumé)**")
                 st.code(

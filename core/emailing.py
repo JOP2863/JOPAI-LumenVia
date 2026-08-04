@@ -166,14 +166,19 @@ def render_weekly_email_template(tpl: EmailTemplate, *, values: dict[str, str]) 
 
 WEEKLY_ACTUALITE_LEAD = "À noter cette semaine dans l'actualité de LumenVia : "
 
-# Valeur par défaut du champ admin (persistée aussi dans ETPL ``status_note`` à l’enregistrement).
+# Texte proposé pour l’envoi hebdo (UI Emailing + défaut si ETPL.status_note vide).
 # Ne pas commencer par « Cette semaine » : le préfixe WEEKLY_ACTUALITE_LEAD l’indique déjà.
-DEFAULT_WEEKLY_ACTUALITE_MESSAGE = (
-    "L’écoute des lectures s’enrichit d’un rappel clair au début de chaque passage "
-    "— lecture ou Évangile — pour mieux se situer dans la Liturgie de la Parole. "
-    "Les voix de synthèse sont désormais francophones et variées : une diversité qui, à sa façon, "
-    "fait aussi entendre la richesse de l’Église."
+PROPOSED_WEEKLY_ACTUALITE_MESSAGE = (
+    "LumenVia s’ouvre davantage : vous pouvez préparer le dimanche en français, "
+    "anglais, espagnol, allemand ou italien — lectures, synthèse, PDF et audio suivent "
+    "votre langue. Les audios s’habillent aussi d’une légère ambiance (cloche, orgue…) "
+    "autour de la voix, pour une écoute plus recueillie. "
+    "Comme chaque semaine, illustration, liens pour écouter ou relire, et l’essentiel "
+    "pour entrer dans la célébration sont dans ce message."
 )
+
+# Alias historique : même contenu que la proposition courante.
+DEFAULT_WEEKLY_ACTUALITE_MESSAGE = PROPOSED_WEEKLY_ACTUALITE_MESSAGE
 
 _CETTE_SEMAINE_LEAD_RE = re.compile(r"(?is)^cette\s+semaine\s*[,:\-–—]?\s*")
 
@@ -218,6 +223,57 @@ def inject_weekly_actualite_into_email_body(body: str, *, message: str) -> str:
     if not inserted:
         out = [para, ""] + out
     return "\n".join(out).strip()
+
+
+def append_weekly_email_run(
+    *,
+    gspread_client: object,
+    spreadsheet_id: str,
+    date_dimanche: str,
+    message_actualite: str,
+    recipients_ok: int,
+    recipients_err: int,
+    run_kind: str = "manual_broadcast",
+    campaign_key: str = "weekly_friday_lumenvia",
+    template_key: str = "weekly_friday_lumenvia",
+    status_detail: str = "done",
+    started_at: str | None = None,
+    error: str = "",
+) -> dict:
+    """
+    Une ligne RUNS par envoi hebdo (mention + date) — pas de duplication OUTM.
+    Les colonnes manquantes sont ajoutées à l’en-tête via ``append_immutable_row``.
+    """
+    from hashlib import sha256
+
+    from core.sheets_db import append_immutable_row, utc_now_iso
+
+    day = str(date_dimanche or "").strip()[:10]
+    finished = utc_now_iso()
+    started = str(started_at or "").strip() or finished
+    mention = str(message_actualite or "").strip()
+    run_id = sha256(
+        f"runs|{campaign_key}|{day}|{run_kind}|{started}".encode("utf-8")
+    ).hexdigest()[:24]
+    return append_immutable_row(
+        gspread_client=gspread_client,
+        spreadsheet_id=spreadsheet_id,
+        table="scheduler_runs",
+        values_by_col={
+            "entity_id": run_id,
+            "campaign_key": campaign_key,
+            "run_kind": run_kind,
+            "status_detail": status_detail,
+            "started_at": started,
+            "finished_at": finished,
+            "recipients_ok": str(int(recipients_ok)),
+            "recipients_err": str(int(recipients_err)),
+            "error": str(error or "")[:900],
+            "date_dimanche": day,
+            "message_actualite": mention,
+            "template_key": str(template_key or "").strip(),
+        },
+    )
 
 
 def supported_tags() -> tuple[str, ...]:

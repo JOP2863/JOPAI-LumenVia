@@ -120,6 +120,9 @@ par identifiant de campagne.
                     "recipients_ok",
                     "recipients_err",
                     "error",
+                    "date_dimanche",
+                    "message_actualite",
+                    "template_key",
                 ]
             ),
         ),
@@ -875,9 +878,11 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
     
                 from core.emailing import (
                     EmailTemplate,
-                    render_weekly_email_template,
                     french_day_month_year,
+                    inject_weekly_actualite_into_email_body,
+                    render_weekly_email_template,
                     resolve_email_nom_du_dimanche,
+                    strip_redundant_cette_semaine_lead,
                 )
 
                 import app as ap
@@ -886,6 +891,10 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     ident_sched, _ = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
                 except Exception:
                     ident_sched = None
+
+                mention_sched = strip_redundant_cette_semaine_lead(
+                    str(tpl.get("status_note") or "")
+                )
 
                 vals_base = {
                     "origin": origin,
@@ -902,6 +911,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     "url_illustration": url_illu,
                     "illustration_description": (_sched_urls.get("illustration_description") or "").strip(),
                     "url_app": url_app,
+                    "message_actualite": mention_sched,
                 }
     
                 for urec in recipients[:2000]:
@@ -920,7 +930,9 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     if do_email and em and smtp_cfg.host and smtp_cfg.from_email:
                         try:
                             html2 = ""  # le gabarit est généré dans render_admin_emailing; ici simple fallback texte
-                            bt = rendered.body.strip()
+                            bt = inject_weekly_actualite_into_email_body(
+                                rendered.body.strip(), message=mention_sched
+                            )
                             bt = (bt + "\n\n—\n") if bt else ""
                             bt += LUMENVIA_DEVELOPMENT_NOTICE
                             send_smtp_email(cfg=smtp_cfg, to_email=em, subject=rendered.subject, body_text=bt, body_html=html2 or None)
@@ -944,12 +956,15 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                         "entity_id": run_id,
                         "campaign_key": camp_key,
                         "run_kind": "manual",
-                        "status_detail": "done",
+                        "status_detail": "done" if err0 == 0 else ("partial" if ok0 > 0 else "error"),
                         "started_at": started,
                         "finished_at": utc_now_iso(),
                         "recipients_ok": str(ok0),
                         "recipients_err": str(err0),
-                        "error": "",
+                        "error": "" if err0 == 0 else f"{err0} erreur(s)",
+                        "date_dimanche": date_str,
+                        "message_actualite": mention_sched,
+                        "template_key": email_tpl_key,
                     },
                 )
                 if ok0 == 0 and err0 == 0:

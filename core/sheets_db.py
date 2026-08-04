@@ -676,13 +676,17 @@ def default_tables() -> list[TableSpec]:
                 [
                     *BASE_COLUMNS,
                     "campaign_key",
-                    "run_kind",  # manual|scheduled
+                    "run_kind",  # manual|scheduled|manual_dry_run|manual_broadcast
                     "status_detail",
                     "started_at",
                     "finished_at",
                     "recipients_ok",
                     "recipients_err",
                     "error",
+                    # Suivi hebdo (maille envoi, pas OUTM) — mention éditoriale + dimanche ciblé
+                    "date_dimanche",
+                    "message_actualite",
+                    "template_key",
                 ]
             ),
         ),
