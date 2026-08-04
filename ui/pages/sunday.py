@@ -404,10 +404,24 @@ def render_sunday() -> None:
     )
     pref_langue = coerce_liturgy_pref_langue(pref_langue)
     if pref_langue != "FR":
-        st.caption(
-            "Hors FR : source Evangelizo (fenêtre ±30 jours autour d’aujourd’hui). "
-            "Au-delà, le cache RDC déjà rempli reste utilisable."
+        from core.evangelizo import (
+            EVANGELIZO_HORIZON_DAYS,
+            evangelizo_horizon_bounds,
+            is_within_evangelizo_horizon,
         )
+
+        if is_within_evangelizo_horizon(date_str):
+            st.caption(
+                f"Hors FR : Evangelizo à la volée (fenêtre ±{EVANGELIZO_HORIZON_DAYS} j) "
+                "si absent du cache RDC — puis écriture RDC automatique."
+            )
+        else:
+            lo, hi = evangelizo_horizon_bounds()
+            st.warning(
+                f"Date hors fenêtre Evangelizo (±{EVANGELIZO_HORIZON_DAYS} j : "
+                f"{lo.isoformat()} → {hi.isoformat()}). "
+                "Sans ligne RDC déjà préchargée pour cette langue, les lectures ne pourront pas être récupérées."
+            )
 
     gcs_top: object | None = None
     if cfg.gcp_service_account and cfg.gcs_bucket_name:
@@ -623,6 +637,14 @@ def render_sunday() -> None:
             f"aperçu : _{_preview}_",
             icon="📖",
         )
+        if liturgy_source_id and "rdc" not in str(liturgy_source_id) and pref_langue != "FR":
+            if "offline" in str(liturgy_source_id):
+                st.caption("Source : snapshot local (hors-ligne).")
+            else:
+                st.caption(
+                    "Source : Evangelizo à la volée (pas encore en RDC au chargement — "
+                    "une ligne RDC a pu être écrite juste après)."
+                )
 
     inject_liturgical_accent_style(getattr(identity, "couleur", None))
     if offline:
