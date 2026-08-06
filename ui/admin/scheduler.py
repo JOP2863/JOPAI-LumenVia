@@ -30,8 +30,9 @@ from core.sheets_db import (
 from core.subscriptions_util import subscription_is_active
 from core.weekly_email_urls import weekly_email_signed_urls
 from ui.admin.broadcast_recipients import (
-    format_broadcast_recipient_preview_line,
+    format_broadcast_recipient_preview_row_html,
     lumenvia_manual_broadcast_users,
+    render_broadcast_recipient_preview,
 )
 from ui.components import loading_overlay
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url
@@ -773,11 +774,12 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 st.caption(
                     "Colonnes : e-mail · prénom · nom · **langue d’envoi** (`pref_langue` du profil)."
                 )
-                lines = [
-                    format_broadcast_recipient_preview_line(u)
-                    for u in filtered_preview[: int(show_n)]
-                ]
-                st.code(("\n".join(lines) if lines else "—")[:9000])
+                render_broadcast_recipient_preview(
+                    [
+                        format_broadcast_recipient_preview_row_html(u)
+                        for u in filtered_preview[: int(show_n)]
+                    ]
+                )
 
                 # Confirmations
                 final_em = sum(1 for u in filtered_preview if str(u.get("email") or "").strip()) if chan_em else 0
@@ -844,14 +846,9 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 subj = str(tpl.get("subject") or "").strip()
                 body = str(tpl.get("body") or "").strip()
     
-                # Liens (signés) — PDF, audios, illustration
+                # Liens (signés) — PDF, audios, illustration (par langue plus bas)
                 origin = _lumenvia_app_origin_url() or ""
-                url_app = (origin.rstrip("/") + "/?route=about") if origin else ""
-                _sched_urls = weekly_email_signed_urls(cfg=cfg, gs=gs, date_str=date_str, zone="france")
-                url_pdf = _sched_urls["url_pdf"]
-                url_audio = _sched_urls["url_audio"]
-                url_audio_readings = _sched_urls["url_audio_readings"]
-                url_illu = _sched_urls["url_illustration"]
+                url_app = (origin.rstrip("/") + "/?sunday=" + date_str) if origin else ""
     
                 # SMTP/Twilio config réutilise _secret_get de la page Emailing (simple)
                 def _secret_get(*keys: str) -> str:
@@ -884,22 +881,35 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     EmailTemplate,
                     french_day_month_year,
                     inject_weekly_actualite_into_email_body,
+                    pick_latest_live_email_template_for_pref_langue,
                     render_weekly_email_template,
                     resolve_email_nom_du_dimanche,
                     strip_redundant_cette_semaine_lead,
                 )
+                from core.liturgy_day import coerce_liturgy_pref_langue
+                from core.locale_codes import user_pref_langue
+                from core.pdf_locale import email_date_dimanche_label
+                from core.readings_cache_loader import rdc_zone_for_pref_langue
+                from ui.streamlit_caches import cached_liturgy_day
 
                 import app as ap
 
                 try:
-                    ident_sched, _ = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
+                    ident_sched, _t0, _s0 = cached_liturgy_day(date_str, pref_langue="FR")
                 except Exception:
-                    ident_sched = None
+                    try:
+                        ident_sched, _ = ap.cached_aelf(date_str, zone="france", _identity_schema=4)
+                    except Exception:
+                        ident_sched = None
 
                 mention_sched = strip_redundant_cette_semaine_lead(
                     str(tpl.get("status_note") or "")
                 )
 
+                _zone_fr = rdc_zone_for_pref_langue("FR")
+                _urls_fr = weekly_email_signed_urls(
+                    cfg=cfg, gs=gs, date_str=date_str, zone=_zone_fr, pref_langue="FR"
+                )
                 vals_base = {
                     "origin": origin,
                     "date_dimanche": french_day_month_year(sunday),
@@ -909,15 +919,20 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                         gspread_client=gs,
                         spreadsheet_id=cfg.gsheet_id,
                     ),
-                    "url_pdf": url_pdf,
-                    "url_audio": url_audio,
-                    "url_audio_readings": url_audio_readings,
-                    "url_illustration": url_illu,
-                    "illustration_description": (_sched_urls.get("illustration_description") or "").strip(),
+                    "url_pdf": _urls_fr["url_pdf"],
+                    "url_audio": _urls_fr["url_audio"],
+                    "url_audio_readings": _urls_fr["url_audio_readings"],
+                    "url_illustration": _urls_fr["url_illustration"],
+                    "illustration_description": (_urls_fr.get("illustration_description") or "").strip(),
                     "url_app": url_app,
                     "message_actualite": mention_sched,
+                    "pref_langue": "FR",
                 }
-    
+                _urls_by_lang: dict[str, dict[str, str]] = {"FR": _urls_fr}
+                _tpl_by_lang: dict[str, tuple[str, str, str]] = {
+                    "FR": (subj, body, mention_sched)
+                }
+
                 for urec in recipients[:2000]:
                     uid0 = str(urec.get("entity_id") or "").strip() or "recipient"
                     em = str(urec.get("email") or "").strip()
@@ -926,8 +941,97 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     vals["prenom"] = str(urec.get("first_name") or "—").strip() or "—"
                     vals["nom"] = str(urec.get("last_name") or "—").strip() or "—"
                     vals["email"] = em
+                    urec_lang = coerce_liturgy_pref_langue(user_pref_langue(urec))
+                    vals["pref_langue"] = urec_lang
+                    if urec_lang not in _urls_by_lang:
+                        _urls_by_lang[urec_lang] = weekly_email_signed_urls(
+                            cfg=cfg,
+                            gs=gs,
+                            date_str=date_str,
+                            zone=rdc_zone_for_pref_langue(urec_lang),
+                            pref_langue=urec_lang,
+                        )
+                    u_urls = _urls_by_lang[urec_lang]
+                    vals["url_pdf"] = u_urls.get("url_pdf") or vals.get("url_pdf") or ""
+                    vals["url_audio"] = u_urls.get("url_audio") or vals.get("url_audio") or ""
+                    vals["url_audio_readings"] = (
+                        u_urls.get("url_audio_readings") or vals.get("url_audio_readings") or ""
+                    )
+                    vals["url_illustration"] = (
+                        u_urls.get("url_illustration") or vals.get("url_illustration") or ""
+                    )
+                    # Légende ILUS : pivot FR + traduction à la volée (ILUS souvent zone france seule).
+                    _desc_fr = (
+                        str((_urls_by_lang.get("FR") or {}).get("illustration_description") or "").strip()
+                        or str(vals.get("illustration_description") or "").strip()
+                        or str(u_urls.get("illustration_description") or "").strip()
+                    )
+                    if _desc_fr:
+                        if urec_lang != "FR":
+                            try:
+                                from core.emailing import localize_illustration_description_for_email
+
+                                vals["illustration_description"] = (
+                                    localize_illustration_description_for_email(
+                                        _desc_fr, pref_langue=urec_lang, cfg=cfg
+                                    )
+                                )
+                            except Exception:
+                                vals["illustration_description"] = _desc_fr
+                        else:
+                            vals["illustration_description"] = _desc_fr
+                    if urec_lang != "FR":
+                        try:
+                            vals["date_dimanche"] = email_date_dimanche_label(
+                                date_str, pref_langue=urec_lang
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            ident_l, _tl, _sl = cached_liturgy_day(
+                                date_str, pref_langue=urec_lang
+                            )
+                            vals["nom_du_dimanche"] = resolve_email_nom_du_dimanche(
+                                identity=ident_l,
+                                date_str=date_str,
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                            )
+                        except Exception:
+                            pass
+                        if urec_lang not in _tpl_by_lang:
+                            _tn = pick_latest_live_email_template_for_pref_langue(
+                                tpl_rows,
+                                template_key=email_tpl_key,
+                                pref_langue=urec_lang,
+                                channel="email",
+                                fallback_fr=True,
+                            )
+                            if _tn:
+                                _tpl_by_lang[urec_lang] = (
+                                    str(_tn.get("subject") or "").strip() or subj,
+                                    str(_tn.get("body") or "").strip() or body,
+                                    str(_tn.get("status_note") or "").strip() or mention_sched,
+                                )
+                            else:
+                                _tpl_by_lang[urec_lang] = (subj, body, mention_sched)
+                    subj_use, body_use, note_use = _tpl_by_lang.get(urec_lang) or (
+                        subj,
+                        body,
+                        mention_sched,
+                    )
+                    try:
+                        from core.emailing import replace_mission_quote_in_text
+
+                        body_use = replace_mission_quote_in_text(
+                            body_use, pref_langue=urec_lang
+                        )
+                    except Exception:
+                        pass
+                    vals["message_actualite"] = note_use
                     rendered = render_weekly_email_template(
-                        EmailTemplate(subject=subj, body=body), values={k: str(v) for k, v in vals.items()}
+                        EmailTemplate(subject=subj_use, body=body_use),
+                        values={k: str(v) for k, v in vals.items()},
                     )
     
                     # Envoi email (HTML gabarit)
@@ -935,7 +1039,9 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                         try:
                             html2 = ""  # le gabarit est généré dans render_admin_emailing; ici simple fallback texte
                             bt = inject_weekly_actualite_into_email_body(
-                                rendered.body.strip(), message=mention_sched
+                                rendered.body.strip(),
+                                message=note_use,
+                                pref_langue=urec_lang,
                             )
                             bt = (bt + "\n\n—\n") if bt else ""
                             bt += LUMENVIA_DEVELOPMENT_NOTICE

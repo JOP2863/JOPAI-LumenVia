@@ -118,12 +118,21 @@ def weekly_email_signed_urls(
         return out
     if gsheet_id:
         try:
-            out["illustration_description"] = _latest_illustration_description_from_ilus(
+            desc = _latest_illustration_description_from_ilus(
                 gspread_client=gs,
                 spreadsheet_id=gsheet_id,
                 date_str=date_str,
                 zone=zone,
             )
+            # Visuel / légende ILUS souvent stockés en zone france uniquement.
+            if not desc and str(zone or "").strip() != "france":
+                desc = _latest_illustration_description_from_ilus(
+                    gspread_client=gs,
+                    spreadsheet_id=gsheet_id,
+                    date_str=date_str,
+                    zone="france",
+                )
+            out["illustration_description"] = desc
         except Exception:
             pass
     p_pdf_cands = fascicule_pdf_path_candidates(date_str, pref_langue=lg)

@@ -35,6 +35,7 @@ from core.emailing import (
     inject_weekly_actualite_into_email_body,
     normalize_email_template_text,
     pick_latest_live_email_template,
+    pick_latest_live_email_template_for_pref_langue,
     render_weekly_email_template,
     resolve_email_nom_du_dimanche,
 )
@@ -45,10 +46,11 @@ from core.emailing_newsletter_html import (
 from core.weekly_email_urls import weekly_email_signed_urls
 from ui.admin.broadcast_recipients import (
     count_skipped_weekly_broadcast_recipients,
-    format_broadcast_recipient_preview_line,
+    format_broadcast_recipient_preview_row_html,
     is_broadcast_email_ok,
     lumenvia_manual_broadcast_recipient_pairs,
     lumenvia_manual_broadcast_users,
+    render_broadcast_recipient_preview,
 )
 from ui.components import loading_overlay
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url
@@ -218,21 +220,26 @@ def render_emailing_manual_broadcast(
     st.caption(
         "Colonne langue = `pref_langue` du profil (`users`) : langue dans laquelle l’e-mail sera rendu."
     )
-    preview_lines: list[str] = []
+    preview_rows: list[str] = []
     for em in selected_test_emails:
         u0 = _latest_user_by_email(em)
         if u0:
-            preview_lines.append(format_broadcast_recipient_preview_line(u0, email_fallback=em))
+            preview_rows.append(format_broadcast_recipient_preview_row_html(u0, email_fallback=em))
         else:
-            preview_lines.append(
-                format_broadcast_recipient_preview_line(
+            preview_rows.append(
+                format_broadcast_recipient_preview_row_html(
                     {"email": em, "first_name": "Test", "last_name": "JOPAI", "pref_langue": "FR"},
                     email_fallback=em,
                 )
             )
     if dry_phone_in and not selected_test_emails:
-        preview_lines.append(f"phone_e164:\t{dry_phone_in}")
-    st.code(("\n".join(preview_lines) if preview_lines else "—")[:9000])
+        preview_rows.append(
+            "<tr>"
+            f"<td style='padding:0.15rem 0.45rem;' colspan='4'>"
+            f"phone_e164:\t{html_escape(dry_phone_in)}</td>"
+            "</tr>"
+        )
+    render_broadcast_recipient_preview(preview_rows, max_height_px=220)
     debug_verbose = False
 
     # Garde-fous supplémentaires si envoi "tous opt-in"
@@ -354,11 +361,12 @@ def render_emailing_manual_broadcast(
             st.caption(
                 "Colonnes : e-mail · prénom · nom · **langue d’envoi** (`pref_langue` du profil)."
             )
-            lines = [
-                format_broadcast_recipient_preview_line(u)
-                for u in filtered_preview[: int(show_n)]
-            ]
-            st.code(("\n".join(lines) if lines else "—")[:9000])
+            render_broadcast_recipient_preview(
+                [
+                    format_broadcast_recipient_preview_row_html(u)
+                    for u in filtered_preview[: int(show_n)]
+                ]
+            )
 
             final_list = filtered_preview[: int(limit_to_n)] if limit_to_n > 0 else filtered_preview
             st.markdown(f"**Après exclusions/limite :** {len(final_list)} destinataire(s).")
@@ -503,7 +511,10 @@ def render_emailing_manual_broadcast(
                 if limit_to_n > 0:
                     recipients = recipients[: int(limit_to_n)]
             else:
-                # Destinataires de test sélectionnés (1 ou 2) + fallback dry-run
+                # Destinataires de test sélectionnés + fallback dry-run
+                # Important : conserver ``pref_langue`` du profil users (sinon envoi toujours en FR).
+                from core.locale_codes import user_pref_langue as _upl
+
                 recipients = []
                 for em in selected_test_emails:
                     u0 = _latest_user_by_email(em)
@@ -515,6 +526,7 @@ def render_emailing_manual_broadcast(
                                 "phone_e164": str(u0.get("phone_e164") or "").strip(),
                                 "first_name": str(u0.get("first_name") or "Test").strip() or "Test",
                                 "last_name": str(u0.get("last_name") or "JOPAI").strip() or "JOPAI",
+                                "pref_langue": _upl(u0) if u0 else "FR",
                             },
                         )
                     )
@@ -525,8 +537,9 @@ def render_emailing_manual_broadcast(
                             {
                                 "email": dry_email_in.strip(),
                                 "phone_e164": dry_phone_in.strip(),
-                                "first_name": "Test",
-                                "last_name": "JOPAI",
+                                "first_name": str(dry_user.get("first_name") or "Test").strip() or "Test",
+                                "last_name": str(dry_user.get("last_name") or "JOPAI").strip() or "JOPAI",
+                                "pref_langue": _upl(dry_user) if dry_user else "FR",
                             },
                         )
                     ]
@@ -669,11 +682,14 @@ def render_emailing_manual_broadcast(
                 except Exception:
                     d_pick = date.today()
             date_str = d_pick.isoformat()[:10]
-            try:
-                from core.liturgy_day import coerce_liturgy_pref_langue
-                from core.locale_codes import user_pref_langue
-                from ui.streamlit_caches import cached_liturgy_day
 
+            from core.liturgy_day import coerce_liturgy_pref_langue
+            from core.locale_codes import user_pref_langue
+            from core.pdf_locale import email_date_dimanche_label
+            from core.readings_cache_loader import rdc_zone_for_pref_langue
+            from ui.streamlit_caches import cached_liturgy_day
+
+            try:
                 ident0, _texts0, _sid = cached_liturgy_day(date_str, pref_langue="FR")
             except Exception:
                 try:
@@ -683,14 +699,19 @@ def render_emailing_manual_broadcast(
             origin = _lumenvia_app_origin_url() or ""
             url_app = (origin.rstrip("/") + "/?sunday=" + date_str) if origin else ""
             # URLs FR de base ; surchargées par destinataire selon pref_langue.
+            _zone_fr = rdc_zone_for_pref_langue("FR")
             _urls_send_fr = weekly_email_signed_urls(
-                cfg=cfg, gs=gs, date_str=date_str, zone="france", pref_langue="FR"
+                cfg=cfg, gs=gs, date_str=date_str, zone=_zone_fr, pref_langue="FR"
             )
+            _date_fr = french_day_month_year(d_pick)
+            note_fr = str(
+                st.session_state.get("adm_email_message_actualite") or ""
+            ).strip()
             values: dict[str, str] = {
                 "prenom": "Jean",
                 "nom": "Dupont",
                 "origin": origin,
-                "date_dimanche": french_day_month_year(d_pick),
+                "date_dimanche": _date_fr,
                 "nom_du_dimanche": resolve_email_nom_du_dimanche(
                     identity=ident0,
                     date_str=date_str,
@@ -704,12 +725,16 @@ def render_emailing_manual_broadcast(
                 "illustration_description": (_urls_send_fr.get("illustration_description") or "").strip(),
                 "url_app": url_app,
                 "optout_url": (origin.rstrip("/") + "/?route=join") if origin else "",
-                "message_actualite": str(
-                    st.session_state.get("adm_email_message_actualite") or ""
-                ).strip(),
+                "message_actualite": note_fr,
+                "pref_langue": "FR",
             }
 
+            # (subject, body, status_note / mention à injecter)
             _urls_by_lang: dict[str, dict[str, str]] = {"FR": _urls_send_fr}
+            _tpl_by_lang: dict[str, tuple[str, str, str]] = {
+                "FR": (subject_rt, body_rt, note_fr),
+            }
+            _missing_lang_tpl: list[str] = []
 
             for uid0, urec in recipients[:500]:
                 to_email = str(urec.get("email") or "").strip()
@@ -719,9 +744,15 @@ def render_emailing_manual_broadcast(
                 values2["nom"] = str(urec.get("last_name") or "—").strip() or "—"
                 values2["email"] = to_email
                 urec_lang = coerce_liturgy_pref_langue(user_pref_langue(urec))
+                values2["pref_langue"] = urec_lang
                 if urec_lang not in _urls_by_lang:
+                    _zone_lg = rdc_zone_for_pref_langue(urec_lang)
                     _urls_by_lang[urec_lang] = weekly_email_signed_urls(
-                        cfg=cfg, gs=gs, date_str=date_str, zone="france", pref_langue=urec_lang
+                        cfg=cfg,
+                        gs=gs,
+                        date_str=date_str,
+                        zone=_zone_lg,
+                        pref_langue=urec_lang,
                     )
                 u_urls = _urls_by_lang[urec_lang]
                 values2["url_pdf"] = u_urls.get("url_pdf") or values2.get("url_pdf") or ""
@@ -732,14 +763,35 @@ def render_emailing_manual_broadcast(
                 values2["url_illustration"] = (
                     u_urls.get("url_illustration") or values2.get("url_illustration") or ""
                 )
-                if u_urls.get("illustration_description"):
-                    values2["illustration_description"] = str(
-                        u_urls.get("illustration_description") or ""
-                    ).strip()
+                # Légende ILUS : toujours depuis le pivot FR (souvent zone france uniquement),
+                # puis traduction à la volée — ne pas dépendre de u_urls[lang] qui peut être vide.
+                _desc_fr = (
+                    str((_urls_by_lang.get("FR") or {}).get("illustration_description") or "").strip()
+                    or str(values2.get("illustration_description") or "").strip()
+                    or str(u_urls.get("illustration_description") or "").strip()
+                )
+                if _desc_fr:
+                    if urec_lang != "FR":
+                        try:
+                            from core.emailing import localize_illustration_description_for_email
+
+                            values2["illustration_description"] = (
+                                localize_illustration_description_for_email(
+                                    _desc_fr, pref_langue=urec_lang, cfg=cfg
+                                )
+                            )
+                        except Exception:
+                            values2["illustration_description"] = _desc_fr
+                    else:
+                        values2["illustration_description"] = _desc_fr
                 if urec_lang != "FR":
                     try:
-                        from ui.streamlit_caches import cached_liturgy_day
-
+                        values2["date_dimanche"] = email_date_dimanche_label(
+                            date_str, pref_langue=urec_lang
+                        )
+                    except Exception:
+                        pass
+                    try:
                         ident_l, _t_l, _s = cached_liturgy_day(date_str, pref_langue=urec_lang)
                         values2["nom_du_dimanche"] = resolve_email_nom_du_dimanche(
                             identity=ident_l,
@@ -749,6 +801,38 @@ def render_emailing_manual_broadcast(
                         )
                     except Exception:
                         pass
+                    if urec_lang not in _tpl_by_lang:
+                        _tpl_native = pick_latest_live_email_template_for_pref_langue(
+                            _tpl_mail_rows,
+                            template_key=template_key,
+                            pref_langue=urec_lang,
+                            channel="email",
+                            fallback_fr=False,
+                        )
+                        if _tpl_native:
+                            _tpl_by_lang[urec_lang] = (
+                                str(_tpl_native.get("subject") or "").strip() or subject_rt,
+                                str(_tpl_native.get("body") or "").strip() or body_rt,
+                                str(_tpl_native.get("status_note") or "").strip() or note_fr,
+                            )
+                        else:
+                            _tpl_by_lang[urec_lang] = (subject_rt, body_rt, note_fr)
+                            if urec_lang not in _missing_lang_tpl:
+                                _missing_lang_tpl.append(urec_lang)
+                subj_use, body_use, note_use = _tpl_by_lang.get(urec_lang) or (
+                    subject_rt,
+                    body_rt,
+                    note_fr,
+                )
+                try:
+                    from core.emailing import replace_mission_quote_in_text
+
+                    body_use = replace_mission_quote_in_text(
+                        body_use, pref_langue=urec_lang
+                    )
+                except Exception:
+                    pass
+                values2["message_actualite"] = note_use
                 # Lien préférences: pré-remplit l'email sur "Nous rejoindre"
                 try:
                     from urllib.parse import quote_plus
@@ -758,7 +842,7 @@ def render_emailing_manual_broadcast(
                     enc = quote_plus(to_email) if quote_plus else to_email
                     values2["optout_url"] = values2["origin"].rstrip("/") + "/?route=join&email=" + enc
                 rendered2 = render_weekly_email_template(
-                    EmailTemplate(subject=subject_rt, body=body_rt), values=values2
+                    EmailTemplate(subject=subj_use, body=body_use), values=values2
                 )
                 # Placeholder "docx" (non-tag) : illustration
                 rendered2 = EmailTemplate(
@@ -795,7 +879,9 @@ def render_emailing_manual_broadcast(
                 body_clean = body_clean.strip()
                 msg_actu = str(values2.get("message_actualite") or "")
                 # Texte brut : paragraphe injecté. HTML LV : injecté via values (évite le double).
-                body_txt = inject_weekly_actualite_into_email_body(body_clean, message=msg_actu)
+                body_txt = inject_weekly_actualite_into_email_body(
+                    body_clean, message=msg_actu, pref_langue=urec_lang
+                )
                 rendered2 = EmailTemplate(subject=rendered2.subject, body=body_txt.strip())
 
                 if send_email:
@@ -1002,6 +1088,13 @@ def render_emailing_manual_broadcast(
                 st.error(f"Échec : {err} erreur(s), aucun envoi réussi.")
             else:
                 st.warning(f"Terminé partiellement : {ok} envoi(s) OK, {err} erreur(s).")
+            if _missing_lang_tpl:
+                st.warning(
+                    "Pas de template **Actif** dans ETPL pour : "
+                    + ", ".join(f"`{x}`" for x in _missing_lang_tpl)
+                    + " — corps/objet FR utilisés (liens médias déjà localisés). "
+                    "Ajoute une ligne `language=de` (etc.) dans ETPL pour un texte natif."
+                )
 
             # Suivi hebdo (RUNS) : une ligne pour la mention + date — pas de duplication OUTM.
             if ok > 0 or err > 0:

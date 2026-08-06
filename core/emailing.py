@@ -81,6 +81,51 @@ def pick_latest_live_email_template(
     return max(pool, key=_key)
 
 
+def language_filter_for_pref_langue(pref_langue: object | None) -> tuple[str, ...]:
+    """Valeurs acceptées dans ``email_templates.language`` pour une ``pref_langue`` produit."""
+    from core.liturgy_day import coerce_liturgy_pref_langue
+
+    lg = coerce_liturgy_pref_langue(pref_langue)
+    # FR : chaîne vide = historique (templates sans langue = français).
+    if lg == "FR":
+        return ("fr", "fr-fr", "france", "FR", "")
+    aliases: dict[str, tuple[str, ...]] = {
+        "DE": ("de", "de-de", "deutsch", "germany", "allemagne", "DE"),
+        "EN": ("en", "en-gb", "en-us", "english", "uk", "gb", "EN"),
+        "ES": ("es", "es-es", "español", "espanol", "spain", "ES"),
+        "IT": ("it", "it-it", "italiano", "italy", "italia", "IT"),
+    }
+    return aliases.get(lg, (lg.lower(), lg))
+
+
+def pick_latest_live_email_template_for_pref_langue(
+    rows: Iterable[dict[str, Any]],
+    *,
+    template_key: str,
+    pref_langue: object | None,
+    channel: str = "email",
+    fallback_fr: bool = True,
+) -> dict[str, Any] | None:
+    """Template Actif pour ``pref_langue`` ; repli FR si ``fallback_fr`` et aucune ligne native."""
+    from core.liturgy_day import coerce_liturgy_pref_langue
+
+    lg = coerce_liturgy_pref_langue(pref_langue)
+    tpl = pick_latest_live_email_template(
+        rows,
+        template_key=template_key,
+        channel=channel,
+        language_in=language_filter_for_pref_langue(lg),
+    )
+    if tpl is None and fallback_fr and lg != "FR":
+        tpl = pick_latest_live_email_template(
+            rows,
+            template_key=template_key,
+            channel=channel,
+            language_in=language_filter_for_pref_langue("FR"),
+        )
+    return tpl
+
+
 _TAG_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 
 
@@ -123,13 +168,39 @@ _CLES_LECTURE_RENDERED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Ancre FR (templates mal traduits) — remplacée par la phrase localisée à l’envoi.
+_CLES_LECTURE_FR_BASE_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"les\s+cl[eé]s\s+de\s+lecture\s+de\s+la\s+c[eé]l[eé]bration\s+de\s+ce\s+dimanche",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"les\s+cl[eé]s\s+de\s+lecture\s+de\s+ce\s+dimanche",
+        re.IGNORECASE,
+    ),
+)
 
-def email_cles_lecture_celebration_phrase(*, date_label: str) -> str:
+_CLES_LECTURE_BASE_BY_LANG: dict[str, str] = {
+    "FR": "les clés de lecture de la célébration de ce dimanche",
+    "DE": "die Leseschlüssel für die Feier dieses Sonntags",
+    "EN": "the keys to reading this Sunday's celebration",
+    "ES": "las claves de lectura de la celebración de este domingo",
+    "IT": "le chiavi di lettura della celebrazione di questa domenica",
+}
+
+
+def email_cles_lecture_celebration_phrase(
+    *, date_label: str, pref_langue: object | None = None
+) -> str:
     """Phrase canonique après « Nous avons préparé pour vous … » (date = ``{{date_dimanche}}`` résolu)."""
+    from core.prompt_locale import coerce_aip_langue
+
+    lg = coerce_aip_langue(pref_langue)
+    base = _CLES_LECTURE_BASE_BY_LANG.get(lg) or _CLES_LECTURE_BASE_BY_LANG["FR"]
     d = str(date_label or "").strip()
     if not d:
-        return "les clés de lecture de la célébration de ce dimanche"
-    return f"les clés de lecture de la célébration de ce dimanche {d}"
+        return base
+    return f"{base} {d}"
 
 
 def normalize_email_body_liturgy_clause(body: str) -> str:
@@ -140,12 +211,28 @@ def normalize_email_body_liturgy_clause(body: str) -> str:
     return out
 
 
-def fix_rendered_email_cles_lecture_phrase(body: str, *, date_label: str) -> str:
-    """Corrige les corps déjà rendus (ex. « de ce Sainte Trinité ») — templates ETPL hérités."""
-    if not body or not str(date_label or "").strip():
+def fix_rendered_email_cles_lecture_phrase(
+    body: str, *, date_label: str, pref_langue: object | None = None
+) -> str:
+    """Corrige restes FR / formulations héritées — templates ETPL, y compris hors FR."""
+    from core.prompt_locale import coerce_aip_langue
+
+    if not body:
         return body
-    canonical = email_cles_lecture_celebration_phrase(date_label=date_label)
-    return _CLES_LECTURE_RENDERED_RE.sub(canonical, body, count=1)
+    lg = coerce_aip_langue(pref_langue)
+    d = str(date_label or "").strip()
+    canonical = email_cles_lecture_celebration_phrase(date_label=d, pref_langue=lg)
+    out = body
+    for base_re in _CLES_LECTURE_FR_BASE_RES:
+        if d:
+            pat = re.compile(base_re.pattern + r"(?:\s+" + re.escape(d) + r")?", re.I)
+        else:
+            pat = base_re
+        if pat.search(out):
+            return pat.sub(canonical, out, count=1)
+    if lg == "FR" and d:
+        return _CLES_LECTURE_RENDERED_RE.sub(canonical, out, count=1)
+    return out
 
 
 def render_weekly_email_template(tpl: EmailTemplate, *, values: dict[str, str]) -> EmailTemplate:
@@ -153,18 +240,29 @@ def render_weekly_email_template(tpl: EmailTemplate, *, values: dict[str, str]) 
     Rendu e-mail hebdo : normalise la phrase « clés de lecture » et injecte ``cles_lecture_celebration``.
     """
     date_label = str(values.get("date_dimanche") or "").strip()
+    pref = values.get("pref_langue")
     vals = dict(values)
     vals.setdefault(
         "cles_lecture_celebration",
-        email_cles_lecture_celebration_phrase(date_label=date_label),
+        email_cles_lecture_celebration_phrase(date_label=date_label, pref_langue=pref),
     )
     body_norm = normalize_email_body_liturgy_clause(tpl.body or "")
     rendered = render_template(EmailTemplate(subject=tpl.subject, body=body_norm), values=vals)
-    fixed_body = fix_rendered_email_cles_lecture_phrase(rendered.body or "", date_label=date_label)
+    fixed_body = fix_rendered_email_cles_lecture_phrase(
+        rendered.body or "", date_label=date_label, pref_langue=pref
+    )
     return EmailTemplate(subject=rendered.subject, body=fixed_body)
 
 
 WEEKLY_ACTUALITE_LEAD = "À noter cette semaine dans l'actualité de LumenVia : "
+
+WEEKLY_ACTUALITE_LEAD_BY_LANG: dict[str, str] = {
+    "FR": WEEKLY_ACTUALITE_LEAD,
+    "DE": "Aktuelles von LumenVia in dieser Woche: ",
+    "EN": "This week in LumenVia news: ",
+    "ES": "Novedades de LumenVia esta semana: ",
+    "IT": "Novità di LumenVia di questa settimana: ",
+}
 
 # Texte proposé pour l’envoi hebdo (UI Emailing + défaut si ETPL.status_note vide).
 # Ne pas commencer par « Cette semaine » : le préfixe WEEKLY_ACTUALITE_LEAD l’indique déjà.
@@ -182,32 +280,162 @@ DEFAULT_WEEKLY_ACTUALITE_MESSAGE = PROPOSED_WEEKLY_ACTUALITE_MESSAGE
 
 _CETTE_SEMAINE_LEAD_RE = re.compile(r"(?is)^cette\s+semaine\s*[,:\-–—]?\s*")
 
+_EMAIL_GREETING_LINE_RE = re.compile(
+    r"(?i)^\s*(bonjour|hallo|guten\s+tag|hello|hi|hola|buenos\s+d[ií]as|"
+    r"buenas\s+tardes|ciao|buongiorno|lieber?\b|dear\b)\b"
+)
+
+
+def weekly_actualite_lead_for_lang(pref_langue: object | None = None) -> str:
+    from core.prompt_locale import coerce_aip_langue
+
+    lg = coerce_aip_langue(pref_langue)
+    return WEEKLY_ACTUALITE_LEAD_BY_LANG.get(lg) or WEEKLY_ACTUALITE_LEAD
+
+
+# Citation signature LumenVia (corps e-mail / encadré HTML).
+LUMENVIA_MISSION_QUOTE_FR = (
+    "LumenVia n'est pas là pour remplacer la rencontre, mais pour la préparer, "
+    "afin que chaque messe devienne une rencontre plus consciente avec le Christ."
+)
+
+LUMENVIA_MISSION_QUOTE_BY_LANG: dict[str, str] = {
+    "FR": LUMENVIA_MISSION_QUOTE_FR,
+    "DE": (
+        "LumenVia ist nicht dazu da, die Begegnung zu ersetzen, sondern sie vorzubereiten, "
+        "damit jede Messe zu einer bewussteren Begegnung mit Christus wird."
+    ),
+    "EN": (
+        "LumenVia is not here to replace the encounter, but to prepare for it, "
+        "so that each Mass may become a more conscious encounter with Christ."
+    ),
+    "ES": (
+        "LumenVia no está ahí para reemplazar el encuentro, sino para prepararlo, "
+        "a fin de que cada misa se convierta en un encuentro más consciente con Cristo."
+    ),
+    "IT": (
+        "LumenVia non è qui per sostituire l'incontro, ma per prepararlo, "
+        "affinché ogni messa diventi un incontro più consapevole con Cristo."
+    ),
+}
+
+
+def lumenvia_mission_quote_for_lang(pref_langue: object | None = None) -> str:
+    from core.prompt_locale import coerce_aip_langue
+
+    lg = coerce_aip_langue(pref_langue)
+    return LUMENVIA_MISSION_QUOTE_BY_LANG.get(lg) or LUMENVIA_MISSION_QUOTE_FR
+
+
+def replace_mission_quote_in_text(text: str, *, pref_langue: object | None) -> str:
+    """Remplace toute variante connue de la citation signature par la version localisée."""
+    out = text or ""
+    target = lumenvia_mission_quote_for_lang(pref_langue)
+    variants: list[str] = []
+    for q in LUMENVIA_MISSION_QUOTE_BY_LANG.values():
+        if q and q not in variants:
+            variants.append(q)
+        # Apostrophe typographique vs ASCII
+        q2 = (q or "").replace("'", "’")
+        if q2 and q2 not in variants:
+            variants.append(q2)
+        q3 = (q or "").replace("’", "'")
+        if q3 and q3 not in variants:
+            variants.append(q3)
+    for q in variants:
+        if q and q != target and q in out:
+            out = out.replace(q, target)
+    return out
+
+
+_ILLU_DESC_EMAIL_CACHE: dict[tuple[str, str], str] = {}
+
+
+def localize_illustration_description_for_email(
+    text_fr: str,
+    *,
+    pref_langue: object | None,
+    cfg: object | None = None,
+) -> str:
+    """Traduit la légende ILUS (FR) pour l’e-mail selon ``pref_langue`` (cache process)."""
+    from core.prompt_locale import coerce_aip_langue
+    from core.prompt_translate import translate_plain_fr_to
+
+    src = (text_fr or "").strip()
+    if not src:
+        return ""
+    lg = coerce_aip_langue(pref_langue)
+    if lg == "FR":
+        return src
+    key = (lg, src)
+    cached = _ILLU_DESC_EMAIL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    vertex = None
+    try:
+        sa = getattr(cfg, "gcp_service_account", None) if cfg is not None else None
+        if not sa:
+            from core.config import load_config
+
+            sa = getattr(load_config(), "gcp_service_account", None)
+        if sa:
+            from core.vertex_gemini import VertexGeminiClient
+
+            vertex = VertexGeminiClient(service_account_info=sa)
+    except Exception:
+        vertex = None
+    try:
+        out = translate_plain_fr_to(
+            src,
+            target_lang=lg,
+            vertex_client=vertex,
+            context="short liturgical illustration caption for a Sunday email newsletter",
+        )
+        out = (out or src).strip() or src
+    except Exception:
+        out = src
+    _ILLU_DESC_EMAIL_CACHE[key] = out
+    return out
+
 
 def strip_redundant_cette_semaine_lead(message: str) -> str:
     """Retire un « Cette semaine, » en tête (déjà présent dans ``WEEKLY_ACTUALITE_LEAD``)."""
     return _CETTE_SEMAINE_LEAD_RE.sub("", (message or "").strip()).strip()
 
 
-def format_weekly_actualite_paragraph(message: str) -> str:
+def format_weekly_actualite_paragraph(
+    message: str, *, pref_langue: object | None = None
+) -> str:
     """
     Paragraphe éditorial optionnel (actualité LumenVia).
-    Préfixe automatique sauf si le message commence déjà par « À noter cette semaine… ».
+    Préfixe automatique selon ``pref_langue`` sauf si le message commence déjà par un lead connu.
     """
+    from core.prompt_locale import coerce_aip_langue
+
     msg = (message or "").strip()
     if not msg:
         return ""
+    lg = coerce_aip_langue(pref_langue)
+    lead = weekly_actualite_lead_for_lang(lg)
     low = msg.lower().replace("’", "'")
+    # Déjà préfixé (FR ou autre langue).
     if low.startswith("à noter cette semaine") or low.startswith("a noter cette semaine"):
         return msg
+    for other in WEEKLY_ACTUALITE_LEAD_BY_LANG.values():
+        o = (other or "").strip().lower().replace("’", "'")
+        if o and low.startswith(o.rstrip(" :").lower()):
+            return msg
     msg = strip_redundant_cette_semaine_lead(msg)
     if not msg:
         return ""
-    return f"{WEEKLY_ACTUALITE_LEAD}{msg}"
+    return f"{lead}{msg}"
 
 
-def inject_weekly_actualite_into_email_body(body: str, *, message: str) -> str:
-    """Insère le paragraphe d’actualité juste après la ligne « Bonjour… », sinon en tête."""
-    para = format_weekly_actualite_paragraph(message)
+def inject_weekly_actualite_into_email_body(
+    body: str, *, message: str, pref_langue: object | None = None
+) -> str:
+    """Insère le paragraphe d’actualité juste après la ligne de salutation, sinon en tête."""
+    para = format_weekly_actualite_paragraph(message, pref_langue=pref_langue)
     if not para:
         return body or ""
     text = (body or "").replace("\r\n", "\n")
@@ -216,7 +444,7 @@ def inject_weekly_actualite_into_email_body(body: str, *, message: str) -> str:
     inserted = False
     for ln in lines:
         out.append(ln)
-        if not inserted and re.match(r"(?i)^\s*bonjour\b", (ln or "").strip()):
+        if not inserted and _EMAIL_GREETING_LINE_RE.match((ln or "").strip()):
             out.append("")
             out.append(para)
             inserted = True

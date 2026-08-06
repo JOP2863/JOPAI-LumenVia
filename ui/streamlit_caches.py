@@ -168,3 +168,53 @@ def cached_liturgy_day(
     id_d, txt_d, source_id = _cached_liturgy_day_raw(date_str, lg, _schema=3)
     return AelfDayIdentity(**id_d), AelfTexts(**txt_d), source_id
 
+
+@st.cache_data(ttl=75, max_entries=48, show_spinner=False)
+def sunday_media_status_matrix_cached(
+    spreadsheet_id: str,
+    date_str: str,
+    bucket_name: str,
+    service_account_json: str,
+    langs_key: str,
+    _schema: int = 2,
+) -> list[dict]:
+    """
+    Statut GCS/Sheets des médias dimanche (par langue).
+
+    TTL court : les clics widgets ne refont pas N× ``blob_exists`` + URLs signées.
+    Invalider après génération via ``invalidate_sunday_media_status_cache``.
+    ``_schema`` : bumper pour invalider après ajout de champs (voix TTS, etc.).
+    """
+    if not spreadsheet_id or not service_account_json or not date_str:
+        return []
+    from core.gcp_clients import build_gcs_client
+    from core.sunday_media_status import media_status_matrix
+
+    info = json.loads(service_account_json)
+    gs = build_gspread_client(info)
+    gcs = None
+    bucket = str(bucket_name or "").strip()
+    if bucket:
+        try:
+            gcs = build_gcs_client(info)
+        except Exception:
+            gcs = None
+    langs = tuple(x.strip().upper() for x in str(langs_key or "").split(",") if x.strip()) or None
+    from dataclasses import replace
+
+    cfg = load_config()
+    replace_kw: dict = {"gsheet_id": spreadsheet_id}
+    if bucket:
+        replace_kw["gcs_bucket_name"] = bucket
+    try:
+        cfg = replace(cfg, **replace_kw)
+    except Exception:
+        pass
+    rows = media_status_matrix(gs=gs, gcs=gcs, cfg=cfg, date_str=date_str, langs=langs)
+    return [asdict(r) for r in rows]
+
+
+def invalidate_sunday_media_status_cache() -> None:
+    """Après génération / publication réussie des médias dimanche."""
+    sunday_media_status_matrix_cached.clear()
+

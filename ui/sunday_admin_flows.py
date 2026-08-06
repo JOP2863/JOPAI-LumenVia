@@ -1426,6 +1426,7 @@ def _run_publish_lang_from_fr_pivot(
     generate_readings_audio: bool = True,
     generate_synth_audio: bool = True,
     generate_pdf: bool = True,
+    generate_synth_text: bool = True,
     include_catechese_pdf: bool = True,
     force: bool = False,
     _overlay: object | None = None,
@@ -1448,46 +1449,58 @@ def _run_publish_lang_from_fr_pivot(
     status = media_status_for_lang(
         gs=gs, gcs=gcs, cfg=cfg, date_str=day, pref_langue=lg
     )
-    if status.all_ready and not force:
+    need_synth_audio = generate_synth_audio and (force or not status.synth_audio)
+    need_readings = generate_readings_audio and (force or not status.readings_audio)
+    need_pdf = generate_pdf and (force or not status.pdf)
+    need_text = (generate_synth_text or need_synth_audio or need_pdf) and (
+        force or not status.synth_text
+    )
+
+    if not (need_text or need_synth_audio or need_readings or need_pdf):
         return {
             "level": "info",
-            "message": f"{lg} : déjà complet — ignoré (coche « Forcer » pour refaire).",
+            "message": f"{lg} : rien à faire pour la sélection.",
         }
 
     identity, texts = _ensure_texts_for_pref_langue(
         texts=texts, identity=identity, pref_langue=lg
     )
     fr_body = (fr_synth_text or "").strip()
-    if not fr_body:
+    needs_pivot = need_text or need_synth_audio or need_pdf
+    if needs_pivot and not fr_body:
         return {
             "level": "error",
             "message": f"{lg} : synthèse FR pivot introuvable — génère d’abord le français.",
         }
 
-    if _overlay is not None:
-        _flow_overlay_step(
-            _overlay,
-            f"LumenVia · {lg} — localisation de la synthèse…",
-            hint="Traduction programme du pivot FR (pas de nouvelle rédaction IA).",
-        )
+    localized = ""
+    gen_entity_id = str(status.gen_entity_id or "").strip()
+    text_path = ""
 
-    if lg == "FR":
-        localized = fr_body
-    else:
-        localized = localize_synthesis_from_fr(fr_body, target_lang=lg)
+    if needs_pivot:
+        if _overlay is not None:
+            _flow_overlay_step(
+                _overlay,
+                f"LumenVia · {lg} — localisation de la synthèse…",
+                hint="Traduction programme du pivot FR (pas de nouvelle rédaction IA).",
+            )
 
-    source_hash = sha256(
-        f"localized_from_fr|{day}|{lg}|{sha256(fr_body.encode('utf-8')).hexdigest()[:16]}".encode(
-            "utf-8"
-        )
-    ).hexdigest()[:32]
-    gen_entity_id = sha256(f"{day}|{zone}|{source_hash}".encode("utf-8")).hexdigest()[:24]
-    text_path = synthesis_text_path(day, gen_entity_id, pref_langue=lg)
+        if lg == "FR":
+            localized = fr_body
+        else:
+            localized = localize_synthesis_from_fr(fr_body, target_lang=lg)
 
-    need_text = force or not status.synth_text
-    need_synth_audio = generate_synth_audio and (force or not status.synth_audio)
-    need_readings = generate_readings_audio and (force or not status.readings_audio)
-    need_pdf = generate_pdf and (force or not status.pdf)
+        source_hash = sha256(
+            f"localized_from_fr|{day}|{lg}|{sha256(fr_body.encode('utf-8')).hexdigest()[:16]}".encode(
+                "utf-8"
+            )
+        ).hexdigest()[:32]
+        gen_entity_id = sha256(f"{day}|{zone}|{source_hash}".encode("utf-8")).hexdigest()[:24]
+        text_path = synthesis_text_path(day, gen_entity_id, pref_langue=lg)
+    elif not gen_entity_id:
+        gen_entity_id = sha256(
+            f"readings_only|{day}|{zone}|{lg}".encode("utf-8")
+        ).hexdigest()[:24]
 
     done: list[str] = []
     issues: list[str] = []
@@ -1884,47 +1897,55 @@ def _run_multilang_sunday_batch(
         gs=gs, gcs=gcs, cfg=cfg, date_str=day
     )
     if ensure_fr_first and (not fr_text.strip() or force and "FR" in wanted):
-        if _overlay is not None:
-            _flow_overlay_step(
-                _overlay,
-                "LumenVia · FR — rédaction synthèse (Vertex)…",
-                hint="Pivot français requis avant localisation des autres langues.",
+        # Ne force le pivot FR que si au moins une langue hors lectures-only en a besoin,
+        # ou si FR lui-même est demandé.
+        needs_pivot_langs = bool(wanted)  # batch historique : toujours OK de générer FR
+        if needs_pivot_langs and (not fr_text.strip() or (force and "FR" in wanted)):
+            if _overlay is not None:
+                _flow_overlay_step(
+                    _overlay,
+                    "LumenVia · FR — rédaction synthèse (Vertex)…",
+                    hint="Pivot français requis avant localisation des autres langues.",
+                )
+            total_words = sum(
+                len(str(getattr(texts, k, "") or "").split())
+                for k in (
+                    "premiere_lecture",
+                    "psaume",
+                    "deuxieme_lecture",
+                    "evangile",
+                )
             )
-        total_words = sum(
-            len(str(getattr(texts, k, "") or "").split())
-            for k in (
-                "premiere_lecture",
-                "psaume",
-                "deuxieme_lecture",
-                "evangile",
+            fr_flow = _run_generate_sunday_flow(
+                _overlay=_overlay or st.empty(),
+                identity=identity,
+                texts=texts,
+                zone=rdc_zone_for_pref_langue("FR"),
+                total_words=max(total_words, 80),
+                pct=int(pct),
+                include_takeaways=include_takeaways,
+                include_catechese_bridge=include_catechese_bridge,
+                generate_pdf=generate_pdf and "FR" in wanted,
+                generate_readings_audio=generate_readings_audio and "FR" in wanted,
+                debug=False,
+                cfg=cfg,
+                pref_langue="FR",
             )
-        )
-        fr_flow = _run_generate_sunday_flow(
-            _overlay=_overlay or st.empty(),
-            identity=identity,
-            texts=texts,
-            zone=rdc_zone_for_pref_langue("FR"),
-            total_words=max(total_words, 80),
-            pct=int(pct),
-            include_takeaways=include_takeaways,
-            include_catechese_bridge=include_catechese_bridge,
-            generate_pdf=generate_pdf and "FR" in wanted,
-            generate_readings_audio=generate_readings_audio and "FR" in wanted,
-            debug=False,
-            cfg=cfg,
-            pref_langue="FR",
-        )
-        messages.append(str(fr_flow.get("message") or "FR généré."))
-        if fr_flow.get("level") == "error":
-            return {
-                "level": "error",
-                "message": "Échec pivot FR — " + str(fr_flow.get("message") or ""),
-            }
-        fr_text, _fr_eid = _load_fr_master_synthesis_text(
-            gs=gs, gcs=gcs, cfg=cfg, date_str=day
-        )
+            messages.append(str(fr_flow.get("message") or "FR généré."))
+            if fr_flow.get("level") == "error":
+                return {
+                    "level": "error",
+                    "message": "Échec pivot FR — " + str(fr_flow.get("message") or ""),
+                }
+            fr_text, _fr_eid = _load_fr_master_synthesis_text(
+                gs=gs, gcs=gcs, cfg=cfg, date_str=day
+            )
 
-    if not fr_text.strip():
+    # FR requis seulement si on localise (pas pour lectures natives seules).
+    needs_any_pivot = bool(
+        generate_synth_audio or generate_pdf or ("FR" in wanted and ensure_fr_first)
+    )
+    if needs_any_pivot and not fr_text.strip():
         return {
             "level": "error",
             "message": "Synthèse FR absente — impossible de localiser les autres langues.",
@@ -1967,6 +1988,143 @@ def _run_multilang_sunday_batch(
             generate_pdf=generate_pdf,
             include_catechese_pdf=include_catechese_pdf,
             force=force,
+            _overlay=_overlay,
+        )
+        messages.append(str(res.get("message") or lg))
+        lv = str(res.get("level") or "info")
+        if lv == "error":
+            worst = "error"
+        elif lv == "warning" and worst == "success":
+            worst = "warning"
+
+    return {"level": worst, "message": "\n".join(messages)}
+
+
+def _run_multilang_from_cell_selection(
+    *,
+    cfg: object,
+    gs: object,
+    gcs: object,
+    identity: object,
+    texts: object,
+    selected: list[tuple[str, str]],
+    include_catechese_pdf: bool = True,
+    pct: int = 20,
+    include_takeaways: bool = True,
+    include_catechese_bridge: bool = True,
+    _overlay: object | None = None,
+) -> dict[str, str]:
+    """
+    Génération granulaire depuis le tableau (paires langue × média).
+    """
+    from core.readings_cache_loader import rdc_zone_for_pref_langue
+
+    day = str(getattr(identity, "date", "") or "").strip()[:10]
+    by_sel: dict[str, set[str]] = {}
+    for lg0, kind in selected:
+        lg = coerce_liturgy_pref_langue(lg0)
+        by_sel.setdefault(lg, set()).add(str(kind))
+
+    if not by_sel:
+        return {"level": "info", "message": "Aucune sélection."}
+
+    messages: list[str] = []
+    worst = "success"
+    fr_text, _fr_eid = _load_fr_master_synthesis_text(
+        gs=gs, gcs=gcs, cfg=cfg, date_str=day
+    )
+
+    needs_fr_pivot = any(
+        (lg != "FR" and (kinds & {"synth_text", "synth_audio", "pdf"}))
+        or (lg == "FR" and ("synth_text" in kinds))
+        for lg, kinds in by_sel.items()
+    )
+    fr_kinds = by_sel.get("FR", set())
+
+    if needs_fr_pivot and not fr_text.strip():
+        if _overlay is not None:
+            _flow_overlay_step(
+                _overlay,
+                "LumenVia · FR — rédaction synthèse (Vertex)…",
+                hint="Pivot français requis.",
+            )
+        total_words = sum(
+            len(str(getattr(texts, k, "") or "").split())
+            for k in (
+                "premiere_lecture",
+                "psaume",
+                "deuxieme_lecture",
+                "evangile",
+            )
+        )
+        fr_flow = _run_generate_sunday_flow(
+            _overlay=_overlay or st.empty(),
+            identity=identity,
+            texts=texts,
+            zone=rdc_zone_for_pref_langue("FR"),
+            total_words=max(total_words, 80),
+            pct=int(pct),
+            include_takeaways=include_takeaways,
+            include_catechese_bridge=include_catechese_bridge,
+            generate_pdf="pdf" in fr_kinds,
+            generate_readings_audio="readings_audio" in fr_kinds,
+            debug=False,
+            cfg=cfg,
+            pref_langue="FR",
+        )
+        messages.append(str(fr_flow.get("message") or "FR généré."))
+        if fr_flow.get("level") == "error":
+            return {
+                "level": "error",
+                "message": "Échec pivot FR — " + str(fr_flow.get("message") or ""),
+            }
+        fr_text, _fr_eid = _load_fr_master_synthesis_text(
+            gs=gs, gcs=gcs, cfg=cfg, date_str=day
+        )
+        # FR text + optional media already handled by generate flow — drop synth_text from FR set
+        fr_kinds.discard("synth_text")
+        if not fr_kinds:
+            by_sel.pop("FR", None)
+        else:
+            by_sel["FR"] = fr_kinds
+
+    order = [lg for lg in ("FR", "DE", "EN", "ES", "IT") if lg in by_sel]
+    for extra in by_sel:
+        if extra not in order:
+            order.append(extra)
+
+    for i, lg in enumerate(order, start=1):
+        kinds = by_sel.get(lg) or set()
+        if not kinds:
+            continue
+        if _overlay is not None:
+            _kind_lbl = {
+                "synth_text": "synthèse texte",
+                "synth_audio": "audio synthèse",
+                "readings_audio": "audio lectures",
+                "pdf": "PDF",
+            }
+            labels = [_kind_lbl.get(k, k) for k in sorted(kinds)]
+            _flow_overlay_step(
+                _overlay,
+                f"LumenVia · {lg} ({i}/{len(order)}) — {' · '.join(labels)}…",
+                hint="Progression détaillée : localisation / TTS / PDF selon la sélection.",
+            )
+        # Si FR vient d'être généré via Vertex et qu'il ne reste rien, skip
+        res = _run_publish_lang_from_fr_pivot(
+            cfg=cfg,
+            gs=gs,
+            gcs=gcs,
+            identity=identity,
+            texts=texts,
+            target_lang=lg,
+            fr_synth_text=fr_text,
+            generate_synth_text="synth_text" in kinds,
+            generate_readings_audio="readings_audio" in kinds,
+            generate_synth_audio="synth_audio" in kinds,
+            generate_pdf="pdf" in kinds,
+            include_catechese_pdf=include_catechese_pdf,
+            force=False,
             _overlay=_overlay,
         )
         messages.append(str(res.get("message") or lg))

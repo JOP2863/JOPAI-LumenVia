@@ -64,12 +64,15 @@ def render_admin_emailing() -> None:
         f"**Onglet Sheets :** `{etpl_tab}` (alias logique `email_templates` → acronyme via **AliasTables**). "
         "**Templates e-mail :** seule la colonne **`status`** (**Actif** / **Inactif**) détermine quelle ligne est la version "
         "courante (aperçu, enregistrement, envoi manuel, **et** choix du modèle côté campagne / scheduler). "
-        "La colonne **`active`** sur cette table n’est **pas** utilisée par l’app pour ce choix (elle peut rester pour du "
-        "pilotage manuel ou un usage futur lié au planning, mais si **`status`** est **Inactif**, la ligne est ignorée "
-        "**sans** lire **`active`**)."
+        "La colonne **`active`** sur cette table n’est **pas** utilisée par l’app pour ce choix. "
+        "**Multi-langues :** tu édites le **FR** ; à l’enregistrement, DE/EN/ES/IT sont **recréés** "
+        "(traduction **Vertex**, balises `{{…}}` préservées ; refus si le texte reste en français) — "
+        "ancienne ligne Actif → Inactif, nouvelle Actif."
     )
     with st.expander("Paramètres du template (clé/canal/langue)", expanded=False):
-        st.caption(f"Template : `{template_key}` (canal: email, langue: fr)")
+        st.caption(
+            f"Template : `{template_key}` (édition : **fr** · sync auto : de / en / es / it)"
+        )
 
     from core.emailing import (
         EmailTemplate,
@@ -166,9 +169,10 @@ def render_admin_emailing() -> None:
     st.markdown("##### Mention de début d’e-mail (chaque semaine)")
     st.caption(
         "Texte affiché **juste après le bonjour**. À adapter chaque vendredi avant l’envoi. "
+        "**Éditable ici** ; à l’enregistrement / sync, il est **traduit** dans ETPL (`status_note`) "
+        "pour DE/EN/ES/IT — l’envoi utilise la version de la langue du destinataire. "
         "À l’envoi, une ligne est écrite dans **RUNS** (`scheduler_runs`) avec la date du dimanche "
-        "et cette mention — **pas** dans OUTM (qui reste à la maille de chaque inscrit). "
-        "L’enregistrement du template conserve aussi une copie brouillon dans ETPL (`status_note`)."
+        "et cette mention — **pas** dans OUTM."
     )
     st.text_area(
         "Message d’actualité pour les destinataires (optionnel)",
@@ -314,7 +318,7 @@ def render_admin_emailing() -> None:
             if unchanged:
                 st.info(
                     "Aucune modification détectée (objet + corps + message d’actualité inchangés) "
-                    "— pas de nouvelle ligne."
+                    "— pas de nouvelle ligne FR, pas de re-sync DE/EN/ES/IT."
                 )
             else:
                 # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
@@ -394,10 +398,100 @@ def render_admin_emailing() -> None:
                 )
                 invalidate_adm_sheets_fetch_cache()
                 invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="email_templates")
-                st.success("Template enregistré.")
+
+                # 3) Sync DE/EN/ES/IT depuis le nouveau FR (immuabilité par langue).
+                from core.email_template_sync import sync_localized_email_templates_from_fr
+                from ui.components import update_loading_overlay
+
+                def _prog(msg: str) -> None:
+                    try:
+                        update_loading_overlay(ov, msg)
+                    except Exception:
+                        pass
+
+                _prog("Localisation DE / EN / ES / IT depuis le FR…")
+                sync_res = sync_localized_email_templates_from_fr(
+                    gs=gs,
+                    spreadsheet_id=str(cfg.gsheet_id),
+                    service_account_email=sa_email or None,
+                    template_key=template_key,
+                    subject_fr=subj_n,
+                    body_fr=body_n,
+                    status_note_fr=note_n,
+                    progress=_prog,
+                )
+                invalidate_adm_sheets_fetch_cache()
+                invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="email_templates")
+
+                ok_langs = [k for k, v in sync_res.items() if v == "ok"]
+                err_langs = {k: v for k, v in sync_res.items() if v != "ok"}
+                st.success(
+                    "Template FR enregistré."
+                    + (f" Localisé : {', '.join(ok_langs)}." if ok_langs else "")
+                )
+                if err_langs:
+                    st.warning(
+                        "Localisation partielle — "
+                        + " · ".join(f"{k}: {v}" for k, v in err_langs.items())
+                    )
                 st.rerun()
         finally:
             ov.empty()
+
+    if st.button(
+        "Générer / mettre à jour DE · EN · ES · IT depuis le FR actif",
+        key="adm_email_sync_langs_now",
+        help="Sans modifier le FR : recrée les lignes localisées (immuabilité) à partir du template FR Actif ou du formulaire.",
+    ):
+        ov2 = loading_overlay("Localisation DE / EN / ES / IT…")
+        try:
+            from core.email_template_sync import sync_localized_email_templates_from_fr
+            from ui.components import update_loading_overlay
+
+            subj_src = (subject or "").strip()
+            body_src = (body or "").strip()
+            note_src = (note or "").strip()
+            if not subj_src or not body_src:
+                cur0 = pick_latest_live_email_template(
+                    rows, template_key=template_key, channel="email", language_in=lang_fr
+                ) or {}
+                subj_src = str(cur0.get("subject") or "").strip()
+                body_src = str(cur0.get("body") or "").strip()
+                note_src = str(cur0.get("status_note") or "").strip()
+            if not subj_src or not body_src:
+                st.error("Pas de template FR (formulaire ou ligne Actif) à localiser.")
+            else:
+
+                def _prog2(msg: str) -> None:
+                    try:
+                        update_loading_overlay(ov2, msg)
+                    except Exception:
+                        pass
+
+                sync_res = sync_localized_email_templates_from_fr(
+                    gs=gs,
+                    spreadsheet_id=str(cfg.gsheet_id),
+                    service_account_email=sa_email or None,
+                    template_key=template_key,
+                    subject_fr=subj_src,
+                    body_fr=body_src,
+                    status_note_fr=note_src,
+                    progress=_prog2,
+                )
+                invalidate_adm_sheets_fetch_cache()
+                invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="email_templates")
+                ok_langs = [k for k, v in sync_res.items() if v == "ok"]
+                err_langs = {k: v for k, v in sync_res.items() if v != "ok"}
+                if ok_langs:
+                    st.success(f"Templates localisés : {', '.join(ok_langs)}.")
+                if err_langs:
+                    st.warning(
+                        " · ".join(f"{k}: {v}" for k, v in err_langs.items())
+                    )
+                if ok_langs:
+                    st.rerun()
+        finally:
+            ov2.empty()
 
     render_emailing_manual_broadcast(
         gs=gs,

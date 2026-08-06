@@ -358,6 +358,27 @@ def pdf_cover_date_line(date_str: str, pref_langue: object | None = None) -> str
     return f"{wd.capitalize()} {d.day} {month} {d.year}"
 
 
+def email_date_dimanche_label(date_str: str, pref_langue: object | None = None) -> str:
+    """
+    Valeur ``{{date_dimanche}}`` pour l’e-mail hebdo : **sans** jour de semaine.
+
+    Les templates disent déjà « dimanche / Sonntag / Sunday … {{date_dimanche}} » ;
+    inclure le weekday (comme la couverture PDF) produit « Sonntag, den Sonntag, … ».
+    """
+    lg = coerce_aip_langue(pref_langue)
+    try:
+        d = date.fromisoformat(str(date_str).strip()[:10])
+    except Exception:
+        return str(date_str).strip()[:10]
+    months = _MONTHS.get(lg) or _MONTHS[DEFAULT_PREF_LANGUE]
+    month = months[d.month - 1]
+    if lg == "EN":
+        return f"{month} {d.day}, {d.year}"
+    if lg == "DE":
+        return f"{d.day}. {month} {d.year}"
+    return f"{d.day} {month} {d.year}"
+
+
 def _short_season(periode: object | None, pref_langue: object | None) -> str:
     from core.liturgy_theme import norm_key
 

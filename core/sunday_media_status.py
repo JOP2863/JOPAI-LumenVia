@@ -15,6 +15,7 @@ from core.locale_codes import DEFAULT_PREF_LANGUE, normalize_pref_langue
 from core.readings_cache_loader import rdc_zone_for_pref_langue
 from core.storage import blob_exists
 from core.sunday_existing_outputs import (
+    audio_voice_for_gen,
     fetch_existing_sunday_bundle,
     has_readings_audio_for_gen,
     latest_generation_row_for_sunday,
@@ -22,6 +23,7 @@ from core.sunday_existing_outputs import (
     sheet_day_key,
     synthesis_audio_gcs_path_for_gen,
 )
+from core.sunday_tts_labels import format_audio_voice_info
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,10 @@ class LangMediaStatus:
     synth_audio_url: str | None = None
     readings_audio_url: str | None = None
     pdf_url: str | None = None
+    synth_audio_voice: str | None = None
+    readings_audio_voice: str | None = None
+    synth_audio_voice_info: str | None = None
+    readings_audio_voice_info: str | None = None
 
     @property
     def ready_count(self) -> int:
@@ -199,6 +205,18 @@ def media_status_for_lang(
         pdf_path = _first_blob_path(gcs, bucket, fascicule_pdf_path_candidates(day, pref_langue=lg))
         pdf = bool(pdf_path)
 
+    synth_voice: str | None = None
+    readings_voice: str | None = None
+    if gen_eid and (synth_audio or readings):
+        if synth_audio:
+            synth_voice = audio_voice_for_gen(
+                gs=gs, cfg=cfg, gen_entity_id=gen_eid, readings=False
+            )
+        if readings:
+            readings_voice = audio_voice_for_gen(
+                gs=gs, cfg=cfg, gen_entity_id=gen_eid, readings=True
+            )
+
     return LangMediaStatus(
         lang=lg,
         zone=zone,
@@ -211,6 +229,18 @@ def media_status_for_lang(
         synth_audio_url=_sign_gcs_path(gcs=gcs, bucket=bucket, path=synth_audio_path),
         readings_audio_url=_sign_gcs_path(gcs=gcs, bucket=bucket, path=readings_path),
         pdf_url=_sign_gcs_path(gcs=gcs, bucket=bucket, path=pdf_path),
+        synth_audio_voice=synth_voice,
+        readings_audio_voice=readings_voice,
+        synth_audio_voice_info=format_audio_voice_info(
+            date_str=day, cible="synthese", voice_name=synth_voice
+        )
+        if synth_voice
+        else None,
+        readings_audio_voice_info=format_audio_voice_info(
+            date_str=day, cible="lectures", voice_name=readings_voice
+        )
+        if readings_voice
+        else None,
     )
 
 

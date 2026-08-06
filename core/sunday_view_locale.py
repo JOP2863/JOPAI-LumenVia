@@ -21,6 +21,15 @@ LANG_FLAGS: dict[str, str] = {
     "IT": "🇮🇹",
 }
 
+# Codes flagcdn (ISO 3166) — les emoji drapeaux ne s’affichent souvent pas sous Windows / Chrome desktop.
+LANG_FLAG_CDN: dict[str, str] = {
+    "FR": "fr",
+    "DE": "de",
+    "EN": "gb",
+    "ES": "es",
+    "IT": "it",
+}
+
 # Fonds discrets par langue (lisibles sur crème liturgique, distincts les uns des autres).
 LANG_PANEL_STYLE: dict[str, dict[str, str]] = {
     "FR": {
@@ -287,6 +296,19 @@ def lang_flag(pref_langue: object | None) -> str:
     return LANG_FLAGS.get(coerce_aip_langue(pref_langue), "🏳️")
 
 
+def lang_flag_html(pref_langue: object | None, *, height: int = 14) -> str:
+    """Drapeau via image CDN (lisible desktop Windows + mobile)."""
+    lg = coerce_aip_langue(pref_langue)
+    code = LANG_FLAG_CDN.get(lg, lg.lower()[:2])
+    h = max(10, min(int(height), 28))
+    return (
+        f'<img src="https://flagcdn.com/h20/{html_escape(code)}.png" '
+        f'height="{h}" width="{int(h * 4 / 3)}" alt="{html_escape(lg)}" '
+        f'title="{html_escape(lg)}" '
+        f'style="vertical-align:-2px;margin-right:0.28rem;border-radius:2px;" loading="lazy"/>'
+    )
+
+
 def reading_titles(pref_langue: object | None) -> dict[str, str]:
     lg = coerce_aip_langue(pref_langue)
     return dict(PDF_READING_TITLES.get(lg) or PDF_READING_TITLES[DEFAULT_PREF_LANGUE])
@@ -330,7 +352,7 @@ def lang_panel_banner_html(
     lg = coerce_aip_langue(pref_langue)
     ui = sunday_ui(lg)
     style = LANG_PANEL_STYLE.get(lg) or LANG_PANEL_STYLE[DEFAULT_PREF_LANGUE]
-    flag = lang_flag(lg)
+    flag = lang_flag_html(lg, height=18)
     native = html_escape(output_language_label(lg))
     title = html_escape(ui["edit_banner"] if kind == "edit" else ui["content_banner"])
     if kind == "edit":
@@ -349,7 +371,7 @@ def lang_panel_banner_html(
   margin:0.35rem 0 0.75rem;
 ">
   <div style="display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;">
-    <span style="font-size:1.55rem;line-height:1;" aria-hidden="true">{flag}</span>
+    <span style="line-height:1;display:inline-flex;align-items:center;" aria-hidden="true">{flag}</span>
     <div style="min-width:0;">
       <div style="font-weight:700;color:{style['accent']};font-size:1.02rem;line-height:1.25;">
         {title} · {html_escape(lg)}

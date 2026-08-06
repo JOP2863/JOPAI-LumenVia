@@ -168,7 +168,7 @@ def count_skipped_weekly_broadcast_recipients(
 
 
 def format_broadcast_recipient_preview_line(user_row: dict | None, *, email_fallback: str = "") -> str:
-    """Ligne d’aperçu : e-mail, nom, langue d’envoi (``pref_langue`` du profil)."""
+    """Ligne texte (logs / fallback) : e-mail, nom, langue — emoji drapeau (mobile OK)."""
     from core.locale_codes import user_pref_langue
     from core.sunday_view_locale import lang_flag
 
@@ -178,3 +178,55 @@ def format_broadcast_recipient_preview_line(user_row: dict | None, *, email_fall
     ln0 = str(u.get("last_name") or "").strip()
     lg = user_pref_langue(u)
     return f"{em0}\t{fn0}\t{ln0}\t{lang_flag(lg)} {lg}"
+
+
+def format_broadcast_recipient_preview_row_html(
+    user_row: dict | None, *, email_fallback: str = ""
+) -> str:
+    """Ligne HTML : drapeau via flagcdn (lisible desktop Windows + mobile)."""
+    from html import escape as html_escape
+
+    from core.locale_codes import user_pref_langue
+    from core.sunday_view_locale import lang_flag_html
+
+    u = user_row or {}
+    em0 = str(u.get("email") or email_fallback or "").strip().lower()
+    fn0 = str(u.get("first_name") or "").strip()
+    ln0 = str(u.get("last_name") or "").strip()
+    lg = user_pref_langue(u)
+    return (
+        "<tr>"
+        f"<td style='padding:0.15rem 0.45rem;white-space:nowrap;'>{html_escape(em0)}</td>"
+        f"<td style='padding:0.15rem 0.45rem;'>{html_escape(fn0)}</td>"
+        f"<td style='padding:0.15rem 0.45rem;'>{html_escape(ln0)}</td>"
+        f"<td style='padding:0.15rem 0.45rem;white-space:nowrap;'>"
+        f"{lang_flag_html(lg, height=12)}{html_escape(lg)}</td>"
+        "</tr>"
+    )
+
+
+def render_broadcast_recipient_preview(
+    rows_html: list[str],
+    *,
+    empty_label: str = "—",
+    max_height_px: int = 280,
+) -> None:
+    """Tableau HTML scrollable (remplace ``st.code`` pour afficher les drapeaux)."""
+    import streamlit as st
+
+    body = "".join(rows_html) if rows_html else (
+        f"<tr><td colspan='4' style='padding:0.35rem;opacity:0.7;'>{empty_label}</td></tr>"
+    )
+    st.markdown(
+        f"<div style='max-height:{int(max_height_px)}px;overflow:auto;"
+        f"border:1px solid rgba(212,175,55,0.28);border-radius:8px;"
+        f"background:rgba(255,255,255,0.55);font-size:0.82rem;'>"
+        f"<table style='width:100%;border-collapse:collapse;font-family:ui-monospace,Consolas,monospace;'>"
+        f"<thead><tr style='position:sticky;top:0;background:#fff8e8;color:#6b5918;text-align:left;'>"
+        f"<th style='padding:0.25rem 0.45rem;'>e-mail</th>"
+        f"<th style='padding:0.25rem 0.45rem;'>prénom</th>"
+        f"<th style='padding:0.25rem 0.45rem;'>nom</th>"
+        f"<th style='padding:0.25rem 0.45rem;'>langue</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )

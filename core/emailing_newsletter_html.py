@@ -44,6 +44,11 @@ def email_body_to_minimal_html(body0: str) -> str:
 
 def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], intro_text: str) -> str:
     import app as ap
+    from core.emailing import replace_mission_quote_in_text
+    from core.prompt_locale import coerce_aip_langue
+
+    _lg_mail = coerce_aip_langue(values0.get("pref_langue"))
+    intro_text = replace_mission_quote_in_text(intro_text or "", pref_langue=_lg_mail)
 
     prenom = (values0.get("prenom") or "").strip() or "—"
     nom = (values0.get("nom") or "").strip() or ""
@@ -54,6 +59,38 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     url_app0 = (values0.get("url_app") or "").strip()
     url_illu0 = (values0.get("url_illustration") or "").strip()
     illu_desc0 = (values0.get("illustration_description") or "").strip()
+    # Variantes pour filtrer la légende du corps (FR pivot + version localisée).
+    _illu_desc_match: list[str] = [illu_desc0] if illu_desc0 else []
+    if illu_desc0 and _lg_mail != "FR":
+        _low_desc = illu_desc0.casefold().replace("’", "'")
+        _still_fr = any(
+            m in _low_desc
+            for m in (
+                "l'image",
+                "composition",
+                "fond clair",
+                "bordure dor",
+                "eucharist",
+                "évoquent",
+                "evoquent",
+                "encadrent",
+                "ornée",
+                "ornee",
+            )
+        )
+        if _still_fr:
+            try:
+                from core.emailing import localize_illustration_description_for_email
+
+                _loc = localize_illustration_description_for_email(
+                    illu_desc0, pref_langue=_lg_mail, cfg=None
+                )
+                if _loc and _loc.strip():
+                    if _loc.strip() != illu_desc0:
+                        _illu_desc_match.append(_loc.strip())
+                    illu_desc0 = _loc.strip()
+            except Exception:
+                pass
     optout0 = (values0.get("optout_url") or "").strip()
     email0 = (values0.get("email") or "").strip().lower()
 
@@ -79,17 +116,18 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             return False
         if re.search(r"(?is)\{\{\s*illustration_description\s*\}\}", s):
             return True
-        if not illu_desc0:
+        if not _illu_desc_match:
             return False
         nl = _norm_line(s)
-        nd = _norm_line(illu_desc0)
-        if not nl or not nd:
-            return False
-        if nl == nd:
-            return True
-        # Même texte tronqué (aperçu client mail) ou variante apostrophe.
-        if len(nl) >= 40 and (nd.startswith(nl) or nl.startswith(nd)):
-            return True
+        for cand in _illu_desc_match:
+            nd = _norm_line(cand)
+            if not nl or not nd:
+                continue
+            if nl == nd:
+                return True
+            # Même texte tronqué (aperçu client mail) ou variante apostrophe.
+            if len(nl) >= 40 and (nd.startswith(nl) or nl.startswith(nd)):
+                return True
         return False
 
     # On retire les lignes techniques / URLs signées du corps (l’illustration est rendue en image seule sous le texte).
@@ -97,7 +135,10 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     raw_lines = [ln for ln in raw_lines if ln]
     filtered: list[str] = []
     for ln in raw_lines:
-        if re.match(r"(?i)^bonjour\b", ln):
+        if re.match(
+            r"(?i)^(bonjour|hallo|guten\s+tag|hello|hi|hola|ciao|buongiorno)\b",
+            ln,
+        ):
             continue
         if re.match(r"(?i)^illustration\s*:\s*https?://", ln):
             continue
@@ -124,18 +165,86 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             r"(?i)cliquez\s+ici", s
         ):
             return True
+        # DE / EN / ES / IT
+        if re.search(
+            r"(?i)(sie erhalten diese e-?mail|you are receiving this e-?mail|"
+            r"recibes este correo|ricevi questa e-?mail)",
+            s,
+        ):
+            return True
+        if re.search(
+            r"(?i)(abmelden|unsubscribe|darse de baja|cancellare l['’]iscrizione|"
+            r"preferenzen|preferences|preferencias|preferenze)",
+            s,
+        ) and re.search(r"(?i)(hier|here|aqu[ií]|qui|cliquez|click|klicken)", s):
+            return True
         return False
 
     def _is_feedback_survey_bullet(ln: str) -> bool:
         """True uniquement pour la ligne CTA questionnaire (pas « L'Expérience Sonore »)."""
         if "👉" not in ln:
             return False
-        if re.match(r"(?i)^l['’]exp[eé]rience\s+sonore\b", ln.strip()):
+        if re.match(
+            r"(?i)^(l['’]exp[eé]rience\s+sonore|die\s+klangerfahrung|"
+            r"the\s+sound\s+experience|la\s+experiencia\s+sonora|"
+            r"l['’]esperienza\s+sonora)\b",
+            ln.strip(),
+        ):
             return False
         return bool(
-            re.search(r"(?i)donner\s+(mon\s+)?avis|avis\s+sur\s+cette\s+expérience", ln)
-            or re.search(r"(?i)questionnaire", ln)
+            re.search(
+                r"(?i)donner\s+(mon\s+)?avis|avis\s+sur\s+cette\s+exp[eé]rience|"
+                r"questionnaire|feedback|meinung|ihre\s+meinung|"
+                r"leave\s+(your\s+)?feedback|give\s+(us\s+)?your\s+(feedback|opinion)|"
+                r"dejar\s+(tu|su)\s+opini[oó]n|dare\s+(il\s+)?tuo\s+parere|"
+                r"geben\s+sie\s+(uns\s+)?ihre\s+meinung",
+                ln,
+            )
         )
+
+    def _is_resource_bullet_line(raw: str) -> bool:
+        """Section média (PDF / audio / illustration) — titres FR + DE/EN/ES/IT ou ligne 👉 CTA."""
+        lead = raw.lstrip("-•").lstrip()
+        if raw.startswith(("-", "•")):
+            return True
+        if re.match(
+            r"(?i)^("
+            # FR
+            r"la\s+synth[eè]se|l['’]essentiel|l['’]exp[eé]rience\s+sonore|la\s+parole|"
+            r"l['’]audio\s+des\s+lectures|"
+            # DE
+            r"die\s+(illustrierte\s+)?zusammenfassung|das\s+wesentliche|das\s+wort|"
+            r"die\s+klangerfahrung|"
+            # EN
+            r"the\s+(illustrated\s+)?summary|the\s+essentials?|the\s+word|"
+            r"the\s+sound\s+experience|"
+            # ES
+            r"la\s+s[ií]ntesis|lo\s+esencial|la\s+palabra|la\s+experiencia\s+sonora|"
+            # IT
+            r"la\s+sintesi|l['’]essenziale|la\s+parola|l['’]esperienza\s+sonora"
+            r")\b",
+            lead,
+        ):
+            return True
+        if re.match(
+            r"(?i)^(l['’]illustration|die\s+illustration|the\s+illustration|"
+            r"la\s+ilustraci[oó]n|l['’]illustrazione)\b",
+            lead,
+        ) and "👉" in raw:
+            return True
+        # Filet : toute ligne 👉 liée à un média (templates traduits sans tiret).
+        if "👉" in raw and re.search(
+            r"(?i)\b("
+            r"pdf|audio|illustration|image|bild|"
+            r"synth[eè]se|zusammenfassung|summary|s[ií]ntesis|sintesi|"
+            r"lesungen|lectures|readings|lecturas|letture|"
+            r"h[öo]ren|listen|[ée]couter|escuch|ascolt|"
+            r"t[eé]l[eé]charg|download|herunterlad|descarg|scaric"
+            r")\b",
+            raw,
+        ):
+            return True
+        return False
 
     legal_notice_line = ""
 
@@ -147,14 +256,7 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             continue
         raw = ln.strip()
         lead = raw.lstrip("-•").lstrip()
-        if re.match(
-            r"(?i)^(la synth[eè]se|l['’]essentiel|l['’]exp[eé]rience\s+sonore|la\s+parole"
-            r"|l['’]audio\s+des\s+lectures)\b",
-            lead,
-        ) or (
-            re.match(r"(?i)^l['’]illustration\b", lead)
-            and "👉" in raw
-        ) or raw.startswith(("-", "•")):
+        if _is_resource_bullet_line(raw):
             segments.append(("li", lead))
             continue
         if _is_feedback_survey_bullet(raw):
@@ -168,21 +270,37 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     def _newsletter_cta_href(bb0: str, right: str) -> str:
         """URL du bouton pill pour une ligne « … 👉 libellé » (corps newsletter)."""
         href = ""
-        if url_pdf0 and re.search(r"(?i)synth[èe]se.*pdf|pdf", bb0):
+        if url_pdf0 and re.search(
+            r"(?i)\bpdf\b|synth[èe]se.*pdf|zusammenfassung.*pdf|summary.*pdf|"
+            r"s[ií]ntesis.*pdf|sintesi.*pdf",
+            bb0,
+        ):
             href = url_pdf0
         elif url_audio_readings0 and re.search(
-            r"(?i)parole.*audio|lectures|textes\s+bibliques|[ée]critures", bb0
+            r"(?i)parole.*audio|lectures|textes\s+bibliques|[ée]critures|"
+            r"das\s+wort|lesungen|readings|biblical|la\s+palabra|lecturas|"
+            r"la\s+parola|letture",
+            bb0,
         ):
             href = url_audio_readings0
         elif url_audio0 and re.search(
-            r"(?i)audio|essentiel|[ée]couter",
+            r"(?i)audio|essentiel|wesentliche|essentials?|s[ií]ntesis|sintesi|"
+            r"zusammenfassung|[ée]couter|h[öo]ren|listen",
             bb0,
-        ) and not re.search(r"(?i)lectures|parole.*\(lectures\)|textes\s+bibliques", bb0):
+        ) and not re.search(
+            r"(?i)lectures|lesungen|readings|lecturas|letture|"
+            r"parole.*\(lectures\)|das\s+wort|la\s+palabra|la\s+parola|"
+            r"textes\s+bibliques",
+            bb0,
+        ):
             href = url_audio0
-        elif url_illu0 and re.search(r"(?i)image|illustration", bb0):
+        elif url_illu0 and re.search(
+            r"(?i)image|illustration|bild|ilustraci[oó]n|illustrazione", bb0
+        ):
             href = url_illu0
         if not href and fb_url0 and re.search(
-            r"(?i)donner\s+mon\s+avis|avis\s+sur\s+cette\s+expérience|donner\s+votre\s+avis",
+            r"(?i)donner\s+mon\s+avis|avis\s+sur\s+cette\s+exp[eé]rience|"
+            r"donner\s+votre\s+avis|feedback|meinung|opinion|opini[oó]n|parere",
             right,
         ):
             href = fb_url0
@@ -214,7 +332,13 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     _wrap_hi: int | None = None
     for _wi, (_wk, _wch) in enumerate(segments):
         if _wk == "p" and re.match(
-            r"(?i)^beau\s+chemin\s+vers\s+dimanche",
+            r"(?i)^("
+            r"beau\s+chemin\s+vers\s+dimanche|"
+            r"sch[öo]nen?\s+weg\s+(zum\s+)?sonntag|"
+            r"have\s+a\s+(blessed|good)\s+(path\s+)?(toward\s+)?sunday|"
+            r"buen\s+camino\s+(hacia\s+)?(el\s+)?domingo|"
+            r"buon\s+cammino\s+(verso\s+)?(la\s+)?domenica"
+            r")\b",
             (_wch or "").strip(),
         ):
             _wrap_lo = _wi
@@ -364,7 +488,18 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
                     '<span class="jopai-inline"><span class="jop">JOP</span><span class="ai">AI</span><sup class="ai">©</sup></span>',
                     pp,
                 )
-                for kw in ("LumenVia", "PDF", "Audio", "Illustration", "messe", "Parole"):
+                for kw in (
+                    "LumenVia",
+                    "PDF",
+                    "Audio",
+                    "Illustration",
+                    "messe",
+                    "Parole",
+                    "Zusammenfassung",
+                    "Lesungen",
+                    "Summary",
+                    "Readings",
+                ):
                     pp = re.sub(
                         rf"(?i)\b{re.escape(kw)}\b",
                         lambda m: f"<strong>{m.group(0)}</strong>",
@@ -438,12 +573,28 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             f"<p style=\"color:#64748b;font-size:12px;line-height:1.45;margin:16px 0 0 0;\">{esc}</p>"
         )
 
-    # Citation mise en valeur (seulement si absente du corps — le template Sheets peut déjà la porter)
-    quote_txt = (
-        "LumenVia n'est pas là pour remplacer la rencontre, mais pour la préparer, "
-        "afin que chaque messe devienne une rencontre plus consciente avec le Christ."
+    # Citation mise en valeur — localisée ; remplace d’éventuels restes FR du template.
+    from core.emailing import (
+        LUMENVIA_MISSION_QUOTE_BY_LANG,
+        lumenvia_mission_quote_for_lang,
     )
-    if not re.search(r"remplacer la rencontre", intro_html, flags=re.I):
+
+    quote_txt = lumenvia_mission_quote_for_lang(_lg_mail)
+    _quote_variants: list[str] = []
+    for _q in LUMENVIA_MISSION_QUOTE_BY_LANG.values():
+        if not _q:
+            continue
+        for _qv in (_q, _q.replace("'", "’"), _q.replace("’", "'")):
+            if _qv and _qv not in _quote_variants:
+                _quote_variants.append(_qv)
+    for _q in _quote_variants:
+        if _q != quote_txt and _q in intro_html:
+            intro_html = intro_html.replace(_q, quote_txt)
+        _qe = html_escape(_q)
+        _qt_esc = html_escape(quote_txt)
+        if _qe != _qt_esc and _qe in intro_html:
+            intro_html = intro_html.replace(_qe, _qt_esc)
+    if quote_txt not in intro_html and html_escape(quote_txt) not in intro_html:
         intro_html += (
             "<p style=\"margin-top:14px;padding:10px 12px;border-left:4px solid #0d9488;"
             "background:#f0fdfa;color:#0b2745;border-radius:10px;\">"
@@ -453,8 +604,16 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     footer_links = []
     # Liens de footer (cibles fixes)
     if origin0:
+        _access_lbl = {
+            "FR": "Accéder à LumenVia",
+            "DE": "Zu LumenVia",
+            "EN": "Go to LumenVia",
+            "ES": "Ir a LumenVia",
+            "IT": "Vai a LumenVia",
+        }.get(_lg_mail, "Accéder à LumenVia")
         footer_links.append(
-            f'<a href="{origin0.rstrip("/")}/?route=about" target="_blank" rel="noopener noreferrer">Accéder à LumenVia</a>'
+            f'<a href="{origin0.rstrip("/")}/?route=about" target="_blank" rel="noopener noreferrer">'
+            f"{html_escape(_access_lbl)}</a>"
         )
     footer_html = " • ".join(footer_links)
 
@@ -478,7 +637,14 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     parts.append(".jopai-inline .jop{font-weight:800;color:#0d9488;}")
     parts.append(".jopai-inline .ai{font-style:italic;color:#0b2745;}")
     parts.append("</style></head><body><div class=\"wrap\">")
-    parts.append(f"<p><strong>Bonjour {who},</strong></p>")
+    _hello = {
+        "FR": "Bonjour",
+        "DE": "Hallo",
+        "EN": "Hello",
+        "ES": "Hola",
+        "IT": "Ciao",
+    }.get(_lg_mail, "Bonjour")
+    parts.append(f"<p><strong>{_hello} {who},</strong></p>")
     try:
         from core.emailing import format_weekly_actualite_paragraph
     except Exception:  # pragma: no cover
@@ -486,7 +652,8 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     actu_raw = ""
     if format_weekly_actualite_paragraph is not None:
         actu_raw = format_weekly_actualite_paragraph(
-            str(values0.get("message_actualite") or values0.get("actualite_lumenvia") or "")
+            str(values0.get("message_actualite") or values0.get("actualite_lumenvia") or ""),
+            pref_langue=_lg_mail,
         )
     if actu_raw:
         # Plusieurs lignes → <br> ; blocs séparés par ligne vide → <p> distincts.

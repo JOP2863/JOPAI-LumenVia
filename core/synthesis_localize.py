@@ -115,6 +115,26 @@ def _map_known_headings(line: str, *, target_lang: str) -> str | None:
     return None
 
 
+def localize_plain_from_fr(
+    text: str,
+    *,
+    target_lang: object,
+    pause_s: float = 0.25,
+) -> str:
+    """Traduction programme FR → langue (MyMemory), sans bannière HTML."""
+    lg = coerce_aip_langue(target_lang)
+    src = text or ""
+    if not src.strip() or lg == DEFAULT_PREF_LANGUE:
+        return src
+    pieces = _split_chunks(src)
+    translated: list[str] = []
+    for i, ch in enumerate(pieces):
+        translated.append(_translate_chunk(ch, target_lang=lg))
+        if pause_s and i + 1 < len(pieces):
+            time.sleep(pause_s)
+    return "\n".join(translated)
+
+
 def localize_synthesis_from_fr(
     body_fr: str,
     *,
@@ -175,4 +195,4 @@ def localize_synthesis_from_fr(
     return banner + result
 
 
-__all__ = ["localize_synthesis_from_fr"]
+__all__ = ["localize_plain_from_fr", "localize_synthesis_from_fr"]
