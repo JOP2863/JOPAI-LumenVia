@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import re
-import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from hashlib import sha256
 from html import escape as html_escape
-from pathlib import Path
 
 import streamlit as st
 
-from core.content_locale_paths import fascicule_pdf_path
 from core.liturgy_day import coerce_liturgy_pref_langue, supported_liturgy_langs
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
-from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
-from core.pdf_locale import about_markdown_for_lang, pdf_cover_date_line, pdf_cover_meta_line
-from core.aelf_reading_meta import pdf_liturgy_reading_kwargs
 from core.readings_cache_loader import (
     load_liturgy_from_readings_cache,
     rdc_zone_aliases_for_pref_langue,
@@ -26,25 +19,19 @@ from core.readings_cache_loader import (
     readings_cache_row_from_texts,
 )
 from core.sheets_db import append_immutable_row, build_gspread_client, utc_now_iso
-from core.storage import download_bytes, upload_bytes, upload_text
 from core.local_aelf_cache import (
     load_aelf_snapshot,
     load_aelf_snapshot_for_zones,
     persist_aelf_snapshot,
 )
 from core.local_bundle_cache import load_sunday_bundle, persist_sunday_bundle
-from core.liturgy_theme import inject_liturgical_accent_style, liturgical_accent_hex
-from core.gcs_signed_urls import gcs_signed_url
-from core.sunday_existing_outputs import pdf_synthesis_listen_url
+from core.liturgy_theme import inject_liturgical_accent_style
 from core.sunday_calendar_status import compute_month_content_status
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import loading_overlay
 from ui.liturgy_render import render_liturgy_block
 from ui.sunday_admin_flows import (
-    _append_pdf_export_row,
-    _pdf_illustration_description_localized,
     _run_generate_sunday_flow,
-    _run_incremental_sunday_outputs,
 )
 
 _SUNDAY_FLASH_KEY = "_lumenvia_sunday_flash"
@@ -246,22 +233,31 @@ def render_sunday() -> None:
                 return True
         return False
 
-    # UX: l’utilisateur peut choisir n’importe quel jour ; on affiche le DIMANCHE de la semaine.
-    default = date.today()
+    # UX: l’utilisateur peut choisir n’importe quel jour ; on affiche / charge le DIMANCHE
+    # de la semaine. La date est pilotée par une clé session stable (évite le décalage
+    # Streamlit où le widget affiche ``value=`` mais renvoie encore l’ancienne date).
+    _SUNDAY_DATE_KEY = "sunday_view_date"
+
     if "_lumenvia_sunday_qs" in st.session_state:
         try:
-            default = date.fromisoformat(str(st.session_state.pop("_lumenvia_sunday_qs"))[:10])
+            st.session_state[_SUNDAY_DATE_KEY] = _sunday_of_week(
+                date.fromisoformat(str(st.session_state.pop("_lumenvia_sunday_qs"))[:10])
+            )
         except Exception:
-            pass
-    chosen_any = st.date_input(
-        "Sélectionnez une date au calendrier pour préparer ou revivre la synthèse illustrée du dimanche correspondant.",
-        value=default,
-    )
-    chosen = _sunday_of_week(chosen_any)
-    if chosen_any != chosen:
-        d_fr = html_escape(ap._french_day_month_year(chosen.isoformat()))
-        st.caption(f"Le dimanche **{d_fr}**")
-    date_str = chosen.isoformat()
+            st.session_state.pop("_lumenvia_sunday_qs", None)
+
+    if _SUNDAY_DATE_KEY not in st.session_state:
+        st.session_state[_SUNDAY_DATE_KEY] = _sunday_of_week(date.today())
+    else:
+        raw_d = st.session_state.get(_SUNDAY_DATE_KEY)
+        try:
+            if isinstance(raw_d, datetime):
+                raw_d = raw_d.date()
+            elif not isinstance(raw_d, date):
+                raw_d = date.fromisoformat(str(raw_d)[:10])
+            st.session_state[_SUNDAY_DATE_KEY] = _sunday_of_week(raw_d)
+        except Exception:
+            st.session_state[_SUNDAY_DATE_KEY] = _sunday_of_week(date.today())
 
     account_pref = coerce_liturgy_pref_langue(st.session_state.get("pref_langue"))
     _lang_opts = list(supported_liturgy_langs())
@@ -276,39 +272,49 @@ def render_sunday() -> None:
         st.session_state["sunday_view_pref_langue"] = account_pref
     elif st.session_state.get("sunday_view_pref_langue") not in _lang_opts:
         st.session_state["sunday_view_pref_langue"] = account_pref
-    pref_langue = st.selectbox(
-        "Langue des lectures",
-        options=_lang_opts,
-        format_func=lambda lg: _lang_labels.get(lg, lg),
-        key="sunday_view_pref_langue",
-        help=(
-            "Les lectures s’affichent dans cette langue : cache Sheets (RDC) d’abord, "
-            "sinon récupération à la volée (AELF pour FR, Evangelizo pour les autres) puis écriture RDC. "
-            "Défaut : préférence du compte (FR)."
-        ),
-    )
+
+    col_date, col_lang = st.columns([1.2, 1])
+    with col_date:
+        chosen_any = st.date_input(
+            "Date (dimanche de la semaine)",
+            key=_SUNDAY_DATE_KEY,
+        )
+    with col_lang:
+        pref_langue = st.selectbox(
+            "Langue",
+            options=_lang_opts,
+            format_func=lambda lg: _lang_labels.get(lg, lg),
+            key="sunday_view_pref_langue",
+        )
+    chosen = _sunday_of_week(chosen_any if isinstance(chosen_any, date) else date.today())
+    if chosen != chosen_any:
+        st.session_state[_SUNDAY_DATE_KEY] = chosen
+        st.rerun()
+    date_str = chosen.isoformat()
+
     pref_langue = coerce_liturgy_pref_langue(pref_langue)
     zone = rdc_zone_for_pref_langue(pref_langue)
-    st.caption(f"{lang_flag(pref_langue)} Zone liturgique : **{zone}** · lectures en **{pref_langue}**")
-    if pref_langue != "FR":
-        from core.evangelizo import (
-            EVANGELIZO_HORIZON_DAYS,
-            evangelizo_horizon_bounds,
-            is_within_evangelizo_horizon,
-        )
+    with st.expander("Source des lectures", expanded=False):
+        st.caption(f"{lang_flag(pref_langue)} Zone : **{zone}** · langue **{pref_langue}**")
+        if pref_langue != "FR":
+            from core.evangelizo import (
+                EVANGELIZO_HORIZON_DAYS,
+                evangelizo_horizon_bounds,
+                is_within_evangelizo_horizon,
+            )
 
-        if is_within_evangelizo_horizon(date_str):
-            st.caption(
-                f"Hors FR : Evangelizo à la volée (fenêtre ±{EVANGELIZO_HORIZON_DAYS} j) "
-                "si absent du cache RDC — puis écriture RDC automatique."
-            )
-        else:
-            lo, hi = evangelizo_horizon_bounds()
-            st.warning(
-                f"Date hors fenêtre Evangelizo (±{EVANGELIZO_HORIZON_DAYS} j : "
-                f"{lo.isoformat()} → {hi.isoformat()}). "
-                "Sans ligne RDC déjà préchargée pour cette langue, les lectures ne pourront pas être récupérées."
-            )
+            if is_within_evangelizo_horizon(date_str):
+                st.caption(
+                    f"Evangelizo à la volée (fenêtre ±{EVANGELIZO_HORIZON_DAYS} j) "
+                    "si absent du cache RDC — puis écriture RDC."
+                )
+            else:
+                lo, hi = evangelizo_horizon_bounds()
+                st.warning(
+                    f"Date hors fenêtre Evangelizo (±{EVANGELIZO_HORIZON_DAYS} j : "
+                    f"{lo.isoformat()} → {hi.isoformat()}). "
+                    "Sans ligne RDC préchargée, les lectures peuvent manquer."
+                )
 
     @st.cache_data(ttl=900, show_spinner=False, max_entries=48)
     def _month_content_status(
@@ -762,438 +768,185 @@ def render_sunday() -> None:
         + (texts.evangile or "")
     )
 
-    st.markdown(
-        '<h2 class="lv-sunday-identity-heading">Identité du jour</h2>',
-        unsafe_allow_html=True,
-    )
-    # Livrables numériques : cadre complet (filet liturgique) sous le titre.
-    has_pdf_fmt = bool(pdf_bytes_for_user)
-    has_audio_fmt = bundle_audio is not None
-    has_text_fmt = bool((bundle_synth_text or "").strip())
-    has_readings_fmt = bundle_readings_audio is not None
-    n_formats = sum([has_pdf_fmt, has_audio_fmt, has_text_fmt, has_readings_fmt])
-    date_prep = html_escape(ap._french_weekday_day_month_year(date_str))
-    # Teintes tirées du couple or / sépia (charte liturgique) : lisibles sur fond crème, distinctes du corps #342E29.
-    if n_formats <= 0:
-        intro_inner = (
-            f"<strong style=\"color:#6b5918;font-weight:600;\">Aucun support numérique</strong>"
-            f"<span style=\"color:#5f4f3a;\"> publié pour l’instant par "
-            f"<strong style=\"color:#6b5918;font-weight:600;\">{ap._jopai_mark_html()} LumenVia</strong>"
-            f" pour vous préparer</span>"
-            f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
-            f"<strong style=\"color:#584610;\">{date_prep}</strong>"
-            f" — les lectures textuelles figurent plus bas.</span>"
-        )
-    else:
-        cardinals = ("Un", "Deux", "Trois", "Quatre")
-        c = cardinals[n_formats - 1]
-        fmt_word = "format" if n_formats == 1 else "formats"
-        disp = "disponible" if n_formats == 1 else "disponibles"
-        prop = "proposé" if n_formats == 1 else "proposés"
-        intro_inner = (
-            f"<strong style=\"color:#6b5918;font-weight:600;\">{c} {fmt_word}</strong>"
-            f"<span style=\"color:#5f4f3a;\"> {disp} {prop} par "
-            f"<strong style=\"color:#6b5918;font-weight:600;\">{ap._jopai_mark_html()} LumenVia</strong>"
-            f" pour vous préparer</span>"
-            f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
-            f"<strong style=\"color:#584610;\">{date_prep}</strong>.</span>"
-        )
-
-    with st.container(border=True, key="lv_sunday_deliverables_box"):
-        st.markdown(
-            f"<p style=\"font-size:clamp(0.95rem, 0.35vw + 0.94rem, 1.06rem);line-height:1.52;"
-            f"text-align:center;text-wrap:balance;max-width:min(42rem,calc(100% - 0.75rem));"
-            f"margin:0 auto 0.85rem;color:#5f4f3a;\">{intro_inner}</p>",
-            unsafe_allow_html=True,
-        )
-
-        if has_readings_fmt:
-            st.markdown(
-                "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.4;color:#5f4f3a;"
-                "font-size:0.95rem;\"><strong>Écouter les lectures (intégrales)</strong></p>",
-                unsafe_allow_html=True,
-            )
-            _sunday_identity_audio(
-                bundle_readings_audio[0],
-                bundle_readings_audio[1],
-                voice_label=_tts_voice_display_label(bundle_readings_voice),
-                accent_label=_tts_accent_display_label(
-                    date_str=date_str,
-                    cible="lectures",
-                    voice_name=bundle_readings_voice,
-                ),
-            )
-
-        if has_pdf_fmt or has_text_fmt:
-            col_pdf, col_texte = st.columns(2, gap="medium")
-            with col_pdf:
-                if has_pdf_fmt:
-                    st.download_button(
-                        label="Télécharger le PDF du dimanche",
-                        data=pdf_bytes_for_user,
-                        file_name=f"lumenvia_dimanche_{date_str}_{pref_langue}.pdf",
-                        mime="application/pdf",
-                        key=f"dl_sunday_top_{date_str}_{pref_langue}",
-                        type="secondary",
-                        use_container_width=True,
-                    )
-                else:
-                    st.caption("PDF indisponible pour cette date.")
-            with col_texte:
-                with st.expander("Lire le texte de cette synthèse\n\u00a0", expanded=False):
-                    if has_text_fmt:
-                        st.markdown(bundle_synth_text)
-                    elif has_audio_fmt:
-                        st.info(
-                            "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
-                            "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
-                        )
-                    else:
-                        st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
-
-        if has_audio_fmt:
-            st.markdown(
-                "<p style=\"text-align:center;margin:0.65rem 0 0.35rem;line-height:1.4;color:#5f4f3a;"
-                "font-size:0.95rem;\"><strong>Audio de la synthèse</strong></p>",
-                unsafe_allow_html=True,
-            )
-            if bundle_from_disk:
-                st.markdown(
-                    "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.35;"
-                    "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
-                    unsafe_allow_html=True,
-                )
-            _sunday_identity_audio(
-                bundle_audio[0],
-                bundle_audio[1],
-                voice_label=_tts_voice_display_label(bundle_synth_voice),
-                accent_label=_tts_accent_display_label(
-                    date_str=date_str,
-                    cible="synthese",
-                    voice_name=bundle_synth_voice,
-                ),
-            )
-        elif has_readings_fmt or has_pdf_fmt or has_text_fmt:
-            st.markdown(
-                "<p style=\"text-align:center;margin:0.65rem 0 0.25rem;line-height:1.4;color:#5f4f3a;"
-                "font-size:0.85rem;\">Pas encore publié. Les lectures sont affichées plus bas.</p>",
-                unsafe_allow_html=True,
-            )
-
-        if not has_pdf_fmt and not has_audio_fmt and not has_text_fmt and not has_readings_fmt:
-            _synth_na_msg = (
-                "Pour le moment, **seules les lectures** du dimanche sont disponibles sur cette page : "
-                "la synthèse (texte et audio) réalisée avec l’aide de l’IA n’a pas encore été publiée.\n\n"
-                "Si vous vous êtes **inscrit au service** depuis la rubrique **« Nous rejoindre »**, "
-                "vous recevrez une **notification automatique** lorsqu’elle sera prête — en général "
-                "**quelques jours avant** la célébration."
-            )
-            if is_admin_sunday:
-                _synth_na_msg += (
-                    "\n\n**Administrateur —** C’est le message vu par tous les visiteurs tant qu’il n’y a ni synthèse "
-                    "ni PDF. Tu peux **générer la synthèse et l’audio**, puis **préparer le fascicule PDF**, "
-                    "dans les blocs **Administration** affichés juste ci‑dessous."
-                )
-            st.info(_synth_na_msg, icon="📖")
-
     if is_admin_sunday:
-        st.divider()
-        if gcs_top and cfg.gcs_bucket_name:
-            prep_key = f"prep_liturgy_pdf_{date_str}"
-            st.caption("Administration — fascicule PDF")
-            has_any_synthesis = bool((bundle_synth_text or "").strip()) or (bundle_audio is not None)
-            if not has_any_synthesis:
-                st.info(
-                    "Le fascicule PDF « complet » (avec synthèse) n’a pas encore de contenu : "
-                    "génère d’abord **la synthèse et l’audio** ci‑dessous. "
-                    "Sinon, le PDF contiendrait essentiellement les lectures.",
-                    icon="ℹ️",
-                )
-            include_catechese_pdf = st.checkbox(
+        with st.expander(
+            "Générer et Valider les contenus de la semaine sélectionnée",
+            expanded=True,
+        ):
+            _show_sunday_admin_flash(date_str)
+            st.caption(
+                "Atelier de production — la page ci-dessous sert d’aperçu pour valider les contenus."
+            )
+
+            from ui.sunday_admin_panel import render_sunday_multilang_admin
+
+            try:
+                gs_ml = gs_top or build_gspread_client(cfg.gcp_service_account)
+            except Exception:
+                gs_ml = None
+            render_sunday_multilang_admin(
+                cfg=cfg,
+                gs=gs_ml,
+                gcs=gcs_top,
+                identity=identity,
+                texts=texts,
+                date_str=date_str,
+                current_lang=pref_langue,
+                pct=int(st.session_state.get(f"adm_sunday_pct_{date_str}", 20) or 20),
+                include_takeaways=bool(st.session_state.get(f"adm_sunday_takeaways_{date_str}", True)),
+                include_catechese_bridge=bool(st.session_state.get(f"adm_sunday_catech_{date_str}", True)),
+                include_catechese_pdf=bool(st.session_state.get(f"pdf_catechese_{date_str}", True)),
+            )
+
+            st.divider()
+            pct = st.segmented_control(
+                "Longueur (en % du total des lectures)",
+                options=[10, 15, 20, 25, 30, 35, 40, 45, 50],
+                default=20,
+                format_func=lambda x: f"{x}%",
+                key=f"adm_sunday_pct_{date_str}",
+            )
+            include_takeaways = st.checkbox(
+                "Inclure “À retenir” (3–5 points)", value=True, key=f"adm_sunday_takeaways_{date_str}"
+            )
+            include_catechese_bridge_gen = st.checkbox(
+                "Inclure « Passerelle catéchèse »",
+                value=True,
+                help=(
+                    "Ajoute la passerelle catéchèse (5 sous-parties) en fin de synthèse. "
+                    "Sa longueur (~275 mots) est fixe et indépendante du pourcentage ci-dessus."
+                ),
+                key=f"adm_sunday_catech_{date_str}",
+            )
+            st.checkbox(
                 "Inclure la « Passerelle catéchèse » dans le PDF",
                 value=True,
                 key=f"pdf_catechese_{date_str}",
-                help="Si la synthèse contient cette section, elle sera incluse dans le PDF (coché par défaut).",
+                help="Si la synthèse contient cette section, elle sera incluse dans le PDF.",
             )
-            force_regen_pdf = st.checkbox(
-                "Régénérer le PDF (ignorer le PDF déjà stocké sur Cloud)",
-                value=False,
-                key=f"pdf_force_regen_{date_str}",
-            )
-            can_build_pdf = bool(has_any_synthesis)
-            if st.button("Préparer le PDF du dimanche (complet)", key=prep_key, disabled=not can_build_pdf):
-                ov_pdf = loading_overlay("Préparation du PDF (couverture + lectures + synthèse)…")
-                try:
-                    if not force_regen_pdf:
-                        cached_pdf = ap._fetch_existing_fascicule_pdf_bytes(
-                            gcs=gcs_top, cfg=cfg, date_str=date_str, pref_langue=pref_langue
-                        )
-                        if cached_pdf:
-                            st.session_state[pdf_key] = cached_pdf
-                            st.info("PDF déjà généré — réutilisation depuis Cloud.")
-                            cached_pdf = None
-                    img_b = ap._fetch_liturgy_illustration_full_bytes(gcs=gcs_top, cfg=cfg, date_str=date_str)
-                    _base_pub = ""
-                    try:
-                        s = st.secrets
-                        _base_pub = str(
-                            s.get("PUBLIC_APP_URL") or s.get("public_app_url") or ""
-                        ).strip()
-                    except Exception:
-                        pass
-                    _gen_eid = ""
-                    if gs_top:
-                        try:
-                            _gr = ap._latest_generation_row_for_sunday(
-                                gs=gs_top,
-                                cfg=cfg,
-                                date_str=date_str,
-                                zone=zone,
-                            )
-                            if _gr:
-                                _gen_eid = str(_gr.get("entity_id") or "").strip()
-                        except Exception:
-                            _gen_eid = ""
-                    aud_url, aud_note = pdf_synthesis_listen_url(
-                        date_str=date_str,
-                        public_app_url=_base_pub or None,
-                        gcs=gcs_top,
-                        bucket_name=str(cfg.gcs_bucket_name).strip(),
-                        gcs_audio_path=bundle_audio_gcs_path,
-                        gs=gs_top,
-                        cfg=cfg,
-                        gen_entity_id=_gen_eid or None,
-                    )
-                    readings_pdf_cover = None
-                    if bundle_readings_gcs_path:
-                        try:
-                            readings_pdf_cover = gcs_signed_url(
-                                gcs=gcs_top,
-                                bucket_name=str(cfg.gcs_bucket_name).strip(),
-                                path=bundle_readings_gcs_path,
-                            ) or None
-                        except Exception:
-                            readings_pdf_cover = None
-                    ilus_desc_pdf = ""
-                    if str(cfg.gsheet_id or "").strip():
-                        try:
-                            gs_pdf = build_gspread_client(cfg.gcp_service_account)
-                            ilus_desc_pdf = _latest_illustration_description_from_ilus(
-                                gspread_client=gs_pdf,
-                                spreadsheet_id=str(cfg.gsheet_id).strip(),
-                                date_str=date_str,
-                                zone=zone,
-                            )
-                        except Exception:
-                            ilus_desc_pdf = ""
-                    synth_for_pdf = bundle_synth_text if has_any_synthesis else ""
-                    if not include_catechese_pdf:
-                        synth_for_pdf = ap._strip_catechese_bridge(synth_for_pdf)
-                    back_cover_b = None
-                    try:
-                        y = str(date_str)[:4]
-                        back_cover_b = download_bytes(
-                            gcs=gcs_top,
-                            bucket_name=str(cfg.gcs_bucket_name).strip(),
-                            path=f"Images/thumbs/montage_{y}.png",
-                        )
-                    except Exception:
-                        back_cover_b = None
-
-                    # Titre PDF sur 2 lignes : fête puis (semaine du Psautier uniquement)
-                    semaine_psautier = (getattr(identity, "semaine", None) or "").strip()
-                    line1 = ap._liturgy_display_label(
-                        (getattr(identity, "fete", None) or "").strip()
-                        or (ap._jour_liturgique(identity) or "").strip()
-                        or ap._liturgy_cover_pdf_title(identity)
-                    )
-                    line2 = ""
-                    if semaine_psautier and ("psautier" in semaine_psautier.lower()):
-                        lbl = ap._liturgy_display_label(semaine_psautier).strip()
-                        line2 = f"({lbl})" if lbl else ""
-                    week_title_pdf = (line1 + ("\n" + line2 if line2 else "")).strip()
-
-                    # Index de la vignette du dimanche dans le montage annuel (pour encadrer la semaine correspondante)
-                    highlight_idx = None
-                    try:
-                        manifest = json.loads(
-                            Path("data/manifests/illustration_pipeline.json").read_text(encoding="utf-8")
-                        )
-                        targets = manifest.get("targets") or []
-                        year = str(date_str)[:4]
-                        year_targets = [t for t in targets if str(t.get("date") or "").startswith(year)]
-                        year_dates = [str(t.get("date") or "")[:10] for t in year_targets]
-                        if str(date_str)[:10] in year_dates:
-                            highlight_idx = int(year_dates.index(str(date_str)[:10]))
-                    except Exception:
-                        highlight_idx = None
-
-                    tpdf0 = time.perf_counter()
-                    pdf_b = build_liturgy_sunday_pdf_bytes(
-                        image_bytes=img_b,
-                        week_title=week_title_pdf,
-                        date_line=pdf_cover_date_line(date_str, pref_langue),
-                        meta_line=pdf_cover_meta_line(
-                            periode=getattr(identity, "periode", None),
-                            annee=getattr(identity, "annee", None),
-                            couleur=getattr(identity, "couleur", None),
-                            pref_langue=pref_langue,
-                        ),
-                        **pdf_liturgy_reading_kwargs(texts),
-                        synthesis_text=synth_for_pdf,
-                        audio_listen_url=aud_url,
-                        audio_listen_note=aud_note,
-                        audio_readings_listen_url=readings_pdf_cover,
-                        illustration_description=_pdf_illustration_description_localized(
-                            text_fr=ilus_desc_pdf or "",
-                            pref_langue=pref_langue,
-                            cfg=cfg,
-                        ),
-                        about_markdown=about_markdown_for_lang(pref_langue),
-                        back_cover_image_bytes=back_cover_b,
-                        accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
-                        back_cover_highlight_cell_index=highlight_idx,
-                        pref_langue=pref_langue,
-                    )
-                    st.session_state[pdf_key] = pdf_b
-                    st.session_state.pop(f"liturgy_sunday_pdf_{date_str}", None)
-                    try:
-                        fasc_path = fascicule_pdf_path(date_str, pref_langue=pref_langue)
-                        upload_bytes(
-                            gcs=gcs_top,
-                            bucket_name=str(cfg.gcs_bucket_name).strip(),
-                            path=fasc_path,
-                            data=pdf_b,
-                            content_type="application/pdf",
-                        )
-                        if gs_top and str(cfg.gsheet_id or "").strip():
-                            try:
-                                _append_pdf_export_row(
-                                    gs=gs_top,
-                                    cfg=cfg,
-                                    date_str=date_str,
-                                    zone=zone,
-                                    gen_entity_id=_gen_eid,
-                                    gcs_path=fasc_path,
-                                    duration_build_s=round(time.perf_counter() - tpdf0, 3),
-                                )
-                            except Exception:
-                                pass
-                        st.success("PDF enregistré — tu peux le télécharger ci-dessus.")
-                        st.rerun()
-                    except Exception as ex:
-                        st.warning(f"Impossible d’enregistrer le PDF sur Cloud (Fascicules/) : {ex}")
-                        # Session OK même si GCS échoue — rerun pour afficher le bouton.
-                        st.rerun()
-                finally:
-                    ov_pdf.empty()
-            st.divider()
-        st.caption("Administration — synthèse (texte + audio)")
-        _show_sunday_admin_flash(date_str)
-        already_has_bundle = bool((bundle_synth_text or "").strip()) or (bundle_audio is not None)
-        if already_has_bundle:
-            _tail = (
-                "Les supports **PDF**, **audio synthèse** et **texte** disponibles sont regroupés en haut de la page."
-            )
-            if not bundle_readings_audio:
-                _tail += (
-                    " **L’audio des lectures** (bloc « Écouter les lectures (intégrales) ») n’apparaît que si une ligne "
-                    "existe dans la table `audio` avec un chemin `AudioLectures/…` lié à la génération du jour ; "
-                    "sinon utilise **Compléter les manquants** avec la case « Audio des lectures » cochée."
-                )
-            else:
-                _tail += " **L’audio des lectures** figure au-dessus des trois colonnes."
-            st.info(
-                "Une synthèse existe déjà pour ce dimanche (texte et/ou audio). " + _tail + " Tu peux régénérer ci-dessous si besoin.",
-                icon="ℹ️",
-            )
-        pct = st.segmented_control(
-            "Longueur (en % du total des lectures)",
-            options=[10, 15, 20, 25, 30, 35, 40, 45, 50],
-            default=20,
-            format_func=lambda x: f"{x}%",
-            key=f"adm_sunday_pct_{date_str}",
-        )
-        include_takeaways = st.checkbox(
-            "Inclure “À retenir” (3–5 points)", value=True, key=f"adm_sunday_takeaways_{date_str}"
-        )
-        include_catechese_bridge_gen = st.checkbox(
-            "Inclure « Passerelle catéchèse »",
-            value=True,
-            help=(
-                "Ajoute la passerelle catéchèse (5 sous-parties) en fin de synthèse. "
-                "Sa longueur (~275 mots) est fixe et indépendante du pourcentage ci-dessus."
-            ),
-            key=f"adm_sunday_catech_{date_str}",
-        )
-        auto_pdf = st.checkbox(
-            "Inclure aussi le fascicule du dimanche au format PDF",
-            value=False,
-            key=f"adm_sunday_auto_pdf_{date_str}",
-            help="À la fin d’une régénération complète, produit aussi le PDF et l’envoie sur Cloud.",
-        )
-        audio_readings_gen = st.checkbox(
-            "Audio des lectures",
-            value=True,
-            key=f"adm_sunday_audio_readings_{date_str}",
-            help="Fichier distinct AudioLectures/… rattaché à la même génération que la synthèse.",
-        )
-        debug = st.toggle("Mode debug", value=False, key=f"adm_sunday_debug_{date_str}")
-        admin_pref_langue = pref_langue
-
-        from core.sunday_view_locale import (
-            lang_flag,
-            lang_panel_banner_html,
-            lang_panel_css,
-            sunday_ui,
-        )
-
-        _ui_edit = sunday_ui(pref_langue)
-        st.markdown(lang_panel_css(pref_langue, container_key="lv_sunday_lang_edit"), unsafe_allow_html=True)
-        with st.container(border=True, key="lv_sunday_lang_edit"):
-            st.markdown(
-                lang_panel_banner_html(
-                    pref_langue=pref_langue,
-                    kind="edit",
-                    source_id=liturgy_source_id,
+            auto_pdf = st.checkbox(
+                "Inclure aussi le fascicule du dimanche au format PDF",
+                value=True,
+                key=f"adm_sunday_auto_pdf_{date_str}",
+                help=(
+                    "Coché par défaut : à la fin d’une régénération / complément, "
+                    "produit aussi le PDF et l’envoie sur Cloud."
                 ),
-                unsafe_allow_html=True,
             )
-            st.caption(
-                f"{lang_flag(pref_langue)} {_ui_edit['edit_hint']} "
-                f"(source `{liturgy_source_id}`). "
-                "Change « Langue des lectures » en haut de page pour recharger les textes "
-                "(RDC → API → écriture RDC) et cibler les assets GCS `{LANG}/`."
+            audio_readings_gen = st.checkbox(
+                "Audio des lectures",
+                value=True,
+                key=f"adm_sunday_audio_readings_{date_str}",
+                help="Fichier distinct AudioLectures/… rattaché à la même génération que la synthèse.",
             )
-            st.caption(
-                "« Compléter les manquants » ajoute seulement ce qui manque encore sur Cloud, selon les cases "
-                "**Audio des lectures** et **fascicule PDF** — sans refaire la synthèse IA. "
-                "« Tout régénérer (long) » relance Vertex + audios ; prévoir **5–10 min** si les lectures sont cochées. "
-                "Progression affichée en **4 étapes** (1/4 synthèse écrite → 2/4 audios synthèse → 3/4 lectures → 4/4 PDF). "
-                "Le **premier** fichier Cloud est le texte (`Syntheses/…`) après l’étape 1/4 ; les audios suivent. "
-                "L’audio passe par **Vertex TTS** en priorité ; si le projet n’est pas "
-                "allowlisté pour l’audio, configure `GEMINI_API_KEY` dans les secrets pour le repli automatique."
-            )
+            debug = st.toggle("Mode debug", value=False, key=f"adm_sunday_debug_{date_str}")
+            admin_pref_langue = pref_langue
+
             if not cfg.gcp_service_account or not cfg.gsheet_id or not cfg.gcs_bucket_name:
                 st.warning("Configuration incomplète (service account / gsheet_id / bucket). Synthèse indisponible.")
             else:
+                _inc_plan_key = f"_adm_sunday_inc_plan_{date_str}"
+                _inc_run_key = f"_adm_sunday_inc_run_{date_str}"
+                _inc_blocker_key = f"_adm_sunday_inc_blocker_{date_str}"
+                _inc_skip_key = f"_adm_sunday_inc_skip_{date_str}"
+
+                @st.dialog("Confirmer — Compléter les manquants")
+                def _confirm_incremental_dialog() -> None:
+                    plan = list(st.session_state.get(_inc_plan_key) or [])
+                    skips = list(st.session_state.get(_inc_skip_key) or [])
+                    blocker = str(st.session_state.get(_inc_blocker_key) or "").strip()
+                    sel = list(st.session_state.get(f"adm_sunday_ml_langs_{date_str}") or [])
+                    if not sel:
+                        sel = [admin_pref_langue]
+                    sel_lbl = ", ".join(
+                        f"{lang_flag(coerce_liturgy_pref_langue(x))} {coerce_liturgy_pref_langue(x)}"
+                        for x in sel
+                    )
+                    st.markdown(f"Dimanche **{date_str}** · langues : {sel_lbl}.")
+                    if blocker:
+                        st.warning(blocker)
+                    elif not plan:
+                        st.info("Aucun manquant à produire avec la sélection et les options cochées.")
+                    else:
+                        st.markdown("Éléments qui seront générés :")
+                        st.markdown("\n".join(f"- {line}" for line in plan))
+                    if skips:
+                        st.caption("Déjà présents (ignorés) :")
+                        st.markdown("\n".join(f"- {line}" for line in skips))
+                    c_ok, c_no = st.columns(2)
+                    with c_ok:
+                        can_run = bool(plan) and not blocker
+                        if st.button(
+                            "Lancer",
+                            type="primary",
+                            key=f"adm_sunday_inc_dlg_ok_{date_str}",
+                            disabled=not can_run,
+                        ):
+                            st.session_state[_inc_run_key] = True
+                            st.session_state.pop(_inc_plan_key, None)
+                            st.session_state.pop(_inc_skip_key, None)
+                            st.session_state.pop(_inc_blocker_key, None)
+                            st.rerun()
+                    with c_no:
+                        if st.button("Annuler", key=f"adm_sunday_inc_dlg_no_{date_str}"):
+                            st.session_state.pop(_inc_plan_key, None)
+                            st.session_state.pop(_inc_skip_key, None)
+                            st.session_state.pop(_inc_blocker_key, None)
+                            st.rerun()
+
                 col_inc, col_full = st.columns(2)
                 with col_inc:
                     inc_clicked = st.button(
                         "Compléter les manquants",
                         type="primary",
                         key=f"adm_sunday_incremental_{date_str}",
-                        help="Audio des lectures (si case cochée) et/ou fascicule PDF (si case fascicule cochée), "
-                        "uniquement si absents sur Cloud — synthèse déjà enregistrée.",
+                        help="Complète les médias manquants pour les langues du bloc "
+                        "« Langues à publier / compléter » et les cases Audio/PDF de ce bloc.",
                     )
                 with col_full:
                     full_clicked = st.button(
                         "Tout régénérer (long)",
                         type="secondary",
                         key=f"adm_sunday_full_{date_str}",
-                        help="Nouvelle synthèse Vertex, audio synthèse, options ci-dessous — plusieurs minutes.",
+                        help="Nouvelle synthèse Vertex, audio synthèse, options ci-dessus — plusieurs minutes "
+                        "(langue d’affichage uniquement).",
                     )
                 if inc_clicked:
+                    from core.sunday_media_status import media_status_matrix
+                    from ui.sunday_admin_panel import plan_multilang_missing_items
+
+                    sel_langs = list(st.session_state.get(f"adm_sunday_ml_langs_{date_str}") or [])
+                    if not sel_langs:
+                        sel_langs = [admin_pref_langue]
+                    want_read_ml = bool(st.session_state.get(f"adm_sunday_ml_read_{date_str}", True))
+                    want_syna_ml = bool(st.session_state.get(f"adm_sunday_ml_syna_{date_str}", True))
+                    want_pdf_ml = bool(st.session_state.get(f"adm_sunday_ml_pdf_{date_str}", True))
+                    force_ml = bool(st.session_state.get(f"adm_sunday_ml_force_{date_str}", False))
+                    try:
+                        status_rows = media_status_matrix(
+                            gs=gs_top or build_gspread_client(cfg.gcp_service_account),
+                            gcs=gcs_top,
+                            cfg=cfg,
+                            date_str=date_str,
+                        )
+                    except Exception:
+                        status_rows = []
+                    plan_lines, skip_lines, blocker_msg = plan_multilang_missing_items(
+                        rows=status_rows,
+                        selected_langs=sel_langs,
+                        want_readings=want_read_ml,
+                        want_synth_audio=want_syna_ml,
+                        want_pdf=want_pdf_ml,
+                        force=force_ml,
+                    )
+                    st.session_state[_inc_plan_key] = plan_lines
+                    st.session_state[_inc_skip_key] = skip_lines
+                    st.session_state[_inc_blocker_key] = blocker_msg
+                    _confirm_incremental_dialog()
+
+                if st.session_state.pop(_inc_run_key, False):
+                    from ui.sunday_admin_flows import _run_multilang_sunday_batch
+
                     gcs_inc = gcs_top
                     if gcs_inc is None:
                         try:
@@ -1202,27 +955,39 @@ def render_sunday() -> None:
                             st.error(f"Connexion GCS impossible : {ex}")
                             gcs_inc = None
                     if gcs_inc:
-                        overlay_inc = loading_overlay("Complément des contenus manquants…")
+                        sel_run = list(st.session_state.get(f"adm_sunday_ml_langs_{date_str}") or [])
+                        if not sel_run:
+                            sel_run = [admin_pref_langue]
+                        overlay_inc = loading_overlay("Complément multi-langues…", flush=True)
                         try:
                             gs_inc = build_gspread_client(cfg.gcp_service_account)
                             include_cat_state = bool(
                                 st.session_state.get(f"pdf_catechese_{date_str}", True)
                             )
-                            flash = _run_incremental_sunday_outputs(
+                            flash = _run_multilang_sunday_batch(
                                 cfg=cfg,
                                 gs=gs_inc,
                                 gcs=gcs_inc,
                                 identity=identity,
                                 texts=texts,
-                                zone=zone,
-                                pref_langue=admin_pref_langue,
-                                bundle_synth_text=bundle_synth_text,
-                                bundle_audio_gcs_path=bundle_audio_gcs_path,
-                                bundle_readings_gcs_path=bundle_readings_gcs_path,
+                                langs=list(sel_run),
+                                generate_readings_audio=bool(
+                                    st.session_state.get(f"adm_sunday_ml_read_{date_str}", True)
+                                ),
+                                generate_synth_audio=bool(
+                                    st.session_state.get(f"adm_sunday_ml_syna_{date_str}", True)
+                                ),
+                                generate_pdf=bool(
+                                    st.session_state.get(f"adm_sunday_ml_pdf_{date_str}", True)
+                                ),
                                 include_catechese_pdf=include_cat_state,
-                                also_pdf_if_missing=bool(auto_pdf),
-                                also_readings_if_missing=bool(audio_readings_gen),
-                                pdf_key=pdf_key,
+                                force=bool(
+                                    st.session_state.get(f"adm_sunday_ml_force_{date_str}", False)
+                                ),
+                                ensure_fr_first=True,
+                                pct=int(pct or 20),
+                                include_takeaways=bool(include_takeaways),
+                                include_catechese_bridge=bool(include_catechese_bridge_gen),
                                 _overlay=overlay_inc,
                             )
                             _set_sunday_admin_flash(
@@ -1230,7 +995,7 @@ def render_sunday() -> None:
                                 level=str(flash.get("level") or "info"),
                                 message=str(flash.get("message") or ""),
                             )
-                            if flash.get("level") == "success":
+                            if flash.get("level") in ("success", "warning"):
                                 _month_content_status.clear()
                             st.rerun()
                         finally:
@@ -1267,6 +1032,13 @@ def render_sunday() -> None:
                         st.rerun()
                     finally:
                         overlay.empty()
+
+    from core.sunday_view_locale import sunday_ui as _sunday_ui_hero
+    _hero_ui = _sunday_ui_hero(pref_langue)
+    st.markdown(
+        f'<h2 class="lv-sunday-identity-heading">{_hero_ui["identity"]}</h2>',
+        unsafe_allow_html=True,
+    )
 
     fete_raw = (identity.fete or "").strip() or (ap._jour_liturgique(identity) or "").strip()
     fete_line = ap._liturgy_display_label(fete_raw) if fete_raw else "—"
@@ -1391,5 +1163,158 @@ def render_sunday() -> None:
             intro_lue=getattr(texts, "evangile_intro", None),
             ref=getattr(texts, "evangile_ref", None),
         )
+
+    st.markdown(
+        '<h2 class="lv-sunday-identity-heading">Supports du dimanche</h2>',
+        unsafe_allow_html=True,
+    )
+    # Livrables numériques : cadre complet (filet liturgique) sous le titre.
+    has_pdf_fmt = bool(pdf_bytes_for_user)
+    has_audio_fmt = bundle_audio is not None
+    has_text_fmt = bool((bundle_synth_text or "").strip())
+    has_readings_fmt = bundle_readings_audio is not None
+    n_formats = sum([has_pdf_fmt, has_audio_fmt, has_text_fmt, has_readings_fmt])
+    date_prep = html_escape(ap._french_weekday_day_month_year(date_str))
+    # Teintes tirées du couple or / sépia (charte liturgique) : lisibles sur fond crème, distinctes du corps #342E29.
+    if n_formats <= 0:
+        intro_inner = (
+            f"<strong style=\"color:#6b5918;font-weight:600;\">Aucun support numérique</strong>"
+            f"<span style=\"color:#5f4f3a;\"> publié pour l’instant par "
+            f"<strong style=\"color:#6b5918;font-weight:600;\">{ap._jopai_mark_html()} LumenVia</strong>"
+            f" pour vous préparer</span>"
+            f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
+            f"<strong style=\"color:#584610;\">{date_prep}</strong>"
+            f" — les lectures textuelles figurent ci-dessus.</span>"
+        )
+    else:
+        cardinals = ("Un", "Deux", "Trois", "Quatre")
+        c = cardinals[n_formats - 1]
+        fmt_word = "format" if n_formats == 1 else "formats"
+        disp = "disponible" if n_formats == 1 else "disponibles"
+        prop = "proposé" if n_formats == 1 else "proposés"
+        intro_inner = (
+            f"<strong style=\"color:#6b5918;font-weight:600;\">{c} {fmt_word}</strong>"
+            f"<span style=\"color:#5f4f3a;\"> {disp} {prop} par "
+            f"<strong style=\"color:#6b5918;font-weight:600;\">{ap._jopai_mark_html()} LumenVia</strong>"
+            f" pour vous préparer</span>"
+            f"<span style=\"color:#5f4f3a;\"><br/>à la célébration du "
+            f"<strong style=\"color:#584610;\">{date_prep}</strong>.</span>"
+        )
+
+    # Pastilles d’état des livrables
+    def _pill(ok: bool, label: str) -> str:
+        color = "#3d6b45" if ok else "#8a7a66"
+        bg = "rgba(61,107,69,0.12)" if ok else "rgba(138,122,102,0.10)"
+        mark = "●" if ok else "○"
+        return (
+            f"<span style=\"display:inline-block;margin:0.15rem 0.35rem;padding:0.2rem 0.55rem;"
+            f"border-radius:999px;font-size:0.78rem;color:{color};background:{bg};\">"
+            f"{mark} {html_escape(label)}</span>"
+        )
+
+    pills_html = (
+        "<p style=\"text-align:center;margin:0 0 0.65rem;\">"
+        + _pill(has_readings_fmt, "Lectures audio")
+        + _pill(has_text_fmt, "Synthèse texte")
+        + _pill(has_audio_fmt, "Synthèse audio")
+        + _pill(has_pdf_fmt, "PDF")
+        + "</p>"
+    )
+
+    with st.container(border=True, key="lv_sunday_deliverables_box"):
+        st.markdown(pills_html, unsafe_allow_html=True)
+        st.markdown(
+            f"<p style=\"font-size:clamp(0.95rem, 0.35vw + 0.94rem, 1.06rem);line-height:1.52;"
+            f"text-align:center;text-wrap:balance;max-width:min(42rem,calc(100% - 0.75rem));"
+            f"margin:0 auto 0.85rem;color:#5f4f3a;\">{intro_inner}</p>",
+            unsafe_allow_html=True,
+        )
+
+        if has_readings_fmt:
+            st.markdown(
+                "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.4;color:#5f4f3a;"
+                "font-size:0.95rem;\"><strong>Écouter les lectures (intégrales)</strong></p>",
+                unsafe_allow_html=True,
+            )
+            _sunday_identity_audio(
+                bundle_readings_audio[0],
+                bundle_readings_audio[1],
+                voice_label=_tts_voice_display_label(bundle_readings_voice),
+                accent_label=_tts_accent_display_label(
+                    date_str=date_str,
+                    cible="lectures",
+                    voice_name=bundle_readings_voice,
+                ),
+            )
+            st.caption("Texte des lectures : section **Identité du jour** ci-dessus.")
+
+        if has_pdf_fmt or has_text_fmt:
+            col_pdf, col_texte = st.columns(2, gap="medium")
+            with col_pdf:
+                if has_pdf_fmt:
+                    st.download_button(
+                        label="Télécharger le PDF du dimanche",
+                        data=pdf_bytes_for_user,
+                        file_name=f"lumenvia_dimanche_{date_str}_{pref_langue}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_sunday_top_{date_str}_{pref_langue}",
+                        type="secondary",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("PDF indisponible pour cette date.")
+            with col_texte:
+                with st.expander("Lire le texte de cette synthèse\n\u00a0", expanded=False):
+                    if has_text_fmt:
+                        st.markdown(bundle_synth_text)
+                    elif has_audio_fmt:
+                        st.info(
+                            "Le texte de la synthèse n’est pas disponible (Cloud ou cache local). "
+                            "Vérifie `text_gcs_path` dans la table generations si tu utilises le cloud."
+                        )
+                    else:
+                        st.caption("Le texte de la synthèse n’est pas encore disponible pour cette date.")
+
+        if has_audio_fmt:
+            st.markdown(
+                "<p style=\"text-align:center;margin:0.65rem 0 0.35rem;line-height:1.4;color:#5f4f3a;"
+                "font-size:0.95rem;\"><strong>Audio de la synthèse</strong></p>",
+                unsafe_allow_html=True,
+            )
+            if bundle_from_disk:
+                st.markdown(
+                    "<p style=\"text-align:center;margin:0 0 0.35rem;line-height:1.35;"
+                    "color:#5f4f3a;font-size:0.78rem;opacity:0.88;\">En cache sur cet appareil</p>",
+                    unsafe_allow_html=True,
+                )
+            _sunday_identity_audio(
+                bundle_audio[0],
+                bundle_audio[1],
+                voice_label=_tts_voice_display_label(bundle_synth_voice),
+                accent_label=_tts_accent_display_label(
+                    date_str=date_str,
+                    cible="synthese",
+                    voice_name=bundle_synth_voice,
+                ),
+            )
+        elif has_readings_fmt or has_pdf_fmt or has_text_fmt:
+            st.markdown(
+                "<p style=\"text-align:center;margin:0.65rem 0 0.25rem;line-height:1.4;color:#5f4f3a;"
+                "font-size:0.85rem;\">Audio synthèse pas encore publié.</p>",
+                unsafe_allow_html=True,
+            )
+
+        if not has_pdf_fmt and not has_audio_fmt and not has_text_fmt and not has_readings_fmt:
+            _synth_na_msg = (
+                "**Pas encore de supports numériques** pour ce dimanche (PDF / audio / synthèse). "
+                "Les lectures textuelles sont affichées ci-dessus. "
+                "Inscris-toi via **Nous rejoindre** pour être prévenu quand ils seront prêts."
+            )
+            if is_admin_sunday:
+                _synth_na_msg += (
+                    "\n\n**Admin —** utilise l’atelier **Générer et Valider** en haut de page pour publier."
+                )
+            st.info(_synth_na_msg, icon="📖")
+
 
 

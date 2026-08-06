@@ -571,6 +571,16 @@ div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stExpander"] summa
   white-space: pre-line !important;
 }
 
+@media (max-width: 520px) {
+  div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="stHorizontalBlock"] {
+    flex-direction: column !important;
+  }
+  div[class*="st-key-lv_sunday_deliverables_box"] [data-testid="column"] {
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+}
+
 /* 7. Correction radicale — Expanders & Selectbox */
 
 [data-testid="stExpander"] summary {

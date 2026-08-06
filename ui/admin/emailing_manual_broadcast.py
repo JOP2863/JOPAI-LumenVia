@@ -45,6 +45,7 @@ from core.emailing_newsletter_html import (
 from core.weekly_email_urls import weekly_email_signed_urls
 from ui.admin.broadcast_recipients import (
     count_skipped_weekly_broadcast_recipients,
+    format_broadcast_recipient_preview_line,
     is_broadcast_email_ok,
     lumenvia_manual_broadcast_recipient_pairs,
     lumenvia_manual_broadcast_users,
@@ -214,13 +215,21 @@ def render_emailing_manual_broadcast(
         )
 
     st.markdown("**Destinataires de test (aperçu)**")
+    st.caption(
+        "Colonne langue = `pref_langue` du profil (`users`) : langue dans laquelle l’e-mail sera rendu."
+    )
     preview_lines: list[str] = []
     for em in selected_test_emails:
         u0 = _latest_user_by_email(em)
-        fn0 = str(u0.get("first_name") or "Test").strip() or "Test"
-        ln0 = str(u0.get("last_name") or "JOPAI").strip() or "JOPAI"
-        src0 = str(u0.get("source") or "").strip() or "—"
-        preview_lines.append(f"{em}\t{fn0}\t{ln0}\t{src0}")
+        if u0:
+            preview_lines.append(format_broadcast_recipient_preview_line(u0, email_fallback=em))
+        else:
+            preview_lines.append(
+                format_broadcast_recipient_preview_line(
+                    {"email": em, "first_name": "Test", "last_name": "JOPAI", "pref_langue": "FR"},
+                    email_fallback=em,
+                )
+            )
     if dry_phone_in and not selected_test_emails:
         preview_lines.append(f"phone_e164:\t{dry_phone_in}")
     st.code(("\n".join(preview_lines) if preview_lines else "—")[:9000])
@@ -333,7 +342,7 @@ def render_emailing_manual_broadcast(
                 )
             )
 
-            # Mini table (limite) : qui va recevoir
+            # Mini table (limite) : qui va recevoir + langue d’e-mail (profil)
             show_n = st.slider(
                 "Afficher les N premiers destinataires (aperçu)",
                 min_value=10,
@@ -342,12 +351,13 @@ def render_emailing_manual_broadcast(
                 step=10,
                 key="adm_email_preview_n",
             )
-            lines = []
-            for u in filtered_preview[: int(show_n)]:
-                em0 = str(u.get("email") or "").strip().lower()
-                fn0 = str(u.get("first_name") or "").strip()
-                ln0 = str(u.get("last_name") or "").strip()
-                lines.append(f"{em0}\t{fn0}\t{ln0}")
+            st.caption(
+                "Colonnes : e-mail · prénom · nom · **langue d’envoi** (`pref_langue` du profil)."
+            )
+            lines = [
+                format_broadcast_recipient_preview_line(u)
+                for u in filtered_preview[: int(show_n)]
+            ]
             st.code(("\n".join(lines) if lines else "—")[:9000])
 
             final_list = filtered_preview[: int(limit_to_n)] if limit_to_n > 0 else filtered_preview

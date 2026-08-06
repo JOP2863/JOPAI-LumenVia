@@ -150,6 +150,30 @@ def synthesis_audio_gcs_path_for_gen(*, gs: object, cfg: object, gen_entity_id: 
         return None
 
 
+def readings_audio_gcs_path_for_gen(*, gs: object, cfg: object, gen_entity_id: str) -> str | None:
+    """Chemin GCS de l’audio lectures lié à une génération (dernier en date)."""
+    ge = str(gen_entity_id or "").strip()
+    if not ge:
+        return None
+    try:
+        audios = fetch_records(
+            gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audio", limit=0, use_cache=True
+        )
+        rows = [
+            a
+            for a in audios
+            if str(a.get("gen_entity_id") or "").strip() == ge
+            and _is_readings_audio_gcs_path(str(a.get("gcs_path") or ""))
+        ]
+        if not rows:
+            return None
+        aud = sorted(rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
+        p = str(aud.get("gcs_path") or "").strip()
+        return p or None
+    except Exception:
+        return None
+
+
 def pdf_synthesis_listen_url(
     *,
     date_str: str,

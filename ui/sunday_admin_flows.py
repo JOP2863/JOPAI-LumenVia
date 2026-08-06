@@ -1381,3 +1381,599 @@ def _run_generate_sunday_flow(
         parts.insert(0, retry_fallback_note)
         level = "warning"
     return _flow_result(ok=True, level=level, message=" ".join(parts))
+
+
+def _load_fr_master_synthesis_text(
+    *,
+    gs: object,
+    gcs: object,
+    cfg: object,
+    date_str: str,
+) -> tuple[str, str]:
+    """Retourne ``(texte_fr, gen_entity_id_fr)`` depuis GEN/GCS zone France."""
+    from core.readings_cache_loader import rdc_zone_for_pref_langue
+    from core.sunday_existing_outputs import latest_generation_row_for_sunday
+
+    day = str(date_str or "").strip()[:10]
+    zone = rdc_zone_for_pref_langue("FR")
+    gen = latest_generation_row_for_sunday(gs=gs, cfg=cfg, date_str=day, zone=zone)
+    if not gen:
+        return "", ""
+    eid = str(gen.get("entity_id") or "").strip()
+    tp = str(gen.get("text_gcs_path") or "").strip()
+    if not tp:
+        return "", eid
+    try:
+        text = (
+            download_bytes(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=tp)
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
+    except Exception:
+        text = ""
+    return text, eid
+
+
+def _run_publish_lang_from_fr_pivot(
+    *,
+    cfg: object,
+    gs: object,
+    gcs: object,
+    identity: object,
+    texts: object,
+    target_lang: str,
+    fr_synth_text: str,
+    generate_readings_audio: bool = True,
+    generate_synth_audio: bool = True,
+    generate_pdf: bool = True,
+    include_catechese_pdf: bool = True,
+    force: bool = False,
+    _overlay: object | None = None,
+) -> dict[str, str]:
+    """
+    Publie une langue à partir du pivot FR :
+    - lectures TTS = lectionnaire natif de la langue ;
+    - synthèse = traduction programme du texte FR (pas de rédaction Vertex) ;
+    - audio synthèse = TTS du script traduit ;
+    - PDF = lectures natives + synthèse localisée.
+    """
+    import app as ap
+    from core.readings_cache_loader import rdc_zone_for_pref_langue
+    from core.sunday_media_status import media_status_for_lang
+    from core.synthesis_localize import localize_synthesis_from_fr
+
+    lg = coerce_liturgy_pref_langue(target_lang)
+    day = str(getattr(identity, "date", "") or "").strip()[:10]
+    zone = rdc_zone_for_pref_langue(lg)
+    status = media_status_for_lang(
+        gs=gs, gcs=gcs, cfg=cfg, date_str=day, pref_langue=lg
+    )
+    if status.all_ready and not force:
+        return {
+            "level": "info",
+            "message": f"{lg} : déjà complet — ignoré (coche « Forcer » pour refaire).",
+        }
+
+    identity, texts = _ensure_texts_for_pref_langue(
+        texts=texts, identity=identity, pref_langue=lg
+    )
+    fr_body = (fr_synth_text or "").strip()
+    if not fr_body:
+        return {
+            "level": "error",
+            "message": f"{lg} : synthèse FR pivot introuvable — génère d’abord le français.",
+        }
+
+    if _overlay is not None:
+        _flow_overlay_step(
+            _overlay,
+            f"LumenVia · {lg} — localisation de la synthèse…",
+            hint="Traduction programme du pivot FR (pas de nouvelle rédaction IA).",
+        )
+
+    if lg == "FR":
+        localized = fr_body
+    else:
+        localized = localize_synthesis_from_fr(fr_body, target_lang=lg)
+
+    source_hash = sha256(
+        f"localized_from_fr|{day}|{lg}|{sha256(fr_body.encode('utf-8')).hexdigest()[:16]}".encode(
+            "utf-8"
+        )
+    ).hexdigest()[:32]
+    gen_entity_id = sha256(f"{day}|{zone}|{source_hash}".encode("utf-8")).hexdigest()[:24]
+    text_path = synthesis_text_path(day, gen_entity_id, pref_langue=lg)
+
+    need_text = force or not status.synth_text
+    need_synth_audio = generate_synth_audio and (force or not status.synth_audio)
+    need_readings = generate_readings_audio and (force or not status.readings_audio)
+    need_pdf = generate_pdf and (force or not status.pdf)
+
+    done: list[str] = []
+    issues: list[str] = []
+
+    if need_text:
+        upload_text(
+            gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=text_path, text=localized
+        )
+        append_immutable_row(
+            gspread_client=gs,
+            spreadsheet_id=cfg.gsheet_id,
+            table="generations",
+            values_by_col={
+                "entity_id": gen_entity_id,
+                "date": day,
+                "zone": zone,
+                "cycle": getattr(identity, "annee", None) or "",
+                "season": getattr(identity, "periode", None) or "",
+                "length": len(localized.split()),
+                "prompt_version": "localized_from_fr_v1",
+                "model": "mymemory+locale" if lg != "FR" else "fr_pivot",
+                "source_hash": source_hash,
+                "text_gcs_path": text_path,
+                "text_words": len(localized.split()),
+            },
+        )
+        done.append(f"texte {lg}")
+    else:
+        # Réutilise le gen existant si possible
+        if status.gen_entity_id:
+            gen_entity_id = status.gen_entity_id
+            try:
+                from core.content_locale_paths import synthesis_text_path_candidates
+
+                for cand in synthesis_text_path_candidates(
+                    day, gen_entity_id, pref_langue=lg
+                ):
+                    if blob_exists(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=cand):
+                        text_path = cand
+                        localized = (
+                            download_bytes(
+                                gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=cand
+                            )
+                            .decode("utf-8", errors="replace")
+                            .strip()
+                            or localized
+                        )
+                        break
+            except Exception:
+                pass
+
+    voix_rows: list[dict] = []
+    try:
+        voix_rows = ap._load_voix_rules_cached(
+            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+            service_account_fingerprint=service_account_json_fingerprint(
+                getattr(cfg, "gcp_service_account", {}) or {}
+            ),
+        )
+    except Exception:
+        voix_rows = []
+
+    vx = _readings_tts_vertex_client(cfg)
+    templates: dict[str, str] = {}
+    try:
+        templates = ap._load_prompt_templates_cached(
+            gsheet_id=str(getattr(cfg, "gsheet_id", "") or "").strip(),
+            service_account_fingerprint=service_account_json_fingerprint(
+                getattr(cfg, "gcp_service_account", {}) or {}
+            ),
+            pref_langue=lg,
+        )
+    except Exception:
+        templates = {}
+
+    voice_syn = str(
+        _resolve_voice_for_identity(voix_rows, identity=identity, cible="synthese")[
+            "voice"
+        ]
+    )
+
+    if need_synth_audio and localized.strip():
+        try:
+            if _overlay is not None:
+                _flow_overlay_step(
+                    _overlay,
+                    f"LumenVia · {lg} — audio synthèse…",
+                    hint="TTS du script traduit — peut prendre plusieurs minutes.",
+                )
+            from core.sunday_readings_tts import compose_synthesis_tts_text
+
+            spoken = compose_synthesis_tts_text(body=localized, templates=templates)
+            a_bytes, a_mime, a_ext = tts_spoken_audio_bytes(
+                cfg=cfg,
+                text=spoken,
+                voice_name=voice_syn,
+                vertex_client=vx,
+                gemini_api_key=resolve_gemini_api_key(),
+                sunday_date=_sunday_date_for_voice(identity),
+                cible="synthese",
+                pref_langue=lg,
+            )
+            a_path = audio_synth_path(day, gen_entity_id, a_ext, pref_langue=lg)
+            upload_bytes(
+                gcs=gcs,
+                bucket_name=cfg.gcs_bucket_name,
+                path=a_path,
+                data=a_bytes,
+                content_type=a_mime,
+            )
+            append_immutable_row(
+                gspread_client=gs,
+                spreadsheet_id=cfg.gsheet_id,
+                table="audio",
+                values_by_col={
+                    "entity_id": sha256(
+                        f"audio_syn|{gen_entity_id}|{a_path}".encode("utf-8")
+                    ).hexdigest()[:24],
+                    "gen_entity_id": gen_entity_id,
+                    "voice": voice_syn,
+                    "format": a_ext,
+                    "gcs_path": a_path,
+                    "kind": "synthese",
+                    "tts_route": last_tts_route() or "",
+                },
+            )
+            done.append(f"audio synthèse {lg}")
+        except Exception as ex:
+            issues.append(f"audio synthèse {lg}: {ex}")
+
+    if need_readings:
+        try:
+            if _overlay is not None:
+                _flow_overlay_step(
+                    _overlay,
+                    f"LumenVia · {lg} — audio lectures…",
+                    hint="TTS du lectionnaire natif — 5–10 min possibles.",
+                )
+            texts = _resolve_texts_for_readings_tts(
+                texts=texts,
+                identity=identity,
+                gs=gs,
+                cfg=cfg,
+                zone=zone,
+                pref_langue=lg,
+            )
+            readings_plain = plain_readings_for_tts(texts, pref_langue=lg)
+            if not readings_plain.strip():
+                issues.append(f"lectures {lg} vides")
+            else:
+                voice_read = str(
+                    _resolve_voice_for_identity(
+                        voix_rows,
+                        identity=identity,
+                        cible="lectures",
+                        exclude_voices=[voice_syn],
+                    )["voice"]
+                )
+                readings_tts = compose_readings_tts_text(
+                    body=readings_plain, templates=templates
+                )
+                r_bytes, r_mime, r_ext = tts_readings_audio_bytes(
+                    cfg=cfg,
+                    text=readings_tts,
+                    voice_name=voice_read,
+                    vertex_client=vx,
+                    gemini_api_key=resolve_gemini_api_key(),
+                    sunday_date=_sunday_date_for_voice(identity),
+                    pref_langue=lg,
+                )
+                r_path = audio_readings_path(
+                    day, gen_entity_id, r_ext, pref_langue=lg
+                )
+                upload_bytes(
+                    gcs=gcs,
+                    bucket_name=cfg.gcs_bucket_name,
+                    path=r_path,
+                    data=r_bytes,
+                    content_type=r_mime,
+                )
+                append_immutable_row(
+                    gspread_client=gs,
+                    spreadsheet_id=cfg.gsheet_id,
+                    table="audio",
+                    values_by_col={
+                        "entity_id": sha256(
+                            f"audio_lect|{gen_entity_id}|{r_path}".encode("utf-8")
+                        ).hexdigest()[:24],
+                        "gen_entity_id": gen_entity_id,
+                        "voice": voice_read,
+                        "format": r_ext,
+                        "gcs_path": r_path,
+                        "kind": "lectures",
+                        "tts_route": last_tts_route() or "",
+                    },
+                )
+                done.append(f"audio lectures {lg}")
+        except Exception as ex:
+            issues.append(f"audio lectures {lg}: {ex}")
+
+    if need_pdf:
+        try:
+            if _overlay is not None:
+                _flow_overlay_step(
+                    _overlay,
+                    f"LumenVia · {lg} — fascicule PDF…",
+                    hint="Assemblage lectures natives + synthèse localisée.",
+                )
+            bucket = str(cfg.gcs_bucket_name).strip()
+            img_b = None
+            try:
+                img_b = ap._fetch_liturgy_illustration_full_bytes(
+                    gcs=gcs, cfg=cfg, date_str=day
+                )
+            except Exception:
+                img_b = None
+            ilus_desc = ""
+            try:
+                from core.weekly_email_urls import _latest_illustration_description_from_ilus
+
+                ilus_desc = _latest_illustration_description_from_ilus(
+                    gspread_client=gs,
+                    spreadsheet_id=str(cfg.gsheet_id).strip(),
+                    date_str=day,
+                    zone=zone,
+                )
+            except Exception:
+                ilus_desc = ""
+            _base_pub = ""
+            try:
+                s = st.secrets
+                _base_pub = str(s.get("PUBLIC_APP_URL") or s.get("public_app_url") or "").strip()
+            except Exception:
+                pass
+            aud_url, aud_note = pdf_synthesis_listen_url(
+                date_str=day,
+                public_app_url=_base_pub or None,
+                gcs=gcs,
+                bucket_name=bucket,
+                gcs_audio_path=ap._synthesis_audio_gcs_path_for_gen(
+                    gs=gs, cfg=cfg, gen_entity_id=gen_entity_id
+                ),
+                gs=gs,
+                cfg=cfg,
+                gen_entity_id=gen_entity_id,
+            )
+            readings_pdf_signed = None
+            try:
+                from core.sunday_existing_outputs import fetch_existing_readings_audio
+
+                _ra, rpath, _rv = fetch_existing_readings_audio(
+                    gs=gs, gcs=gcs, cfg=cfg, date_str=day, zone=zone
+                )
+                if rpath:
+                    readings_pdf_signed = gcs_signed_url(
+                        gcs=gcs, bucket_name=bucket, path=rpath
+                    )
+            except Exception:
+                readings_pdf_signed = None
+            back_cover_b = None
+            try:
+                y = str(day)[:4]
+                back_cover_b = download_bytes(
+                    gcs=gcs,
+                    bucket_name=bucket,
+                    path=f"Images/thumbs/montage_{y}.png",
+                )
+            except Exception:
+                back_cover_b = None
+            highlight_idx = None
+            try:
+                manifest = json.loads(
+                    Path("data/manifests/illustration_pipeline.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                targets = manifest.get("targets") or []
+                year_dates = [
+                    str(t.get("date") or "")[:10]
+                    for t in targets
+                    if str(t.get("date") or "").startswith(str(day)[:4])
+                ]
+                if day in year_dates:
+                    highlight_idx = int(year_dates.index(day))
+            except Exception:
+                highlight_idx = None
+            semaine_psautier = (getattr(identity, "semaine", None) or "").strip()
+            line1 = ap._liturgy_display_label(
+                (getattr(identity, "fete", None) or "").strip()
+                or (ap._jour_liturgique(identity) or "").strip()
+                or ap._liturgy_cover_pdf_title(identity)
+            )
+            line2 = ""
+            if semaine_psautier and ("psautier" in semaine_psautier.lower()):
+                lbl = ap._liturgy_display_label(semaine_psautier).strip()
+                line2 = f"({lbl})" if lbl else ""
+            week_title_pdf = (line1 + ("\n" + line2 if line2 else "")).strip()
+            synth_for_pdf = localized
+            if not include_catechese_pdf:
+                try:
+                    synth_for_pdf = ap._strip_catechese_bridge(synth_for_pdf)
+                except Exception:
+                    pass
+            pdf_b = build_liturgy_sunday_pdf_bytes(
+                image_bytes=img_b,
+                week_title=week_title_pdf,
+                date_line=pdf_cover_date_line(day, lg),
+                meta_line=pdf_cover_meta_line(
+                    periode=getattr(identity, "periode", None),
+                    annee=getattr(identity, "annee", None),
+                    couleur=getattr(identity, "couleur", None),
+                    pref_langue=lg,
+                ),
+                **pdf_liturgy_reading_kwargs(texts),
+                synthesis_text=synth_for_pdf,
+                audio_listen_url=aud_url,
+                audio_listen_note=aud_note,
+                audio_readings_listen_url=readings_pdf_signed,
+                illustration_description=_pdf_illustration_description_localized(
+                    text_fr=ilus_desc or "",
+                    pref_langue=lg,
+                    cfg=cfg,
+                ),
+                about_markdown=about_markdown_for_lang(lg),
+                back_cover_image_bytes=back_cover_b,
+                accent_hex=liturgical_accent_hex(getattr(identity, "couleur", None)),
+                back_cover_highlight_cell_index=highlight_idx,
+                pref_langue=lg,
+            )
+            fasc_path = fascicule_pdf_path(day, pref_langue=lg)
+            upload_bytes(
+                gcs=gcs,
+                bucket_name=bucket,
+                path=fasc_path,
+                data=pdf_b,
+                content_type="application/pdf",
+            )
+            _append_pdf_export_row(
+                gs=gs,
+                cfg=cfg,
+                date_str=day,
+                zone=zone,
+                gen_entity_id=gen_entity_id,
+                gcs_path=fasc_path,
+                duration_build_s=0,
+            )
+            st.session_state[f"liturgy_sunday_pdf_{day}_{lg}"] = pdf_b
+            done.append(f"PDF {lg}")
+        except Exception as ex:
+            issues.append(f"PDF {lg}: {ex}")
+
+    if issues and not done:
+        return {"level": "error", "message": f"{lg} : " + " · ".join(issues)}
+    if issues:
+        return {
+            "level": "warning",
+            "message": f"{lg} : " + ", ".join(done) + " — " + " · ".join(issues),
+        }
+    if not done:
+        return {"level": "info", "message": f"{lg} : rien à faire."}
+    return {"level": "success", "message": f"{lg} : " + ", ".join(done) + "."}
+
+
+def _run_multilang_sunday_batch(
+    *,
+    cfg: object,
+    gs: object,
+    gcs: object,
+    identity: object,
+    texts: object,
+    langs: list[str],
+    generate_readings_audio: bool = True,
+    generate_synth_audio: bool = True,
+    generate_pdf: bool = True,
+    include_catechese_pdf: bool = True,
+    force: bool = False,
+    ensure_fr_first: bool = True,
+    pct: int = 20,
+    include_takeaways: bool = True,
+    include_catechese_bridge: bool = True,
+    _overlay: object | None = None,
+) -> dict[str, str]:
+    """
+    Lot multi-langues : FR rédigé (Vertex) si besoin, puis localisation programme + médias.
+    """
+    from core.readings_cache_loader import rdc_zone_for_pref_langue
+
+    day = str(getattr(identity, "date", "") or "").strip()[:10]
+    wanted = [coerce_liturgy_pref_langue(x) for x in langs]
+    messages: list[str] = []
+    worst = "success"
+
+    fr_text, _fr_eid = _load_fr_master_synthesis_text(
+        gs=gs, gcs=gcs, cfg=cfg, date_str=day
+    )
+    if ensure_fr_first and (not fr_text.strip() or force and "FR" in wanted):
+        if _overlay is not None:
+            _flow_overlay_step(
+                _overlay,
+                "LumenVia · FR — rédaction synthèse (Vertex)…",
+                hint="Pivot français requis avant localisation des autres langues.",
+            )
+        total_words = sum(
+            len(str(getattr(texts, k, "") or "").split())
+            for k in (
+                "premiere_lecture",
+                "psaume",
+                "deuxieme_lecture",
+                "evangile",
+            )
+        )
+        fr_flow = _run_generate_sunday_flow(
+            _overlay=_overlay or st.empty(),
+            identity=identity,
+            texts=texts,
+            zone=rdc_zone_for_pref_langue("FR"),
+            total_words=max(total_words, 80),
+            pct=int(pct),
+            include_takeaways=include_takeaways,
+            include_catechese_bridge=include_catechese_bridge,
+            generate_pdf=generate_pdf and "FR" in wanted,
+            generate_readings_audio=generate_readings_audio and "FR" in wanted,
+            debug=False,
+            cfg=cfg,
+            pref_langue="FR",
+        )
+        messages.append(str(fr_flow.get("message") or "FR généré."))
+        if fr_flow.get("level") == "error":
+            return {
+                "level": "error",
+                "message": "Échec pivot FR — " + str(fr_flow.get("message") or ""),
+            }
+        fr_text, _fr_eid = _load_fr_master_synthesis_text(
+            gs=gs, gcs=gcs, cfg=cfg, date_str=day
+        )
+
+    if not fr_text.strip():
+        return {
+            "level": "error",
+            "message": "Synthèse FR absente — impossible de localiser les autres langues.",
+        }
+
+    for i, lg in enumerate(wanted, start=1):
+        if _overlay is not None:
+            _flow_overlay_step(
+                _overlay,
+                f"Publication multi-langues — {lg} ({i}/{len(wanted)})…",
+                hint="Localisation FR→langue puis audios / PDF selon les cases cochées.",
+            )
+        if lg == "FR" and ensure_fr_first and not force:
+            # Déjà traité par le flux FR (sauf pièces manquantes hors force).
+            from core.sunday_media_status import media_status_for_lang
+
+            st_fr = media_status_for_lang(
+                gs=gs, gcs=gcs, cfg=cfg, date_str=day, pref_langue="FR"
+            )
+            missing = []
+            if generate_readings_audio and not st_fr.readings_audio:
+                missing.append("readings")
+            if generate_synth_audio and not st_fr.synth_audio:
+                missing.append("synth_audio")
+            if generate_pdf and not st_fr.pdf:
+                missing.append("pdf")
+            if not missing:
+                messages.append("FR : déjà prêt.")
+                continue
+        res = _run_publish_lang_from_fr_pivot(
+            cfg=cfg,
+            gs=gs,
+            gcs=gcs,
+            identity=identity,
+            texts=texts,
+            target_lang=lg,
+            fr_synth_text=fr_text,
+            generate_readings_audio=generate_readings_audio,
+            generate_synth_audio=generate_synth_audio,
+            generate_pdf=generate_pdf,
+            include_catechese_pdf=include_catechese_pdf,
+            force=force,
+            _overlay=_overlay,
+        )
+        messages.append(str(res.get("message") or lg))
+        lv = str(res.get("level") or "info")
+        if lv == "error":
+            worst = "error"
+        elif lv == "warning" and worst == "success":
+            worst = "warning"
+
+    return {"level": worst, "message": "\n".join(messages)}

@@ -29,7 +29,10 @@ from core.sheets_db import (
 )
 from core.subscriptions_util import subscription_is_active
 from core.weekly_email_urls import weekly_email_signed_urls
-from ui.admin.broadcast_recipients import lumenvia_manual_broadcast_users
+from ui.admin.broadcast_recipients import (
+    format_broadcast_recipient_preview_line,
+    lumenvia_manual_broadcast_users,
+)
 from ui.components import loading_overlay
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url
 
@@ -758,7 +761,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                         if str(u.get("email") or "").strip().lower() not in excluded_emails
                     ]
 
-                # Mini table (limite) : qui va recevoir
+                # Mini table (limite) : qui va recevoir + langue d’e-mail (profil)
                 show_n = st.slider(
                     "Afficher les N premiers destinataires (aperçu)",
                     min_value=10,
@@ -767,12 +770,13 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     step=10,
                     key="adm_sched_preview_n",
                 )
-                lines = []
-                for u in filtered_preview[: int(show_n)]:
-                    em0 = str(u.get("email") or "").strip().lower()
-                    fn0 = str(u.get("first_name") or "").strip()
-                    ln0 = str(u.get("last_name") or "").strip()
-                    lines.append(f"{em0}\t{fn0}\t{ln0}")
+                st.caption(
+                    "Colonnes : e-mail · prénom · nom · **langue d’envoi** (`pref_langue` du profil)."
+                )
+                lines = [
+                    format_broadcast_recipient_preview_line(u)
+                    for u in filtered_preview[: int(show_n)]
+                ]
                 st.code(("\n".join(lines) if lines else "—")[:9000])
 
                 # Confirmations

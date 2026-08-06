@@ -165,3 +165,16 @@ def count_skipped_weekly_broadcast_recipients(
             if for_sms and not has_ph:
                 stats["no_phone"] += 1
     return stats
+
+
+def format_broadcast_recipient_preview_line(user_row: dict | None, *, email_fallback: str = "") -> str:
+    """Ligne d’aperçu : e-mail, nom, langue d’envoi (``pref_langue`` du profil)."""
+    from core.locale_codes import user_pref_langue
+    from core.sunday_view_locale import lang_flag
+
+    u = user_row or {}
+    em0 = str(u.get("email") or email_fallback or "").strip().lower()
+    fn0 = str(u.get("first_name") or "").strip()
+    ln0 = str(u.get("last_name") or "").strip()
+    lg = user_pref_langue(u)
+    return f"{em0}\t{fn0}\t{ln0}\t{lang_flag(lg)} {lg}"
