@@ -71,109 +71,105 @@ def switch_public_lang(code: object | None, *, sync_sunday: bool = True) -> str:
     return lg
 
 
+def _lang_switch_href(lg: str) -> str:
+    """Lien relatif ``?...&lang=XX`` en conservant les autres query params."""
+    from urllib.parse import urlencode
+
+    try:
+        raw = dict(st.query_params)
+    except Exception:
+        raw = {}
+    params: dict[str, str] = {}
+    for k, v in raw.items():
+        if isinstance(v, (list, tuple)):
+            params[str(k)] = str(v[0]) if v else ""
+        else:
+            params[str(k)] = str(v)
+    params["lang"] = coerce_ui_lang(lg)
+    return "?" + urlencode(params)
+
+
 def render_public_lang_flags() -> None:
-    """Barre de drapeaux (haut droite) — chrome public + debug admin.
+    """Barre de drapeaux (haut droite) — liens HTML sur les images (pas de boutons).
 
     L’admin reste rédigé en français ; changer la langue ici n’affecte que le chrome
     public (nav, titres pages publiques, etc.) — utile pour tester le multilangue.
     """
+    from html import escape as html_escape
+
     try:
-        from core.sunday_view_locale import LANG_FLAGS, lang_flag_html
+        from core.sunday_view_locale import LANG_FLAG_CDN, lang_flag_html
     except Exception:
-        LANG_FLAGS = {}  # type: ignore[assignment]
+        LANG_FLAG_CDN = {}  # type: ignore[assignment]
         lang_flag_html = None  # type: ignore[assignment]
 
     cur = get_ui_lang()
-    is_admin = bool(st.session_state.get("admin_authenticated"))
+
+    items: list[str] = []
+    for lg in SUPPORTED_UI_LANGS:
+        title = html_escape(LANG_NATIVE_LABEL.get(lg, lg))
+        href = html_escape(_lang_switch_href(lg))
+        active = " lv-flag-link--active" if lg == cur else ""
+        aria_cur = ' aria-current="true"' if lg == cur else ""
+        if lang_flag_html is not None:
+            img = lang_flag_html(lg, height=18)
+            img = img.replace("margin-right:0.28rem;", "margin-right:0;")
+        else:
+            code = (LANG_FLAG_CDN or {}).get(lg, lg.lower()[:2])
+            img = (
+                f'<img src="https://flagcdn.com/h20/{html_escape(code)}.png" '
+                f'height="18" width="24" alt="{html_escape(lg)}" loading="lazy"/>'
+            )
+        items.append(
+            f'<a class="lv-flag-link{active}" href="{href}" '
+            f'title="{title}" aria-label="{title}"{aria_cur}>{img}</a>'
+        )
+
     st.markdown(
-        """
+        f"""
 <style>
-div[class*="st-key-lv_pub_lang_flags"] {
+.lv-flag-bar {{
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
   width: 100%;
-}
-div[class*="st-key-lv_pub_lang_flags"] [data-testid="stHorizontalBlock"] {
-  gap: 0.2rem !important;
-  justify-content: flex-end !important;
-}
-div[class*="st-key-lv_pub_lang_flags"] [data-testid="column"] {
-  flex: 0 0 auto !important;
-  width: auto !important;
-  min-width: 1.85rem !important;
-  max-width: 2.2rem !important;
-}
-/* Drapeau seul : pas de code langue ; bouton transparent superposé. */
-div[class*="st-key-lv_pub_lang_flags"] [data-testid="stMarkdown"] {
-  margin-bottom: -2.05rem !important;
-  text-align: center;
-  position: relative;
-  z-index: 1;
-  pointer-events: none;
-}
-div[class*="st-key-lv_pub_lang_flags"] .lv-flag-only img {
-  margin: 0 auto !important;
-  display: block;
+  margin: 0 0 0.15rem 0;
+  line-height: 0;
+}}
+.lv-flag-link {{
+  display: inline-block;
+  line-height: 0;
+  padding: 1px;
   border-radius: 3px;
+  border: 1.5px solid transparent;
+  text-decoration: none !important;
+  opacity: 0.78;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
+}}
+.lv-flag-link img {{
+  display: block;
+  border-radius: 2px;
   box-shadow: 0 0 0 1px rgba(52, 46, 41, 0.14);
-}
-div[class*="st-key-lv_pub_lang_flags"] button {
-  position: relative;
-  z-index: 2;
-  min-height: 1.85rem !important;
-  height: 1.85rem !important;
-  padding: 0 !important;
-  border-radius: 6px !important;
-  background: transparent !important;
-  border: 2px solid transparent !important;
-  box-shadow: none !important;
-}
-div[class*="st-key-lv_pub_lang_flags"] button p,
-div[class*="st-key-lv_pub_lang_flags"] button span {
-  font-size: 0 !important;
-  line-height: 0 !important;
-  color: transparent !important;
-}
-div[class*="st-key-lv_pub_lang_flags"] button[kind="primary"],
-div[class*="st-key-lv_pub_lang_flags"] button[data-testid="baseButton-primary"] {
-  border-color: #0d9488 !important;
-  background: rgba(13, 148, 136, 0.12) !important;
-}
-div[class*="st-key-lv_pub_lang_flags"] button:hover {
-  border-color: rgba(13, 148, 136, 0.55) !important;
-  background: rgba(13, 148, 136, 0.08) !important;
-}
+}}
+.lv-flag-link:hover {{
+  opacity: 1;
+  border-color: rgba(95, 79, 58, 0.35);
+}}
+.lv-flag-link--active {{
+  opacity: 1;
+  border-color: rgba(95, 79, 58, 0.55);
+}}
+.lv-flag-link:focus-visible {{
+  outline: 2px solid rgba(95, 79, 58, 0.45);
+  outline-offset: 1px;
+}}
 </style>
+<div class="lv-flag-bar" role="navigation" aria-label="Langue">{"".join(items)}</div>
         """.strip(),
         unsafe_allow_html=True,
     )
-    with st.container(key="lv_pub_lang_flags"):
-        if is_admin:
-            st.caption("Langue chrome public (debug)")
-        cols = st.columns(len(SUPPORTED_UI_LANGS), gap="small")
-        for col, lg in zip(cols, SUPPORTED_UI_LANGS):
-            with col:
-                help_lbl = LANG_NATIVE_LABEL.get(lg, lg)
-                if is_admin:
-                    help_lbl = f"{help_lbl} — chrome public seulement (admin reste FR)"
-                if lang_flag_html is not None:
-                    st.markdown(
-                        f'<div class="lv-flag-only">{lang_flag_html(lg, height=18)}</div>',
-                        unsafe_allow_html=True,
-                    )
-                # Libellé invisible : le drapeau CDN ci-dessus est le seul visuel.
-                # Repli emoji si l’image CDN échoue côté accessibilité (title/help).
-                _emoji = (LANG_FLAGS or {}).get(lg) or ""
-                clicked = st.button(
-                    _emoji or "\u200b",
-                    key=f"lv_pub_lang_{lg}",
-                    help=help_lbl,
-                    type="primary" if lg == cur else "secondary",
-                    use_container_width=True,
-                )
-                if clicked and lg != cur:
-                    switch_public_lang(lg, sync_sunday=True)
-                    st.rerun()
 
 
 def append_lang_query(url: str, *, lang: object | None) -> str:
@@ -196,10 +192,8 @@ def append_lang_query(url: str, *, lang: object | None) -> str:
 def apply_lang_query_param() -> None:
     """Applique ``?lang=DE`` (etc.) à la session, puis consomme le paramètre.
 
-    À appeler tôt dans ``app.py`` (avant ``top_nav``). Si le lien porte aussi
-    ``?sunday=...`` (atterrissage direct depuis un envoi e-mail hebdo), synchronise
-    également ``sunday_view_pref_langue`` — la page « Dimanche » s’ouvre alors dans la
-    langue du destinataire sans étape supplémentaire.
+    À appeler tôt dans ``app.py`` (avant ``top_nav``). Aligné aussi sur Dimanche
+    (bandeau drapeaux et liens e-mail ``?lang=`` / ``?sunday=``).
     """
     try:
         raw = str(st.query_params.get("lang") or "").strip()
@@ -207,14 +201,8 @@ def apply_lang_query_param() -> None:
         raw = ""
     if not raw:
         return
-    lg = coerce_ui_lang(raw)
-    set_ui_lang(lg)
-    try:
-        landing_from_email = "sunday" in st.query_params
-    except Exception:
-        landing_from_email = False
-    if landing_from_email:
-        st.session_state["sunday_view_pref_langue"] = lg
+    # Alignement Dimanche + chrome (bandeau drapeaux et liens e-mail ?lang=).
+    switch_public_lang(raw, sync_sunday=True)
     try:
         del st.query_params["lang"]
     except Exception:
