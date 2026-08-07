@@ -32,6 +32,7 @@ from core.catechese_section_strip import (
 )
 from core.pdf_graine_parole_mensuel import strip_light_markdown_to_plain
 from core.pdf_liturgy_cover import build_liturgy_cover_pdf_bytes, draw_jopai_footer_bar
+from core.synthesis_localize import strip_localized_from_banners
 
 
 def _footer_every_page(canvas: object, doc: object) -> None:
@@ -350,7 +351,7 @@ def build_liturgy_body_pdf_bytes(
     # Chapitre Synthèse
     story.append(PageBreak())
     story.append(Paragraph(titles["synthese"], chapter))
-    syn_raw = (synthesis_text or "").strip()
+    syn_raw = strip_localized_from_banners(synthesis_text or "")
     if syn_raw:
         # Découpe : la Passerelle catéchèse doit être un chapitre séparé.
         syn_part = syn_raw

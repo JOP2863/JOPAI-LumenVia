@@ -135,27 +135,37 @@ _MEDIA_STATUS_TABLE_CSS = """
   color: #9a8b6e;
   font-size: 0.75rem;
 }
-/* Matrice widgets : une ligne = une langue ; scroll X mobile (pas de wrap). */
+/* Matrice widgets : pleine largeur, sans scroller (ni X ni Y). */
 div[class*="st-key-lv_ml_matrix"] {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: visible !important;
   max-width: 100%;
   margin: 0 0 0.55rem 0;
-  padding: 0.35rem 0.4rem 0.2rem 0.4rem;
+  padding: 0.35rem 0.35rem 0.15rem 0.35rem;
   border: 1px solid rgba(212, 175, 55, 0.35);
   border-radius: 10px;
   background: rgba(255, 253, 246, 0.65);
 }
 div[class*="st-key-lv_ml_matrix"] > div {
-  min-width: 32rem;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+div[class*="st-key-lv_ml_matrix"] [data-testid="stVerticalBlock"],
+div[class*="st-key-lv_ml_matrix"] [data-testid="stVerticalBlockBorderWrapper"] {
+  overflow: visible !important;
+  max-height: none !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stHorizontalBlock"] {
   flex-wrap: nowrap !important;
-  gap: 0.25rem !important;
+  gap: 0.2rem !important;
   align-items: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="column"] {
   min-width: 0 !important;
+  overflow: visible !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stMarkdown"] {
   margin-bottom: 0 !important;
@@ -163,22 +173,22 @@ div[class*="st-key-lv_ml_matrix"] [data-testid="stMarkdown"] {
 div[class*="st-key-lv_ml_matrix"] .lv-ml-head {
   font-weight: 700;
   color: #6b5918;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-align: center;
-  line-height: 1.2;
+  line-height: 1.15;
   white-space: nowrap;
 }
 div[class*="st-key-lv_ml_matrix"] .lv-ml-head-lang {
   text-align: left;
-  padding-left: 0.15rem;
+  padding-left: 0.1rem;
 }
 div[class*="st-key-lv_ml_matrix"] .lv-ml-cell {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.15rem;
-  min-height: 1.45rem;
+  gap: 0.1rem;
+  min-height: 1.25rem;
   white-space: nowrap;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] {
@@ -188,7 +198,7 @@ div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] {
 div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] label {
   gap: 0 !important;
   justify-content: center !important;
-  min-height: 1.2rem !important;
+  min-height: 1.1rem !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] p {
   display: none !important;

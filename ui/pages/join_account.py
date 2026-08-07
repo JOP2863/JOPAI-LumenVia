@@ -29,12 +29,37 @@ from core.sheets_db import (
     ensure_table,
     fetch_records,
     get_table_spec,
+    invalidate_fetch_records_cache,
     sheet_row_status_is_live,
     utc_now_iso,
 )
 from core.subscriptions_util import latest_subscription_record, subscription_is_active
 from ui.admin_secrets import admin_login_and_password
 from ui.components import loading_overlay
+
+
+def _cached_users_and_subs(cfg: object) -> tuple[list[dict], list[dict]]:
+    """Lecture users + subscriptions via cache Streamlit (évite HTTP 429 / page bloquée)."""
+    from ui.streamlit_caches import adm_sheets_fetch_cached, service_account_json_fingerprint
+
+    sa_json = service_account_json_fingerprint(getattr(cfg, "gcp_service_account", None))
+    sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    if not sid or not sa_json:
+        return [], []
+    users = list(adm_sheets_fetch_cached(sid, "users", 0, sa_json) or [])
+    subs = list(adm_sheets_fetch_cached(sid, "subscriptions", 0, sa_json) or [])
+    return users, subs
+
+
+def _invalidate_account_sheets_caches(cfg: object) -> None:
+    """Après mutation users / subscriptions — invalide cache UI + core."""
+    from ui.streamlit_caches import invalidate_adm_sheets_fetch_cache
+
+    invalidate_adm_sheets_fetch_cache()
+    sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
+    if sid:
+        invalidate_fetch_records_cache(spreadsheet_id=sid, table="users")
+        invalidate_fetch_records_cache(spreadsheet_id=sid, table="subscriptions")
 
 
 def _locale_select_options(*, gs: object, cfg: object) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
@@ -129,13 +154,19 @@ def render_join() -> None:
                     ws0.update_cell(row_num, col_concat, compute_concat(merged, header=header0))
             except Exception:
                 continue
+
+    # Ne pas lire users/subs à froid ici : bloquait « Mon compte » (full-scan sans cache).
+    # Chargement lazy + cache Streamlit ci-dessous.
     users: list[dict] = []
     subs: list[dict] = []
-    try:
-        users = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=4000)
-        subs = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=4000)
-    except Exception:
-        pass
+    _users_subs_loaded = False
+
+    def _ensure_users_subs(*, force: bool = False) -> tuple[list[dict], list[dict]]:
+        nonlocal users, subs, _users_subs_loaded
+        if force or not _users_subs_loaded:
+            users, subs = _cached_users_and_subs(cfg)
+            _users_subs_loaded = True
+        return users, subs
 
     # --- Mon compte : connexion / création / activation (newsletter → compte) ---
     if is_account_view:
@@ -147,6 +178,8 @@ def render_join() -> None:
         user_entity_id = str(st.session_state.get("auth_user_entity_id") or "").strip()
         st.subheader("Connexion")
         if user_entity_id:
+            with st.spinner("Chargement du compte…"):
+                users, subs = _ensure_users_subs()
             email_disp = str(st.session_state.get("auth_email_lc") or "").strip()
             st.caption(f"Session active pour **{email_disp or 'ton compte'}**.")
             if st.button("Se déconnecter", type="secondary", key="acct_logout"):
@@ -258,6 +291,7 @@ def render_join() -> None:
                             _sync_session_locale_from_user(
                                 {"pref_langue": lang_n, "country": country_n}
                             )
+                            _invalidate_account_sheets_caches(cfg)
                             st.success("Informations enregistrées.")
                             st.rerun()
                         finally:
@@ -301,6 +335,7 @@ def render_join() -> None:
                                 },
                             )
                         st.success("Préférences enregistrées.")
+                        _invalidate_account_sheets_caches(cfg)
                         st.rerun()
                     finally:
                         ov_n.empty()
@@ -352,6 +387,7 @@ def render_join() -> None:
                     else:
                         ov = loading_overlay("LumenVia vérifie tes identifiants…")
                         try:
+                            users, _subs = _ensure_users_subs()
                             adm_login, adm_pwd = admin_login_and_password()
                             if email_login == adm_login and password_login == adm_pwd:
                                 admin_canon = f"{adm_login}@admin.lumenvia"
@@ -481,6 +517,8 @@ def render_join() -> None:
                             ov.empty()
 
             else:
+                # Création / activation : besoin du cache users (préremplissage + contrôles).
+                users, subs = _ensure_users_subs()
                 # Pré-remplissage (avant instanciation des widgets) via on_change sur l'e-mail.
                 def _prefill_acct_profile_from_existing() -> None:
                     em0 = str(st.session_state.get("acct_email_signup") or "").strip().lower()
@@ -612,6 +650,7 @@ def render_join() -> None:
                             }
                         )
                         st.success("Compte créé et connecté.")
+                        _invalidate_account_sheets_caches(cfg)
                         st.rerun()
                     finally:
                         ov.empty()
@@ -621,6 +660,7 @@ def render_join() -> None:
         return
 
     # --- Newsletter : inscription / opt-out ---
+    users, subs = _ensure_users_subs()
     auth_email_lc = str(st.session_state.get("auth_email_lc") or "").strip().lower()
     auth_uid = sha256(auth_email_lc.encode("utf-8")).hexdigest()[:24] if auth_email_lc else ""
     auth_latest_sub = latest_subscription_record(subs, auth_uid, "weekly_friday") if auth_uid else None
@@ -662,6 +702,7 @@ def render_join() -> None:
                             },
                         )
                     st.success("Préférences enregistrées.")
+                    _invalidate_account_sheets_caches(cfg)
                     st.rerun()
                 finally:
                     ov.empty()
@@ -751,6 +792,7 @@ def render_join() -> None:
                     },
                 )
                 st.success("Désinscription enregistrée.")
+                _invalidate_account_sheets_caches(cfg)
                 st.rerun()
             finally:
                 ov.empty()
@@ -803,6 +845,7 @@ def render_join() -> None:
         finally:
             ov.empty()
         if should_refresh:
+            _invalidate_account_sheets_caches(cfg)
             st.rerun()
 
 
@@ -891,7 +934,12 @@ def render_reset_password() -> None:
                 spreadsheet_id=cfg.gsheet_id,
                 table=get_table_spec("password_resets"),
             )
-            resets = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="password_resets", limit=8000)
+            from ui.streamlit_caches import adm_sheets_fetch_cached, service_account_json_fingerprint
+
+            sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+            resets = list(
+                adm_sheets_fetch_cached(cfg.gsheet_id, "password_resets", 0, sa_json) or []
+            )
             tok_h = sha256(tok.encode("utf-8")).hexdigest()
             # Dernière demande pour ce token
             cand = [r for r in resets if str(r.get("token_hash") or "").strip() == tok_h and str(r.get("email") or "").strip().lower() == em]
@@ -916,7 +964,7 @@ def render_reset_password() -> None:
                 return
 
             # Met à jour le mot de passe via append-only dans `users`
-            users = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
+            users, _subs = _cached_users_and_subs(cfg)
             rows_u = [u for u in users if str(u.get("email") or "").strip().lower() == em]
             rows_u.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
             u0 = rows_u[0] if rows_u else {}
@@ -959,6 +1007,7 @@ def render_reset_password() -> None:
                 },
             )
             st.success("Mot de passe mis à jour. Tu peux maintenant te connecter.")
+            _invalidate_account_sheets_caches(cfg)
         finally:
             ov.empty()
 

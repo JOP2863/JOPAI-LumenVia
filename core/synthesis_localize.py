@@ -19,7 +19,6 @@ from core.prompt_locale import (
     PSALM_SECTION_TITLE,
     TAKEAWAYS_SECTION_TITLE,
     coerce_aip_langue,
-    output_language_label,
 )
 from core.locale_codes import DEFAULT_PREF_LANGUE
 
@@ -186,13 +185,23 @@ def localize_synthesis_from_fr(
     _flush_para()
 
     result = "\n".join(out_lines).strip()
-    if not result:
-        return src
-    # Bannière discrète pour l’admin / relecture
-    banner = (
-        f"<!-- localized_from_fr:{lg} native={output_language_label(lg)} -->\n"
-    )
-    return banner + result
+    return result if result else src
 
 
-__all__ = ["localize_plain_from_fr", "localize_synthesis_from_fr"]
+_LOCALIZED_FROM_BANNER_RE = re.compile(
+    r"<!--\s*localized_from_[^>]*-->",
+    re.IGNORECASE,
+)
+
+
+def strip_localized_from_banners(text: str) -> str:
+    """Retire les balises HTML `<!-- localized_from_… -->` (ne doivent jamais apparaître en PDF)."""
+    cleaned = _LOCALIZED_FROM_BANNER_RE.sub("", text or "")
+    return cleaned.strip()
+
+
+__all__ = [
+    "localize_plain_from_fr",
+    "localize_synthesis_from_fr",
+    "strip_localized_from_banners",
+]

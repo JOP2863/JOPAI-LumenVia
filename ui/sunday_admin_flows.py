@@ -25,6 +25,7 @@ from core.pdf_liturgy_sunday import build_liturgy_sunday_pdf_bytes
 from core.pdf_locale import about_markdown_for_lang, pdf_cover_date_line, pdf_cover_meta_line
 from core.prompt_locale import coerce_aip_langue
 from core.prompt_translate import translate_plain_fr_to
+from core.synthesis_localize import strip_localized_from_banners
 from core.synthesis_vertex_prompt import (
     CATECHESE_BRIDGE_TARGET_WORDS,
     build_sunday_vertex_synthesis_prompt,
@@ -1499,6 +1500,7 @@ def _run_publish_lang_from_fr_pivot(
             localized = fr_body
         else:
             localized = localize_synthesis_from_fr(fr_body, target_lang=lg)
+        localized = strip_localized_from_banners(localized)
 
         source_hash = sha256(
             f"localized_from_fr|{day}|{lg}|{sha256(fr_body.encode('utf-8')).hexdigest()[:16]}".encode(
@@ -1550,7 +1552,7 @@ def _run_publish_lang_from_fr_pivot(
                 ):
                     if blob_exists(gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=cand):
                         text_path = cand
-                        localized = (
+                        localized = strip_localized_from_banners(
                             download_bytes(
                                 gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=cand
                             )
