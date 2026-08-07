@@ -950,7 +950,7 @@ def default_tables() -> list[TableSpec]:
                     "title",
                     "role",  # intro | outro | bed
                     "cible",  # lectures | synthese | both
-                    "langue",  # ALL | FR | DE | EN | ES | IT
+                    "langue",  # ALL | FR | DE | EN | ES | IT | PT
                     "licence",  # CC0 | CC-BY | domaine_public | autre
                     "attribution",
                     "gcs_path",

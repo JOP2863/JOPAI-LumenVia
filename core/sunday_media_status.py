@@ -134,7 +134,10 @@ def media_status_for_lang(
             or tp.startswith(f"{lg}/")
             or (
                 lg == DEFAULT_PREF_LANGUE
-                and not any(f"/{x}/" in tp for x in ("DE", "EN", "ES", "IT", "de", "en", "es", "it"))
+                and not any(
+                    f"/{x}/" in tp
+                    for x in ("DE", "EN", "ES", "IT", "PT", "de", "en", "es", "it", "pt")
+                )
             )
         )
         if ok_lang:

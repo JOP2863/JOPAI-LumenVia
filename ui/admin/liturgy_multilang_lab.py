@@ -448,7 +448,7 @@ def render_admin_liturgy_multilang_lab() -> None:
     st.title("Lab — lectures multi-langues")
     st.markdown(_lab_css(), unsafe_allow_html=True)
     st.caption(
-        "Produit : **FR = AELF** (inchangé) · **DE / EN / ES / IT = Evangelizo**. "
+        "Produit : **FR = AELF** (inchangé) · **DE / EN / ES / IT / PT = Evangelizo**. "
         "Universalis = Lab / secours seulement. "
         f"Priorité : {' · '.join(LANG_PRIORITY)}."
     )

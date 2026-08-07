@@ -55,7 +55,7 @@ def render_about() -> None:
 | Langue | Source | Usage LumenVia |
 |--------|--------|----------------|
 | **FR** | [AELF](https://api.aelf.org/) (Association Épiscopale Liturgique pour les pays Francophones) | Source de production — textes de la messe via l’API publique (pas de clé). |
-| **DE / EN / ES / IT** | [Evangelizo — Reader Feed](https://feed.evangelizo.org/v2/reader.php) (*L’Évangile au Quotidien*) | Complément multi-langues : textes natifs complets (pas de traduction maison depuis l’AELF). Affichage dans l’app + cache RDC ; redistribution e-mail / TTS / PDF des textes hors FR soumise à confirmation des conditions Evangelizo. |
+| **DE / EN / ES / IT / PT** | [Evangelizo — Reader Feed](https://feed.evangelizo.org/v2/reader.php) (*L’Évangile au Quotidien*) | Complément multi-langues : textes natifs complets (pas de traduction maison depuis l’AELF). Affichage dans l’app + cache RDC ; redistribution e-mail / TTS / PDF des textes hors FR soumise à confirmation des conditions Evangelizo. |
 
 **Audios**
 

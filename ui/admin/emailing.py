@@ -65,13 +65,13 @@ def render_admin_emailing() -> None:
         "**Templates e-mail :** seule la colonne **`status`** (**Actif** / **Inactif**) détermine quelle ligne est la version "
         "courante (aperçu, enregistrement, envoi manuel, **et** choix du modèle côté campagne / scheduler). "
         "La colonne **`active`** sur cette table n’est **pas** utilisée par l’app pour ce choix. "
-        "**Multi-langues :** tu édites le **FR** ; à l’enregistrement, DE/EN/ES/IT sont **recréés** "
+        "**Multi-langues :** tu édites le **FR** ; à l’enregistrement, DE/EN/ES/IT/PT sont **recréés** "
         "(traduction **Vertex**, balises `{{…}}` préservées ; refus si le texte reste en français) — "
         "ancienne ligne Actif → Inactif, nouvelle Actif."
     )
     with st.expander("Paramètres du template (clé/canal/langue)", expanded=False):
         st.caption(
-            f"Template : `{template_key}` (édition : **fr** · sync auto : de / en / es / it)"
+            f"Template : `{template_key}` (édition : **fr** · sync auto : de / en / es / it / pt)"
         )
 
     from core.emailing import (
@@ -170,7 +170,7 @@ def render_admin_emailing() -> None:
     st.caption(
         "Texte affiché **juste après le bonjour**. À adapter chaque vendredi avant l’envoi. "
         "**Éditable ici** ; à l’enregistrement / sync, il est **traduit** dans ETPL (`status_note`) "
-        "pour DE/EN/ES/IT — l’envoi utilise la version de la langue du destinataire. "
+        "pour DE/EN/ES/IT/PT — l’envoi utilise la version de la langue du destinataire. "
         "À l’envoi, une ligne est écrite dans **RUNS** (`scheduler_runs`) avec la date du dimanche "
         "et cette mention — **pas** dans OUTM."
     )
@@ -318,7 +318,7 @@ def render_admin_emailing() -> None:
             if unchanged:
                 st.info(
                     "Aucune modification détectée (objet + corps + message d’actualité inchangés) "
-                    "— pas de nouvelle ligne FR, pas de re-sync DE/EN/ES/IT."
+                    "— pas de nouvelle ligne FR, pas de re-sync DE/EN/ES/IT/PT."
                 )
             else:
                 # 1) Mettre les lignes actuellement **Actives** (même clé / canal / langue) en **Inactif** dans la feuille
@@ -399,7 +399,7 @@ def render_admin_emailing() -> None:
                 invalidate_adm_sheets_fetch_cache()
                 invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="email_templates")
 
-                # 3) Sync DE/EN/ES/IT depuis le nouveau FR (immuabilité par langue).
+                # 3) Sync DE/EN/ES/IT/PT depuis le nouveau FR (immuabilité par langue).
                 from core.email_template_sync import sync_localized_email_templates_from_fr
                 from ui.components import update_loading_overlay
 
@@ -409,7 +409,7 @@ def render_admin_emailing() -> None:
                     except Exception:
                         pass
 
-                _prog("Localisation DE / EN / ES / IT depuis le FR…")
+                _prog("Localisation DE / EN / ES / IT / PT depuis le FR…")
                 sync_res = sync_localized_email_templates_from_fr(
                     gs=gs,
                     spreadsheet_id=str(cfg.gsheet_id),
@@ -439,11 +439,11 @@ def render_admin_emailing() -> None:
             ov.empty()
 
     if st.button(
-        "Générer / mettre à jour DE · EN · ES · IT depuis le FR actif",
+        "Générer / mettre à jour DE · EN · ES · IT · PT depuis le FR actif",
         key="adm_email_sync_langs_now",
         help="Sans modifier le FR : recrée les lignes localisées (immuabilité) à partir du template FR Actif ou du formulaire.",
     ):
-        ov2 = loading_overlay("Localisation DE / EN / ES / IT…")
+        ov2 = loading_overlay("Localisation DE / EN / ES / IT / PT…")
         try:
             from core.email_template_sync import sync_localized_email_templates_from_fr
             from ui.components import update_loading_overlay

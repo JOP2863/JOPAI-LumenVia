@@ -1,7 +1,7 @@
 """Localisation des prompts synthèse / titres PDF-TTS (pivot FR).
 
 Les consignes métier restent en Sheets ``Paramètres_IA`` (append-only, Actif/Version).
-La colonne ``Langue`` (FR/DE/EN/ES/IT) scope la sélection ; absence de colonne ou
+La colonne ``Langue`` (FR/DE/EN/ES/IT/PT) scope la sélection ; absence de colonne ou
 cellule vide = FR (rétrocompat).
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from core.locale_codes import DEFAULT_PREF_LANGUE, normalize_pref_langue
 
-AIP_PROMPT_LANGS: tuple[str, ...] = ("FR", "DE", "EN", "ES", "IT")
+AIP_PROMPT_LANGS: tuple[str, ...] = ("FR", "DE", "EN", "ES", "IT", "PT")
 
 # Noms natifs pour consignes Vertex (« rédige en … »)
 _OUTPUT_LANG_NATIVE: dict[str, str] = {
@@ -18,6 +18,7 @@ _OUTPUT_LANG_NATIVE: dict[str, str] = {
     "EN": "English",
     "ES": "español",
     "IT": "italiano",
+    "PT": "português",
 }
 
 # Titres sections PDF / assemblage prompt
@@ -77,6 +78,17 @@ PDF_READING_TITLES: dict[str, dict[str, str]] = {
             "nell’applicazione."
         ),
     },
+    "PT": {
+        "premiere_lecture": "Primeira leitura",
+        "psaume": "Salmo responsorial",
+        "deuxieme_lecture": "Segunda leitura",
+        "evangile": "Evangelho",
+        "synthese": "Síntese (LumenVia)",
+        "synthese_missing": (
+            "Síntese ainda não gerada para esta data — utilize « Gerar a síntese e o áudio » "
+            "na aplicação."
+        ),
+    },
 }
 
 CATECHESE_TITLE_BY_LANG: dict[str, str] = {
@@ -85,6 +97,7 @@ CATECHESE_TITLE_BY_LANG: dict[str, str] = {
     "EN": "Catechesis bridge",
     "ES": "Puente de catequesis",
     "IT": "Ponte di catechesi",
+    "PT": "Ponte de catequese",
 }
 
 # Sous-titres passerelle (exact match attendu dans la synthèse)
@@ -124,6 +137,13 @@ CATECHESE_SUBTITLES_BY_LANG: dict[str, tuple[str, str, str, str, str]] = {
         "L’analogia quotidiana",
         "Il passo della settimana",
     ),
+    "PT": (
+        "O Essencial",
+        "A Cena Visual",
+        "A Palavra-Chave",
+        "A Analogia do Quotidiano",
+        "O Passo da Semana",
+    ),
 }
 
 PSALM_SECTION_TITLE: dict[str, str] = {
@@ -132,6 +152,7 @@ PSALM_SECTION_TITLE: dict[str, str] = {
     "EN": "The Psalm",
     "ES": "El Salmo",
     "IT": "Il Salmo",
+    "PT": "O Salmo",
 }
 
 TAKEAWAYS_SECTION_TITLE: dict[str, str] = {
@@ -140,6 +161,7 @@ TAKEAWAYS_SECTION_TITLE: dict[str, str] = {
     "EN": "Takeaways",
     "ES": "Para recordar",
     "IT": "Da ricordare",
+    "PT": "A reter",
 }
 
 # Annonces orales TTS si ``intro_lue`` absente (cache ancien / feed incomplet).
@@ -173,6 +195,12 @@ TTS_READING_FALLBACK_INTRO: dict[str, dict[str, str]] = {
         "psaume": "Il Salmo.",
         "deuxieme_lecture": "Seconda lettura.",
         "evangile": "Vangelo.",
+    },
+    "PT": {
+        "premiere_lecture": "Primeira leitura. Escutai a primeira leitura da Palavra de Deus.",
+        "psaume": "O Salmo.",
+        "deuxieme_lecture": "Segunda leitura.",
+        "evangile": "Evangelho.",
     },
 }
 
@@ -275,6 +303,7 @@ def canonical_reading_section_key(title: str) -> str | None:
         or folded.startswith("the psalm")
         or folded.startswith("el salmo")
         or folded.startswith("il salmo")
+        or folded.startswith("o salmo")
     ):
         return "psaume"
     if (
@@ -283,17 +312,26 @@ def canonical_reading_section_key(title: str) -> str | None:
         or folded.startswith("gospel")
         or folded.startswith("evangelio")
         or folded.startswith("vangelo")
+        or folded.startswith("evangelho")
     ):
         return "evangile"
-    if folded.startswith("primera lectura") or folded.startswith("prima lettura"):
+    if (
+        folded.startswith("primera lectura")
+        or folded.startswith("prima lettura")
+        or folded.startswith("primeira leitura")
+    ):
         return "premiere_lecture"
-    if folded.startswith("segunda lectura") or folded.startswith("seconda lettura"):
+    if (
+        folded.startswith("segunda lectura")
+        or folded.startswith("seconda lettura")
+        or folded.startswith("segunda leitura")
+    ):
         return "deuxieme_lecture"
     return None
 
 
 def detect_pref_langue_from_section_title(title: str) -> str | None:
-    """Devine FR/DE/EN/ES/IT d’après un titre de section injecté dans le TTS."""
+    """Devine FR/DE/EN/ES/IT/PT d’après un titre de section injecté dans le TTS."""
     raw = (title or "").strip()
     if not raw:
         return None
@@ -390,13 +428,21 @@ def default_overlay_takeaways(pref_langue: object | None) -> str:
             "y su cumplimiento o respuesta en el Evangelio, estrictamente a partir de los textos dados.\n"
             f"Termina con una sección « {take} » con 3 a 5 viñetas que empiecen por un verbo.\n"
         )
-    # IT
+    if lg == "IT":
+        return (
+            f"\nIncludi una sottosezione intitolata esattamente « {psalm} »: solo dal testo del salmo fornito, "
+            "spiega come questo salmo risponde in preghiera alle letture (niente fonti esterne).\n"
+            "Struttura anche la sintesi per evidenziare promessa / prefigurazione (Prima lettura, AT se applicabile) "
+            "e il suo compimento o risposta nel Vangelo, rigorosamente dai testi forniti.\n"
+            f"Concludi con una sezione « {take} » con 3–5 elenchi puntati che iniziano con un verbo.\n"
+        )
+    # PT
     return (
-        f"\nIncludi una sottosezione intitolata esattamente « {psalm} »: solo dal testo del salmo fornito, "
-        "spiega come questo salmo risponde in preghiera alle letture (niente fonti esterne).\n"
-        "Struttura anche la sintesi per evidenziare promessa / prefigurazione (Prima lettura, AT se applicabile) "
-        "e il suo compimento o risposta nel Vangelo, rigorosamente dai testi forniti.\n"
-        f"Concludi con una sezione « {take} » con 3–5 elenchi puntati che iniziano con un verbo.\n"
+        f"\nInclui uma subsecção intitulada exatamente « {psalm} »: apenas a partir do texto do salmo "
+        "fornecido, explica como este salmo permite responder em oração às leituras (sem fontes externas).\n"
+        "Estrutura também a síntese para realçar a promessa / prefiguração (Primeira leitura, AT se aplicável) "
+        "e o seu cumprimento ou resposta no Evangelho, estritamente a partir dos textos fornecidos.\n"
+        f"Termina com uma secção « {take} » com 3 a 5 pontos que comecem por um verbo.\n"
     )
 
 
@@ -422,9 +468,15 @@ def default_overlay_no_takeaways(pref_langue: object | None) -> str:
             "\nResalta la promesa / prefiguración (Primera lectura) y el cumplimiento (Evangelio), "
             "estrictamente a partir de los textos facilitados.\n"
         )
+    if lg == "IT":
+        return (
+            "\nMetti in rilievo promessa / prefigurazione (Prima lettura) e compimento (Vangelo), "
+            "rigorosamente dai testi forniti.\n"
+        )
+    # PT
     return (
-        "\nMetti in rilievo promessa / prefigurazione (Prima lettura) e compimento (Vangelo), "
-        "rigorosamente dai testi forniti.\n"
+        "\nRealça a promessa / prefiguração (Primeira leitura) e o cumprimento (Evangelho), "
+        "estritamente a partir dos textos fornecidos.\n"
     )
 
 
@@ -500,21 +552,39 @@ def default_overlay_catechese_bridge(pref_langue: object | None, *, bridge_words
             "- Tono de acompañamiento respetuoso; sin culpabilizar.\n"
             "- Si un punto teológico es complejo/controvertido, invitar a hablar con un catequista.\n"
         )
+    if lg == "IT":
+        return (
+            f"\nAggiungi alla fine una sezione intitolata esattamente: « {title} ».\n"
+            "Questo ponte di catechesi deve essere strutturato in 5 sottosezioni (titoli esatti):\n"
+            "Importante: niente numerazione (niente « 1) », « 2) », ecc.).\n"
+            "Importante: niente emoji, elenchi decorativi o caratteri prefisso isolati.\n"
+            f"Ogni sottosezione inizia con il TITOLO SOLO su una riga (es. « {s2} »), poi il testo.\n"
+            f"« {s1} »: una sola frase incisiva (cuore del messaggio), fedele ai testi.\n"
+            f"« {s2} »: descrivere la scena come un quadro vivo (sensoriale) senza inventare parole.\n"
+            f"« {s3} »: scegliere 1 concetto (es. Grazia, Alleanza…) e definirlo in modo semplice.\n"
+            f"« {s4} »: un’analogia moderna, dignitosa, che illumina il testo senza sostituirlo.\n"
+            f"« {s5} »: una sfida concreta (scuola, famiglia, parrocchia).\n"
+            "Limiti:\n"
+            "- Non inventare parole di Cristo né snaturare il senso della Scrittura.\n"
+            "- Tono di accompagnamento rispettoso; niente colpevolizzazione.\n"
+            "- Se un punto teologico è complesso/controverso, invitare a parlarne con un catechista.\n"
+        )
+    # PT
     return (
-        f"\nAggiungi alla fine una sezione intitolata esattamente: « {title} ».\n"
-        "Questo ponte di catechesi deve essere strutturato in 5 sottosezioni (titoli esatti):\n"
-        "Importante: niente numerazione (niente « 1) », « 2) », ecc.).\n"
-        "Importante: niente emoji, elenchi decorativi o caratteri prefisso isolati.\n"
-        f"Ogni sottosezione inizia con il TITOLO SOLO su una riga (es. « {s2} »), poi il testo.\n"
-        f"« {s1} »: una sola frase incisiva (cuore del messaggio), fedele ai testi.\n"
-        f"« {s2} »: descrivere la scena come un quadro vivo (sensoriale) senza inventare parole.\n"
-        f"« {s3} »: scegliere 1 concetto (es. Grazia, Alleanza…) e definirlo in modo semplice.\n"
-        f"« {s4} »: un’analogia moderna, dignitosa, che illumina il testo senza sostituirlo.\n"
-        f"« {s5} »: una sfida concreta (scuola, famiglia, parrocchia).\n"
-        "Limiti:\n"
-        "- Non inventare parole di Cristo né snaturare il senso della Scrittura.\n"
-        "- Tono di accompagnamento rispettoso; niente colpevolizzazione.\n"
-        "- Se un punto teologico è complesso/controverso, invitare a parlarne con un catechista.\n"
+        f"\nAdiciona no final uma secção intitulada exatamente: « {title} ».\n"
+        "Esta ponte de catequese deve ser estruturada em 5 subpartes (títulos exatos):\n"
+        "Importante: sem numeração (nada de « 1) », « 2) », etc.).\n"
+        "Importante: sem emojis, sem marcadores decorativos, sem caracteres isolados como prefixo.\n"
+        f"Cada subparte deve começar pelo TÍTULO SÓ numa linha (ex.: « {s2} »), depois o texto.\n"
+        f"« {s1} »: uma única frase marcante (o coração da mensagem), fiel aos textos.\n"
+        f"« {s2} »: descrever a cena como um quadro vivo (sensorial) sem inventar palavras.\n"
+        f"« {s3} »: escolher 1 conceito (ex. Graça, Aliança…) e defini-lo com simplicidade.\n"
+        f"« {s4} »: uma analogia moderna, digna, que ilumine o texto sem o substituir.\n"
+        f"« {s5} »: um desafio concreto para viver (escola, família, paróquia).\n"
+        "Limites:\n"
+        "- Não inventar palavras de Cristo nem alterar o sentido da Escritura.\n"
+        "- Tom de acompanhamento respeitoso; sem culpabilizar.\n"
+        "- Se um ponto teológico for complexo/controverso, convidar a falar com um catequista.\n"
     )
 
 

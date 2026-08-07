@@ -1287,7 +1287,7 @@ def _render_admin_prompts_editor_section(
     prop_targets: list[str] = []
     if edit_lang == DEFAULT_PREF_LANGUE and not audio_only:
         propagate = st.checkbox(
-            "Mettre aussi à jour les autres langues (DE, EN, ES, IT)",
+            "Mettre aussi à jour les autres langues (DE, EN, ES, IT, PT)",
             value=False,
             key=f"adm_tpl_propagate_{suffix}",
             help=(
@@ -1597,7 +1597,7 @@ def render_admin_test_resources() -> None:
             "Socle anti-hallucination + surcouches de la génération **écrite** "
             "(`instructions_base_md`, overlays…). Colonne **Langue** (FR pivot) : "
             "versioning Actif/Inactif par (clé, langue) ; à l’enregistrement FR, option de "
-            "propagation vers DE/EN/ES/IT."
+            "propagation vers DE/EN/ES/IT/PT."
         )
         _render_admin_prompts_editor_section(
             cfg=cfg, gs=gs, rows=rows, audio_only=False, section_key_suffix="texte"

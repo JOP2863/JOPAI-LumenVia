@@ -145,6 +145,7 @@ def render_sunday() -> None:
         "EN": "EN — English (Evangelizo)",
         "ES": "ES — español (Evangelizo)",
         "IT": "IT — italiano (Evangelizo)",
+        "PT": "PT — português (Evangelizo)",
     }
     if "sunday_view_pref_langue" not in st.session_state:
         st.session_state["sunday_view_pref_langue"] = account_pref

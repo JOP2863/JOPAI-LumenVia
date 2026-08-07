@@ -1,6 +1,6 @@
 """Synchronisation immuable des templates e-mail localisés depuis le pivot FR.
 
-À chaque enregistrement FR : pour DE/EN/ES/IT —
+À chaque enregistrement FR : pour DE/EN/ES/IT/PT —
 1) inactiver les lignes Actives (même template_key / canal / langue)
 2) append une nouvelle ligne Actif (traduction programme)
 """

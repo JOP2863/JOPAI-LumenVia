@@ -19,6 +19,7 @@ LANG_FLAGS: dict[str, str] = {
     "EN": "🇬🇧",
     "ES": "🇪🇸",
     "IT": "🇮🇹",
+    "PT": "🇵🇹",
 }
 
 # Codes flagcdn (ISO 3166) — les emoji drapeaux ne s’affichent souvent pas sous Windows / Chrome desktop.
@@ -28,6 +29,7 @@ LANG_FLAG_CDN: dict[str, str] = {
     "EN": "gb",
     "ES": "es",
     "IT": "it",
+    "PT": "pt",
 }
 
 # Fonds discrets par langue (lisibles sur crème liturgique, distincts les uns des autres).
@@ -61,6 +63,12 @@ LANG_PANEL_STYLE: dict[str, dict[str, str]] = {
         "border": "rgba(60, 100, 70, 0.40)",
         "accent": "#3f6b48",
         "head_bg": "rgba(100, 130, 100, 0.18)",
+    },
+    "PT": {
+        "bg": "rgba(150, 60, 60, 0.11)",
+        "border": "rgba(120, 45, 45, 0.40)",
+        "accent": "#7a3030",
+        "head_bg": "rgba(150, 60, 60, 0.18)",
     },
 }
 
@@ -145,6 +153,22 @@ _UI: dict[str, dict[str, str]] = {
         "no_image_comment": "Nessun commento all’illustrazione per questa domenica.",
         "source_line": "Letture · {lang} · fonte {source}",
     },
+    "PT": {
+        "edit_banner": "Edição do conteúdo — idioma selecionado",
+        "edit_hint": "As leituras, a ilustração e a geração abaixo seguem este idioma.",
+        "content_banner": "Conteúdo litúrgico",
+        "identity": "Identidade do dia",
+        "readings": "Leituras",
+        "liturgy_details": "Detalhes sobre o tempo litúrgico",
+        "season": "Tempo",
+        "cycle": "Ciclo",
+        "color": "Cor",
+        "feast": "Festa / memória",
+        "illustration_caption": "Ilustração do domingo {date}",
+        "image_comment": "Comentário da imagem",
+        "no_image_comment": "Sem comentário de ilustração para este domingo.",
+        "source_line": "Leituras · {lang} · fonte {source}",
+    },
 }
 
 _TIME_HINTS: dict[str, dict[str, str]] = {
@@ -203,6 +227,17 @@ _TIME_HINTS: dict[str, dict[str, str]] = {
         "pentecote": "Solennità dell’effusione dello Spirito Santo sulla Chiesa.",
         "_default": "Grande movimento liturgico che colora la preghiera e la lettura della Parola in questo giorno.",
     },
+    "PT": {
+        "avent": "Tempo de preparação para a vinda do Senhor: conversão serena, vigilância e esperança.",
+        "noel": "Tempo que celebra a Encarnação: a Palavra feita carne entre nós.",
+        "temps_ordinaire": "Tempo « no meio » das grandes festas: crescimento discreto e fidelidade quotidiana.",
+        "ordinaire": "Tempo « no meio » das grandes festas: crescimento discreto e fidelidade quotidiana.",
+        "careme": "Tempo de preparação pascal: oração, jejum (interior) e partilha.",
+        "saint": "Memória ou festa de um santo: exemplaridade concreta da fé.",
+        "pascal": "Tempo pascal: os cinquenta dias que prolongam a alegria da Ressurreição até Pentecostes.",
+        "pentecote": "Solenidade da efusão do Espírito Santo sobre a Igreja.",
+        "_default": "Grande movimento litúrgico que colore a oração e a leitura da Palavra neste dia.",
+    },
 }
 
 _COLOR_HINTS: dict[str, dict[str, str]] = {
@@ -251,6 +286,15 @@ _COLOR_HINTS: dict[str, dict[str, str]] = {
         "noir": "Solennità funebre o giorno segnato dal lutto liturgico.",
         "_default": "Il colore dei paramenti traduce visivamente il clima liturgico del giorno.",
     },
+    "PT": {
+        "blanc": "Cor de alegria e glória: grandes festas do Senhor e de Maria (segundo o tempo).",
+        "vert": "Cor do Tempo Comum: vida cristã que cresce na fidelidade.",
+        "rouge": "Cor do martírio e do Espírito: dom total e caridade até ao fim.",
+        "violet": "Cor de penitência e espera: conversão e preparação (Advento/Quaresma).",
+        "rose": "Cor de alívio pontual no meio da espera (Gaudete / Laetare).",
+        "noir": "Solenidade fúnebre ou dia marcado pelo luto litúrgico.",
+        "_default": "A cor dos paramentos traduz visualmente o clima litúrgico do dia.",
+    },
 }
 
 _CYCLE_HINTS: dict[str, dict[str, str]] = {
@@ -283,6 +327,12 @@ _CYCLE_HINTS: dict[str, dict[str, str]] = {
         "b": "Anno B: la domenica mette spesso in rilievo il Vangelo secondo Marco.",
         "c": "Anno C: la domenica mette spesso in rilievo il Vangelo secondo Luca.",
         "_default": "Il ciclo liturgico fa ruotare le letture domenicali per nutrire la fede nel corso degli anni.",
+    },
+    "PT": {
+        "a": "Ano A: o domingo destaca frequentemente o Evangelho segundo Mateus.",
+        "b": "Ano B: o domingo destaca frequentemente o Evangelho segundo Marcos.",
+        "c": "Ano C: o domingo destaca frequentemente o Evangelho segundo Lucas.",
+        "_default": "O ciclo litúrgico faz rodar as leituras dominicais para alimentar a fé ao longo dos anos.",
     },
 }
 

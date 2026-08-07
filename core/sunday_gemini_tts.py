@@ -726,7 +726,7 @@ def tts_spoken_audio_bytes(
     Les textes longs sont découpés (~1400 car.) : un seul appel Vertex sur toute
     la synthèse provoquait des timeouts silencieux (plusieurs minutes sans fichier Audio/).
     ``french_accent`` : consigne director explicite (sinon ``pick_tts_speech_direction``
-    selon ``pref_langue`` — accents FR, diction DE/EN/ES/IT hors FR).
+    selon ``pref_langue`` — accents FR, diction DE/EN/ES/IT/PT hors FR).
     ``apply_ambiance`` : intro/outro/bed depuis la bibliothèque AAMB si clips actifs.
     """
     if voice_name is None or not str(voice_name).strip():

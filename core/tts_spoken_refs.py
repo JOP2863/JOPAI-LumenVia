@@ -143,6 +143,33 @@ _BOOK_ORAL: dict[str, dict[str, str]] = {
         "1 Tm": "prima lettera a Timoteo",
         "2 Tm": "seconda lettera a Timoteo",
     },
+    "PT": {
+        "Ps": "Salmo",
+        "Psaume": "Salmo",
+        "Salmo": "Salmo",
+        "Psalm": "Salmo",
+        "Is": "Isaías",
+        "Rm": "Romanos",
+        "Mt": "Mateus",
+        "Mc": "Marcos",
+        "Lc": "Lucas",
+        "Jn": "João",
+        "He": "Hebreus",
+        "Hb": "Hebreus",
+        "Ap": "Apocalipse",
+        "Ac": "Atos dos Apóstolos",
+        "1 Co": "primeira carta aos Coríntios",
+        "2 Co": "segunda carta aos Coríntios",
+        "1 Jn": "primeira carta de João",
+        "2 Jn": "segunda carta de João",
+        "3 Jn": "terceira carta de João",
+        "1 P": "primeira carta de Pedro",
+        "2 P": "segunda carta de Pedro",
+        "1 Th": "primeira carta aos Tessalonicenses",
+        "2 Th": "segunda carta aos Tessalonicenses",
+        "1 Tm": "primeira carta a Timóteo",
+        "2 Tm": "segunda carta a Timóteo",
+    },
 }
 
 _VERSE_WORDS: dict[str, dict[str, str]] = {
@@ -151,6 +178,7 @@ _VERSE_WORDS: dict[str, dict[str, str]] = {
     "EN": {"one": "verse", "many": "verses", "range": "to", "and": "and"},
     "ES": {"one": "versículo", "many": "versículos", "range": "a", "and": "y"},
     "IT": {"one": "versetto", "many": "versetti", "range": "a", "and": "e"},
+    "PT": {"one": "versículo", "many": "versículos", "range": "a", "and": "e"},
 }
 
 # Scories d’intro FR restantes dans un flux non FR.
@@ -162,6 +190,7 @@ _FR_INTRO_STEMS: tuple[tuple[str, dict[str, str]], ...] = (
             "EN": "A reading from the book of ",
             "ES": "Lectura del libro de ",
             "IT": "Lettura del libro di ",
+            "PT": "Leitura do livro de ",
         },
     ),
     (
@@ -171,6 +200,7 @@ _FR_INTRO_STEMS: tuple[tuple[str, dict[str, str]], ...] = (
             "EN": "A reading from the letter ",
             "ES": "Lectura de la carta ",
             "IT": "Lettura della lettera ",
+            "PT": "Leitura da carta ",
         },
     ),
     (
@@ -180,6 +210,7 @@ _FR_INTRO_STEMS: tuple[tuple[str, dict[str, str]], ...] = (
             "EN": "A reading from the holy Gospel according to ",
             "ES": "Lectura del santo Evangelio según ",
             "IT": "Lettura del santo Vangelo secondo ",
+            "PT": "Leitura do santo Evangelho segundo ",
         },
     ),
 )

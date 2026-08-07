@@ -1,4 +1,4 @@
-"""Localisation des templates e-mail FR → DE/EN/ES/IT.
+"""Localisation des templates e-mail FR → DE/EN/ES/IT/PT.
 
 Moteur : **Vertex** (traduction stricte, pas rédaction). MyMemory en filet uniquement.
 Les balises ``{{...}}`` sont protégées puis restaurées.

@@ -280,10 +280,10 @@ div[class*="wrap_active"] button {
       <td>
         Règle produit : uniquement des API qui livrent les <strong>textes complets</strong> de la messe dans la langue
         (pas de traduction IA/maison à partir de l’AELF ; exclus : évangile-seul, calendrier-seul / Romcal).
-        Priorité langues : <strong>FR → DE → EN → ES → IT</strong>.
+        Priorité langues : <strong>FR → DE → EN → ES → IT → PT</strong>.
         Socle : <code>pref_langue</code> + LGP + chemins GCS <code>&#123;LANG&#125;/</code>.
         <strong>FR</strong> : AELF production (non remplacé).
-        <strong>DE / EN / ES / IT</strong> : Evangelizo Reader Feed (<code>cached_liturgy_day</code>) —
+        <strong>DE / EN / ES / IT / PT</strong> : Evangelizo Reader Feed (<code>cached_liturgy_day</code>) —
         page Dimanche (sélecteur + drapeaux) + admin génération + écriture RDC automatique ;
         codes Reader : DE / AM (EN) / SP (ES) / IT ; horizon ±30&nbsp;j.
         Universalis = Lab / secours (pas la route produit EN).
@@ -316,7 +316,7 @@ div[class*="wrap_active"] button {
         le chrome UI, non.
         <strong>Chantier futur :</strong> i18n de l’interface selon la
         <code>pref_langue</code> du compte (session + feuille <code>users</code>) —
-        catalogues de chaînes (FR pivot → DE / EN / ES / IT), bascule à la connexion,
+        catalogues de chaînes (FR pivot → DE / EN / ES / IT / PT), bascule à la connexion,
         fallback FR si clé manquante. Hors scope immédiat : ne pas bloquer lectures / génération multi-langues.
       </td>
     </tr>

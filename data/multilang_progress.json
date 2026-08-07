@@ -5,6 +5,7 @@
     "gcs_lang_paths",
     "lab_page",
     "lang_priority_fr_de_en_es_it",
+    "lang_priority_pt",
     "license_checklist",
     "pref_langue_users",
     "readings_cache_lang",
@@ -14,10 +15,11 @@
     "spike_en",
     "spike_es",
     "spike_it",
+    "spike_pt",
     "sunday_pref_langue",
     "synth_tts_lang",
     "validate_aelf_fr"
   ],
   "current_step_id": "email_pref_langue",
-  "notes": "Prompts AIP multi-langue + génération selon pref_langue. Décision 2026-08-03 : chrome UI du site reste FR seul pour le moment ; chantier futur site_ui_i18n (plan consolidé + roadmap). Reste : templates e-mail multilingues ; ToS Evangelizo canaux larges."
+  "notes": "PT (Portugal, Evangelizo lang=PT, zone RDC portugal) ajouté au produit comme DE/EN/ES/IT. Chrome UI + catalogues dimanche/PDF/TTS/e-mail PT-PT. Reste : templates e-mail sync FR→PT en runtime ; ToS Evangelizo canaux larges."
 }

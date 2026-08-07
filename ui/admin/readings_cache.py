@@ -1,4 +1,4 @@
-"""Admin — Préchargement du cache lectures (AELF FR + Evangelizo DE/EN/ES/IT) vers Sheets."""
+"""Admin — Préchargement du cache lectures (AELF FR + Evangelizo DE/EN/ES/IT/PT) vers Sheets."""
 
 from __future__ import annotations
 
@@ -181,7 +181,8 @@ def render_admin_readings_cache() -> None:
     st.caption(
         "Précharge les lectures dans `readings_cache` (RDC) **sans doublons**, "
         "comme pour le français : **FR = AELF** (`zone=france`, `source=AELF`) · "
-        "**DE / EN / ES / IT = Evangelizo** (`zone=allemagne|amerique|espagne|italie`, `source=Evangelizo`). "
+        "**DE / EN / ES / IT / PT = Evangelizo** "
+        "(`zone=allemagne|amerique|espagne|italie|portugal`, `source=Evangelizo`). "
         "La page Dimanche lit d’abord ce cache, puis l’API."
     )
     st.caption(

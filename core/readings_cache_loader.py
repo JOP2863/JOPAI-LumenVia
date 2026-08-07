@@ -19,6 +19,7 @@ PRODUCT_LANG_TO_RDC_ZONE: dict[str, str] = {
     "IT": "italie",
     "ES": "espagne",
     "EN": "amerique",  # calendrier Evangelizo AM (US)
+    "PT": "portugal",  # calendrier Evangelizo PT (européen)
 }
 
 # Anciennes clés encore présentes dans des lignes RDC déjà écrites.
@@ -28,6 +29,7 @@ _LEGACY_ZONE_ALIASES: dict[str, tuple[str, ...]] = {
     "italie": ("italie", "evangelizo_it"),
     "espagne": ("espagne", "evangelizo_sp", "evangelizo_es_sp"),
     "amerique": ("amerique", "evangelizo_am", "evangelizo_en_am"),
+    "portugal": ("portugal", "evangelizo_pt"),
 }
 
 

@@ -1,4 +1,4 @@
-"""Catalogue UI multilingue — **chrome public** (FR/DE/EN/ES/IT).
+"""Catalogue UI multilingue — **chrome public** (FR/DE/EN/ES/IT/PT).
 
 ``core/sunday_view_locale.py`` / ``core/pdf_locale.py`` localisent déjà le **contenu**
 liturgique (lectures, PDF). Ce module couvre le **chrome** du site public : navigation,
@@ -23,7 +23,7 @@ from core.locale_codes import DEFAULT_PREF_LANGUE
 
 SESSION_KEY = "ui_lang"
 
-# Mêmes 5 langues que le contenu liturgique (FR, DE, EN, ES, IT).
+# Mêmes 6 langues que le contenu liturgique (FR, DE, EN, ES, IT, PT).
 SUPPORTED_UI_LANGS: tuple[str, ...] = supported_liturgy_langs()
 
 LANG_NATIVE_LABEL: dict[str, str] = {
@@ -32,6 +32,7 @@ LANG_NATIVE_LABEL: dict[str, str] = {
     "EN": "English",
     "ES": "Español",
     "IT": "Italiano",
+    "PT": "Português",
 }
 
 
@@ -86,6 +87,7 @@ def render_public_lang_flags() -> None:
             "EN": "gb",
             "ES": "es",
             "IT": "it",
+            "PT": "pt",
         }
 
     cur = get_ui_lang()
@@ -253,7 +255,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "comfort.large": "Grand",
         "comfort.xlarge": "Très grand",
         "comfort.language_label": "Langue de l'interface",
-        "comfort.language_caption": "Change la langue des menus et des pages (FR/DE/EN/ES/IT).",
+        "comfort.language_caption": "Change la langue des menus et des pages (FR/DE/EN/ES/IT/PT).",
         # --- À propos ---
         "about.references_title": "Références & sources",
         "about.readings_heading": "Lectures liturgiques",
@@ -387,7 +389,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "comfort.large": "Groß",
         "comfort.xlarge": "Sehr groß",
         "comfort.language_label": "Oberflächensprache",
-        "comfort.language_caption": "Ändert die Sprache der Menüs und Seiten (FR/DE/EN/ES/IT).",
+        "comfort.language_caption": "Ändert die Sprache der Menüs und Seiten (FR/DE/EN/ES/IT/PT).",
         "about.references_title": "Quellen & Referenzen",
         "about.readings_heading": "Liturgische Lesungen",
         "about.table_lang": "Sprache",
@@ -515,7 +517,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "comfort.large": "Large",
         "comfort.xlarge": "Extra large",
         "comfort.language_label": "Interface language",
-        "comfort.language_caption": "Changes the language of menus and pages (FR/DE/EN/ES/IT).",
+        "comfort.language_caption": "Changes the language of menus and pages (FR/DE/EN/ES/IT/PT).",
         "about.references_title": "References & sources",
         "about.readings_heading": "Liturgical readings",
         "about.table_lang": "Language",
@@ -635,7 +637,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "comfort.large": "Grande",
         "comfort.xlarge": "Muy grande",
         "comfort.language_label": "Idioma de la interfaz",
-        "comfort.language_caption": "Cambia el idioma de los menús y las páginas (FR/DE/EN/ES/IT).",
+        "comfort.language_caption": "Cambia el idioma de los menús y las páginas (FR/DE/EN/ES/IT/PT).",
         "about.references_title": "Referencias y fuentes",
         "about.readings_heading": "Lecturas litúrgicas",
         "about.table_lang": "Idioma",
@@ -755,7 +757,7 @@ _CATALOG: dict[str, dict[str, str]] = {
         "comfort.large": "Grande",
         "comfort.xlarge": "Molto grande",
         "comfort.language_label": "Lingua dell'interfaccia",
-        "comfort.language_caption": "Cambia la lingua dei menu e delle pagine (FR/DE/EN/ES/IT).",
+        "comfort.language_caption": "Cambia la lingua dei menu e delle pagine (FR/DE/EN/ES/IT/PT).",
         "about.references_title": "Riferimenti e fonti",
         "about.readings_heading": "Letture liturgiche",
         "about.table_lang": "Lingua",
@@ -846,5 +848,133 @@ _CATALOG: dict[str, dict[str, str]] = {
         "feedback.thanks": "Grazie infinite: il tuo parere aiuta LumenVia a crescere.",
         "common.save": "Salva",
         "common.cancel": "Annulla",
+    },
+    "PT": {
+        "nav.about_suffix": "o que é?",
+        "nav.sunday_line1": "A Luz",
+        "nav.sunday_line2": "do Domingo",
+        "nav.memo_line1": "O Meu",
+        "nav.memo_line2": "Memo",
+        "nav.join_line1": "Subscrever a",
+        "nav.join_line2": "Newsletter",
+        "nav.account": "A Minha Conta",
+        "nav.feedback_line1": "Dar a tua",
+        "nav.feedback_line2": "Opinião",
+        "nav.menu": "Menu",
+        "nav.connected_as": "🟢 Sessão iniciada · {email}",
+        "nav.session_active": "sessão ativa",
+        "nav.logout": "Terminar sessão",
+        "nav.about": "𝗟𝘂𝗺𝗲𝗻𝗩𝗶𝗮\u00a0:\no que é?",
+        "nav.sunday": "A Luz\ndo Domingo",
+        "nav.memo": "O Meu\nMemo",
+        "nav.join": "Subscrever a Newsletter",
+        "nav.feedback": "Dar a tua\nOpinião",
+        "nav.connected": "🟢 Sessão iniciada · {email}",
+        "comfort.title": "Conforto de leitura — tamanho do texto",
+        "comfort.caption": "Aumenta os textos das páginas e das leituras para maior conforto visual.",
+        "comfort.size_label": "Tamanho do texto",
+        "comfort.standard": "Padrão",
+        "comfort.large": "Grande",
+        "comfort.xlarge": "Muito grande",
+        "comfort.language_label": "Língua da interface",
+        "comfort.language_caption": "Muda a língua dos menus e das páginas (FR/DE/EN/ES/IT/PT).",
+        "about.references_title": "Referências e fontes",
+        "about.readings_heading": "Leituras litúrgicas",
+        "about.table_lang": "Língua",
+        "about.table_source": "Fonte",
+        "about.table_usage": "Utilização no LumenVia",
+        "about.fr_usage": (
+            "Fonte de produção — textos da missa através da API pública (sem chave)."
+        ),
+        "about.other_usage": (
+            "Complemento multilingue: textos nativos completos (sem tradução própria a partir "
+            "da AELF). Apresentados na aplicação + cache RDC; a redistribuição por e-mail / TTS / "
+            "PDF dos textos fora do FR está sujeita à confirmação das condições da Evangelizo."
+        ),
+        "about.audio_heading": "Áudios",
+        "about.voice_label": "Voz",
+        "about.voice_desc": (
+            "síntese de voz Google (Vertex / Gemini TTS) — leitura dos textos já disponíveis."
+        ),
+        "about.ambiance_label": "Ambiente",
+        "about.ambiance_desc": (
+            "(intro / outro / fundo): clipes **livres de direitos** carregados pela equipa no "
+            "Atelier áudio — licenças **CC0**, **domínio público** ou **CC-BY** (atribuição). "
+            "Nenhuma música comercial sem licença."
+        ),
+        "about.footer_note": (
+            "As ilustrações e conteúdos gerados por IA são ajudas à meditação; os textos "
+            "litúrgicos continuam a ser os das fontes acima."
+        ),
+        "sunday.title": "A Luz do Domingo",
+        "sunday.date_label": "Data (domingo da semana)",
+        "sunday.source_expander": "Fonte das leituras",
+        "sunday.zone_caption": "Zona: **{zone}** · língua **{lang}**",
+        "sunday.loading_readings": "A obter as leituras…",
+        "sunday.error_fetch_readings": "Não foi possível obter as leituras em **{lang}** para {date}.",
+        "sunday.error_retry_hint": (
+            "Tenta novamente com ligação à rede, ou escolhe uma data já consultada "
+            "recentemente nesta língua neste dispositivo."
+        ),
+        "sunday.calendar_expander": "Ver os conteúdos já disponíveis — {month} {year}",
+        "sunday.calendar_legend": "Domingo com conteúdo",
+        "sunday.preview_readings": "Leituras **{lang}** (`{source}`) — pré-visualização: _{preview}_",
+        "join.title_account": "A minha conta",
+        "join.title_newsletter": "Subscrever a newsletter",
+        "join.section_login": "Iniciar sessão",
+        "join.btn_login": "Iniciar sessão",
+        "join.btn_logout": "Terminar sessão",
+        "join.password_label": "Palavra-passe",
+        "join.btn_signup_mode": "Criar / ativar uma conta",
+        "join.field_first_name": "Primeiro nome",
+        "join.field_last_name": "Apelido",
+        "join.field_phone": "Telefone (opcional, formato internacional)",
+        "join.field_country": "País",
+        "join.field_pref_langue": "Preferência de língua",
+        "join.consent": "Aceito receber estes e-mails (é possível cancelar a subscrição em qualquer momento).",
+        "join.btn_subscribe": "Subscrever",
+        "join.btn_unsubscribe": "Cancelar subscrição",
+        "join.section_my_info": "As minhas informações",
+        "join.btn_save_profile": "Guardar as minhas informações",
+        "join.section_newsletter": "Newsletter",
+        "memo.title": "O Meu Memo",
+        "memo.subtitle": "Espaço reservado aos utilizadores com sessão iniciada.",
+        "memo.login_required": "Para acederes a **O Meu Memo**, tens de ter sessão iniciada.",
+        "memo.btn_go_account": "Ir para A Minha Conta",
+        "memo.existing_memos": "Os meus memos existentes",
+        "memo.no_memo": "Ainda não há nenhum memo.",
+        "memo.new_memo_heading": "Criar um novo memo",
+        "memo.field_title": "Título",
+        "memo.field_date": "Data (domingo)",
+        "memo.field_body": "O teu memo",
+        "memo.field_resolution": "A minha resolução (esta semana)",
+        "memo.btn_save": "Guardar o memo",
+        "memo.saved": "OK — memo guardado.",
+        "memo.export_heading": "Exportar PDF — Graine de Parole",
+        "feedback.title": "Dar a tua opinião",
+        "feedback.login_required": (
+            "Para responder ao questionário, inicia sessão (**A Minha Conta**) ou abre a "
+            "hiperligação recebida no teu e-mail LumenVia — esta preenche automaticamente o "
+            "teu endereço e permite participar sem conta."
+        ),
+        "feedback.btn_go_account": "Ir para A Minha Conta",
+        "feedback.btn_go_join": "Subscrever a newsletter",
+        "feedback.section_first_steps": "Os teus primeiros passos com o LumenVia",
+        "feedback.field_illustration": "A ilustração",
+        "feedback.field_synthesis": "O PDF de síntese",
+        "feedback.field_audio": "O áudio",
+        "feedback.field_utility": (
+            "Este conteúdo ajuda-te realmente a preparar a celebração de domingo?"
+        ),
+        "feedback.field_standout": (
+            "O que é que mais te tocou ou te pareceu mais útil neste envio?"
+        ),
+        "feedback.field_wish": (
+            "Uma única coisa a melhorar ou a acrescentar (música de ambiente, texto mais curto, …)?"
+        ),
+        "feedback.btn_submit": "Enviar a minha opinião",
+        "feedback.thanks": "Muito obrigado: a tua opinião ajuda o LumenVia a crescer.",
+        "common.save": "Guardar",
+        "common.cancel": "Cancelar",
     },
 }

@@ -51,7 +51,7 @@ _TTS_ADMIN_PREAMBLE_PREFIXES: tuple[str, ...] = (
     "garde une gravité paisible",
 )
 
-# Titres injectés par ``plain_readings_for_tts`` (FR + DE/EN/ES/IT).
+# Titres injectés par ``plain_readings_for_tts`` (FR + DE/EN/ES/IT/PT).
 _READINGS_TTS_SECTION_MARKERS: tuple[str, ...] = all_tts_reading_section_titles()
 
 _LITURGY_SECTION_TITLE_ALT = "|".join(
@@ -72,6 +72,7 @@ _LITURGY_FIRST_SECTION_RE = re.compile(
             "First reading",
             "Primera lectura",
             "Prima lettura",
+            "Primeira leitura",
         )
     )
     + r")\.",
@@ -129,7 +130,7 @@ def liturgy_section_oral_announcement(
     if raw.lower().startswith("à retenir"):
         return "À retenir."
     key = canonical_reading_section_key(raw)
-    if key or raw.lower() in ("le psaume", "der psalm", "the psalm", "el salmo", "il salmo"):
+    if key or raw.lower() in ("le psaume", "der psalm", "the psalm", "el salmo", "il salmo", "o salmo"):
         return oral_reading_intro_phrase(
             raw,
             intro_lue=intro_lue,
@@ -165,6 +166,7 @@ def dedupe_tts_section_body(
         "the psalm",
         "el salmo",
         "il salmo",
+        "o salmo",
     ):
         stems = [
             ("le psaume", "Il"),
@@ -172,6 +174,7 @@ def dedupe_tts_section_body(
             ("the psalm", None),
             ("el salmo", None),
             ("il salmo", None),
+            ("o salmo", None),
             ("antwortpsalm", None),
             ("responsorial psalm", None),
             ("salmo responsorial", None),
@@ -188,6 +191,7 @@ def dedupe_tts_section_body(
             ("first reading", None),
             ("primera lectura", None),
             ("prima lettura", None),
+            ("primeira leitura", None),
         ]
     elif key == "deuxieme_lecture":
         stems = [
@@ -198,6 +202,7 @@ def dedupe_tts_section_body(
             ("second reading", None),
             ("segunda lectura", None),
             ("seconda lettura", None),
+            ("segunda leitura", None),
         ]
     elif key == "evangile":
         stems = [
@@ -209,6 +214,7 @@ def dedupe_tts_section_body(
             ("gospel", None),
             ("evangelio", None),
             ("vangelo", None),
+            ("evangelho", None),
         ]
     elif raw.lower().startswith("à retenir"):
         stems = [("à retenir", None), ("a retenir", None)]
@@ -534,6 +540,12 @@ NON_FR_TTS_SPEECH_SPECS: dict[str, str] = {
         "Standard Italian, clear liturgical diction. "
         "Speak entirely in Italian. Pronounce numbers, psalm references and verse lists in Italian. "
         "Do not use French pronunciation or French number words."
+    ),
+    "PT": (
+        "European Portuguese (Portugal), clear liturgical diction — not Brazilian Portuguese. "
+        "Speak entirely in European Portuguese. Pronounce numbers, psalm references and verse lists "
+        "in European Portuguese. Do not use French pronunciation or French number words, "
+        "and do not switch to Brazilian Portuguese pronunciation."
     ),
 }
 

@@ -2,7 +2,7 @@
 
 Règle produit :
 - ``FR`` → AELF (ne pas remplacer ce qui marche)
-- ``DE`` / ``EN`` / ``ES`` / ``IT`` → Evangelizo Reader Feed
+- ``DE`` / ``EN`` / ``ES`` / ``IT`` / ``PT`` → Evangelizo Reader Feed
 - Universalis reste disponible en Lab / secours, pas la route produit EN
 """
 
@@ -14,7 +14,7 @@ from core.aelf import AelfDayIdentity, AelfTexts, fetch_aelf_day
 from core.evangelizo import fetch_evangelizo_for_product_lang
 from core.locale_codes import DEFAULT_PREF_LANGUE, normalize_pref_langue
 
-PrefLang = Literal["FR", "DE", "EN", "ES", "IT"]
+PrefLang = Literal["FR", "DE", "EN", "ES", "IT", "PT"]
 
 # Langue produit → id registre (source câblée)
 PRODUCT_LANG_TO_SOURCE_ID: dict[str, str] = {
@@ -23,6 +23,7 @@ PRODUCT_LANG_TO_SOURCE_ID: dict[str, str] = {
     "EN": "evangelizo_en_am",
     "ES": "evangelizo_es_sp",
     "IT": "evangelizo_it",
+    "PT": "evangelizo_pt",
 }
 
 
@@ -43,14 +44,14 @@ def fetch_liturgy_day(
     Retourne ``(identity, texts, source_id)`` pour la langue demandée.
 
     - ``FR`` → AELF france
-    - ``DE`` / ``EN`` / ``ES`` / ``IT`` → Evangelizo (codes Reader DE / AM / SP / IT)
+    - ``DE`` / ``EN`` / ``ES`` / ``IT`` / ``PT`` → Evangelizo (codes Reader DE / AM / SP / IT / PT)
     """
     lg = coerce_liturgy_pref_langue(pref_langue)
     date_iso = str(date_iso or "").strip()[:10]
     if lg == "FR":
         ident, texts = fetch_aelf_day(date_iso, zone="france")
         return ident, texts, PRODUCT_LANG_TO_SOURCE_ID["FR"]
-    if lg in ("DE", "EN", "ES", "IT"):
+    if lg in ("DE", "EN", "ES", "IT", "PT"):
         ident, texts, _payload = fetch_evangelizo_for_product_lang(date_iso, pref_langue=lg)
         return ident, texts, PRODUCT_LANG_TO_SOURCE_ID[lg]
     raise ValueError(
@@ -60,7 +61,7 @@ def fetch_liturgy_day(
 
 
 def supported_liturgy_langs() -> tuple[str, ...]:
-    return ("FR", "DE", "EN", "ES", "IT")
+    return ("FR", "DE", "EN", "ES", "IT", "PT")
 
 
 def source_id_for_pref_langue(pref_langue: str) -> str:

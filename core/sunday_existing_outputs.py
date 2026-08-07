@@ -319,7 +319,14 @@ def fetch_existing_sunday_bundle(
             needle = f"/{lg}/"
             if needle in tp or tp.startswith(f"{lg}/"):
                 return (2, str(g.get("created_at") or ""))
-            if lg == DEFAULT_PREF_LANGUE and ("/FR/" not in tp.upper() and "/DE/" not in tp and "/EN/" not in tp and "/ES/" not in tp and "/IT/" not in tp):
+            if lg == DEFAULT_PREF_LANGUE and (
+                "/FR/" not in tp.upper()
+                and "/DE/" not in tp
+                and "/EN/" not in tp
+                and "/ES/" not in tp
+                and "/IT/" not in tp
+                and "/PT/" not in tp
+            ):
                 # Anciens chemins sans feuille langue = FR historique.
                 return (1, str(g.get("created_at") or ""))
             return (0, str(g.get("created_at") or ""))

@@ -73,7 +73,7 @@ section[data-testid="stMain"] [data-testid="stMarkdownContainer"] li {{
 
 
 def render_reading_comfort_expander() -> None:
-    """Expander confort de lecture + sélecteur de langue UI public (FR/DE/EN/ES/IT)."""
+    """Expander confort de lecture + sélecteur de langue UI public (FR/DE/EN/ES/IT/PT)."""
     try:
         from core.ui_locale import SUPPORTED_UI_LANGS, get_ui_lang, set_ui_lang, t
     except Exception:

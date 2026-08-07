@@ -94,6 +94,7 @@ def language_filter_for_pref_langue(pref_langue: object | None) -> tuple[str, ..
         "EN": ("en", "en-gb", "en-us", "english", "uk", "gb", "EN"),
         "ES": ("es", "es-es", "español", "espanol", "spain", "ES"),
         "IT": ("it", "it-it", "italiano", "italy", "italia", "IT"),
+        "PT": ("pt", "pt-pt", "português", "portugues", "portugal", "PT"),
     }
     return aliases.get(lg, (lg.lower(), lg))
 
@@ -186,6 +187,7 @@ _CLES_LECTURE_BASE_BY_LANG: dict[str, str] = {
     "EN": "the keys to reading this Sunday's celebration",
     "ES": "las claves de lectura de la celebración de este domingo",
     "IT": "le chiavi di lettura della celebrazione di questa domenica",
+    "PT": "as chaves de leitura da celebração deste domingo",
 }
 
 
@@ -262,6 +264,7 @@ WEEKLY_ACTUALITE_LEAD_BY_LANG: dict[str, str] = {
     "EN": "This week in LumenVia news: ",
     "ES": "Novedades de LumenVia esta semana: ",
     "IT": "Novità di LumenVia di questa settimana: ",
+    "PT": "Novidades do LumenVia esta semana: ",
 }
 
 # Texte proposé pour l’envoi hebdo (UI Emailing + défaut si ETPL.status_note vide).
@@ -282,7 +285,8 @@ _CETTE_SEMAINE_LEAD_RE = re.compile(r"(?is)^cette\s+semaine\s*[,:\-–—]?\s*")
 
 _EMAIL_GREETING_LINE_RE = re.compile(
     r"(?i)^\s*(bonjour|hallo|guten\s+tag|hello|hi|hola|buenos\s+d[ií]as|"
-    r"buenas\s+tardes|ciao|buongiorno|lieber?\b|dear\b)\b"
+    r"buenas\s+tardes|ciao|buongiorno|ol[áa]|bom\s+dia|boa\s+tarde|"
+    r"lieber?\b|dear\b)\b"
 )
 
 
@@ -316,6 +320,10 @@ LUMENVIA_MISSION_QUOTE_BY_LANG: dict[str, str] = {
     "IT": (
         "LumenVia non è qui per sostituire l'incontro, ma per prepararlo, "
         "affinché ogni messa diventi un incontro più consapevole con Cristo."
+    ),
+    "PT": (
+        "O LumenVia não está aqui para substituir o encontro, mas para o preparar, "
+        "para que cada missa se torne um encontro mais consciente com Cristo."
     ),
 }
 

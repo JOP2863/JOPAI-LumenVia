@@ -13,7 +13,7 @@
   "items": [
     {
       "id": "web_reader_display",
-      "label": "Afficher les lectures DE/EN/ES/IT dans l’app (Streamlit)",
+      "label": "Afficher les lectures DE/EN/ES/IT/PT dans l’app (Streamlit)",
       "status": "allowed_with_conditions",
       "channel": "web",
       "verdict": "ok_si_attribution",
@@ -61,7 +61,7 @@
     },
     {
       "id": "no_house_translation",
-      "label": "Interdiction de « traduire » l’AELF pour simuler DE/EN/ES/IT",
+      "label": "Interdiction de « traduire » l’AELF pour simuler DE/EN/ES/IT/PT",
       "status": "forbidden",
       "channel": "product",
       "verdict": "interdit_produit",

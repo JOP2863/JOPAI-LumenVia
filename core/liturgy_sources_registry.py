@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-# Priorité produit (FR → DE → EN → ES → IT)
-LANG_PRIORITY: tuple[str, ...] = ("FR", "DE", "EN", "ES", "IT")
+# Priorité produit (FR → DE → EN → ES → IT → PT)
+LANG_PRIORITY: tuple[str, ...] = ("FR", "DE", "EN", "ES", "IT", "PT")
 
 SourceStatus = Literal["production", "candidate", "excluded", "unproven"]
 
@@ -120,6 +120,22 @@ LITURGY_SOURCES: tuple[LiturgySourceSpec, ...] = (
         ),
         notes=(
             "Route produit IT. Adapter : core/evangelizo.py. "
+            "Checklist : data/evangelizo_license_checklist.json."
+        ),
+        license_note="Idem Evangelizo — affichage web OK avec attribution ; canaux larges à confirmer.",
+    ),
+    LiturgySourceSpec(
+        id="evangelizo_pt",
+        label="Evangelizo — Reader Feed PT",
+        lang="PT",
+        status="production",
+        provides_full_mass_texts=True,
+        endpoint_template=(
+            "https://feed.evangelizo.org/v2/reader.php?date={date_compact}&type=xml&lang=PT"
+        ),
+        notes=(
+            "Route produit PT (portugais européen, calendrier romain Evangelizo). "
+            "Adapter : core/evangelizo.py. Zone RDC : portugal. "
             "Checklist : data/evangelizo_license_checklist.json."
         ),
         license_note="Idem Evangelizo — affichage web OK avec attribution ; canaux larges à confirmer.",

@@ -41,6 +41,7 @@ PRODUCT_LANG_TO_EVANGELIZO: dict[str, str] = {
     "IT": "IT",
     "EN": "AM",  # American English calendar
     "ES": "SP",  # Spanish
+    "PT": "PT",  # Portuguese (European calendar — Evangelizo)
 }
 
 # Source registry id → Evangelizo lang code
@@ -49,6 +50,7 @@ SOURCE_ID_TO_EVANGELIZO_LANG: dict[str, str] = {
     "evangelizo_en_am": "AM",
     "evangelizo_es_sp": "SP",
     "evangelizo_it": "IT",
+    "evangelizo_pt": "PT",
 }
 
 
@@ -341,6 +343,7 @@ def infer_meta_from_evangelizo_title(
             "jahreskreis",
             "tiempo ordinario",
             "tempo ordinario",
+            "tempo comum",
             "temps ordinaire",
         )
     ):
@@ -351,6 +354,7 @@ def infer_meta_from_evangelizo_title(
             "SP": "Tiempo Ordinario",
             "ES": "Tiempo Ordinario",
             "IT": "Tempo Ordinario",
+            "PT": "Tempo Comum",
             "FR": "Temps Ordinaire",
         }.get(lang, "Temps Ordinaire")
         couleur = {
@@ -360,14 +364,19 @@ def infer_meta_from_evangelizo_title(
             "SP": "Verde",
             "ES": "Verde",
             "IT": "Verde",
+            "PT": "Verde",
             "FR": "Vert",
         }.get(lang, "Vert")
-    elif any(x in low for x in ("advent", "adventzeit", "adviento", "avvento", "avent")):
+    elif any(
+        x in low
+        for x in ("advent", "adventzeit", "adviento", "avvento", "advento", "avent")
+    ):
         periode = {
             "DE": "Advent",
             "AM": "Advent",
             "SP": "Adviento",
             "IT": "Avvento",
+            "PT": "Advento",
             "FR": "Avent",
         }.get(lang, "Avent")
         couleur = {
@@ -375,14 +384,27 @@ def infer_meta_from_evangelizo_title(
             "AM": "Violet",
             "SP": "Morado",
             "IT": "Viola",
+            "PT": "Roxo",
             "FR": "Violet",
         }.get(lang, "Violet")
-    elif any(x in low for x in ("lent", "fastenzeit", "cuaresma", "quaresima", "carême", "careme")):
+    elif any(
+        x in low
+        for x in (
+            "lent",
+            "fastenzeit",
+            "cuaresma",
+            "quaresima",
+            "quaresma",
+            "carême",
+            "careme",
+        )
+    ):
         periode = {
             "DE": "Fastenzeit",
             "AM": "Lent",
             "SP": "Cuaresma",
             "IT": "Quaresima",
+            "PT": "Quaresma",
             "FR": "Carême",
         }.get(lang, "Carême")
         couleur = {
@@ -390,14 +412,19 @@ def infer_meta_from_evangelizo_title(
             "AM": "Violet",
             "SP": "Morado",
             "IT": "Viola",
+            "PT": "Roxo",
             "FR": "Violet",
         }.get(lang, "Violet")
-    elif any(x in low for x in ("easter", "oster", "pascua", "pasqua", "pâques", "paques")):
+    elif any(
+        x in low
+        for x in ("easter", "oster", "pascua", "pasqua", "páscoa", "pascoa", "pâques", "paques")
+    ):
         periode = {
             "DE": "Osterzeit",
             "AM": "Easter Time",
             "SP": "Tiempo Pascual",
             "IT": "Tempo Pasquale",
+            "PT": "Tempo Pascal",
             "FR": "Temps Pascal",
         }.get(lang, "Temps Pascal")
         couleur = {
@@ -405,14 +432,19 @@ def infer_meta_from_evangelizo_title(
             "AM": "White",
             "SP": "Blanco",
             "IT": "Bianco",
+            "PT": "Branco",
             "FR": "Blanc",
         }.get(lang, "Blanc")
-    elif any(x in low for x in ("christmas", "weihnachten", "navidad", "natale", "noël", "noel")):
+    elif any(
+        x in low
+        for x in ("christmas", "weihnachten", "navidad", "natale", "natal", "noël", "noel")
+    ):
         periode = {
             "DE": "Weihnachten",
             "AM": "Christmas",
             "SP": "Navidad",
             "IT": "Natale",
+            "PT": "Natal",
             "FR": "Noël",
         }.get(lang, "Noël")
         couleur = {
@@ -420,6 +452,7 @@ def infer_meta_from_evangelizo_title(
             "AM": "White",
             "SP": "Blanco",
             "IT": "Bianco",
+            "PT": "Branco",
             "FR": "Blanc",
         }.get(lang, "Blanc")
 
@@ -461,7 +494,14 @@ def payload_to_identity(
     title = str(payload.get("liturgic_t") or "").strip()
     saint = str(payload.get("saint") or "").strip()
     # Code Reader → langue produit pour zone pays
-    reader_to_product = {"DE": "DE", "AM": "EN", "SP": "ES", "IT": "IT", "FR": "FR"}
+    reader_to_product = {
+        "DE": "DE",
+        "AM": "EN",
+        "SP": "ES",
+        "IT": "IT",
+        "PT": "PT",
+        "FR": "FR",
+    }
     product = reader_to_product.get(str(evangelizo_lang or "").strip().upper(), "FR")
     zone = PRODUCT_LANG_TO_RDC_ZONE.get(product) or f"evangelizo_{str(evangelizo_lang).lower()}"
 

@@ -86,6 +86,11 @@ MULTILANG_PHASES: tuple[tuple[str, tuple[MultilangStep, ...]], ...] = (
                 "Evangelizo Reader lang=IT — production",
             ),
             MultilangStep(
+                "spike_pt",
+                "Valider au moins une API PT messe complète",
+                "Evangelizo Reader lang=PT — production (Portugal / calendrier romain)",
+            ),
+            MultilangStep(
                 "license_checklist",
                 "Checklist licence / ToS par source retenue (web, e-mail, TTS, PDF)",
                 "Universalis + Evangelizo + ambiances audio (data/*.json)",

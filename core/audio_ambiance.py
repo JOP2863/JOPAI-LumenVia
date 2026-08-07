@@ -23,7 +23,7 @@ AMBIANCE_GCS_PREFIX = "Audio/ambiance"
 ROLES: tuple[str, ...] = ("intro", "outro", "bed", "ecoute")
 MIX_ROLES: tuple[str, ...] = ("intro", "outro", "bed")  # utilisés par le mix TTS
 CIBLES: tuple[str, ...] = ("lectures", "synthese", "both", "ecoute")
-LANGUES: tuple[str, ...] = ("ALL", "FR", "DE", "EN", "ES", "IT")
+LANGUES: tuple[str, ...] = ("ALL", "FR", "DE", "EN", "ES", "IT", "PT")
 LICENCES: tuple[str, ...] = ("CC0", "CC-BY", "CC-BY-SA", "domaine_public", "autre")
 
 # Licences acceptées pour un usage producteur sans risque majeur (hors « autre » à valider).

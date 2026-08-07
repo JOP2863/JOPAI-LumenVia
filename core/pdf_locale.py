@@ -34,6 +34,10 @@ _MONTHS: dict[str, tuple[str, ...]] = {
         "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
         "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre",
     ),
+    "PT": (
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    ),
 }
 
 # Alias public — réutilisé par le chrome (ex. mini-calendrier « Dimanche ») pour éviter
@@ -46,6 +50,7 @@ _WEEKDAYS: dict[str, tuple[str, ...]] = {
     "EN": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
     "ES": ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"),
     "IT": ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"),
+    "PT": ("segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"),
 }
 
 # Libellés courts période / couleur (couverture) — les codes AELF restent FR en entrée.
@@ -95,6 +100,15 @@ _SEASON_SHORT: dict[str, dict[str, str]] = {
         "pascal": "Tempo Pasquale",
         "pentecote": "Pentecoste",
     },
+    "PT": {
+        "avent": "Advento",
+        "noel": "Natal",
+        "temps_ordinaire": "Tempo Comum",
+        "ordinaire": "Tempo Comum",
+        "careme": "Quaresma",
+        "pascal": "Tempo Pascal",
+        "pentecote": "Pentecostes",
+    },
 }
 
 _COLOR_SHORT: dict[str, dict[str, str]] = {
@@ -137,6 +151,14 @@ _COLOR_SHORT: dict[str, dict[str, str]] = {
         "violet": "Viola",
         "rose": "Rosa",
         "noir": "Nero",
+    },
+    "PT": {
+        "blanc": "Branco",
+        "vert": "Verde",
+        "rouge": "Vermelho",
+        "violet": "Violeta",
+        "rose": "Rosa",
+        "noir": "Preto",
     },
 }
 
@@ -220,6 +242,22 @@ _PDF_UI: dict[str, dict[str, str]] = {
         ),
         "about_quote_needle": "La tua Parola è lampada",
         "about_closing_needle": "Possa questo strumento",
+    },
+    "PT": {
+        "listen_readings": "Ouvir as leituras",
+        "listen_synthesis": "Ouvir a síntese em áudio",
+        "about_title": "Sobre a JOPAI LumenVia",
+        "footer_rights": " LumenVia - 2026 | TODOS OS DIREITOS RESERVADOS",
+        "dev_notice": (
+            "A LumenVia ainda está em desenvolvimento — Conteúdos e funcionalidades não contratuais."
+        ),
+        "back_cover_note": (
+            "Este painel desdobra as 51 etapas do nosso caminho litúrgico. Cada vinheta é uma "
+            "janela aberta sobre a Palavra, uma paragem visual para meditar os mistérios da semana. "
+            "Segui este fio de luz, de domingo em domingo, para habitar o tempo com esperança"
+        ),
+        "about_quote_needle": "A tua Palavra é lâmpada",
+        "about_closing_needle": "Que esta ferramenta",
     },
 }
 
@@ -329,6 +367,27 @@ Troppo spesso arriviamo alla messa senza aver deposto il rumore del mondo. Quest
 
 Possa questo strumento aiutarti a trasformare ogni messa in un incontro più profondo e consapevole con Cristo.
 """.strip(),
+    "PT": """
+« *A tua Palavra é lâmpada para os meus passos, luz no meu caminho.* »
+
+
+A JOPAI LumenVia é uma companheira espiritual concebida para vos ajudar a atravessar o limiar da celebração com um coração aberto e uma inteligência iluminada.
+Muitas vezes chegamos à missa sem termos tido tempo de depor o ruído do mundo. Este sítio é uma pausa, um caminho de luz (**LumenVia**) para vos preparar a receber a Palavra de Deus.
+
+**Porque usar a LumenVia?**
+
+- **Compreender o essencial**: com a ajuda da Inteligência Artificial, colocamos em perspetiva as leituras do domingo para vos oferecer a síntese. Não se trata de inventar, mas de sublinhar o fio condutor que liga os textos entre si.
+- **Preparar-se pelo caminho**: quer prefiram ler quer ouvir, a LumenVia gera para vós um resumo escrito e um áudio. Ouvi a síntese nos transportes ou a caminho da igreja para deixar o espírito da festa penetrar em vós.
+- **Viver o tempo litúrgico**: do dourado do Tempo Comum ao violeta da Quaresma, a aplicação veste-se com as cores da Igreja para vos ajudar a habitar plenamente cada estação do ano.
+
+**Como percorrer este caminho?**
+
+- **A Luz do Domingo**: descobri os textos do dia e a sua síntese para alimentar a vossa meditação.
+- **A minha Ajuda-Memória**: criai as vossas próprias notas para guardar o que tocou o vosso coração.
+- **Juntai-vos a nós**: subscrevei para receber, todas as sextas-feiras à noite, a vossa preparação dominical diretamente por e-mail ou por SMS.
+
+Que esta ferramenta vos ajude a transformar cada missa num encontro mais profundo e mais consciente com Cristo.
+""".strip(),
 }
 
 
@@ -357,7 +416,7 @@ def pdf_cover_date_line(date_str: str, pref_langue: object | None = None) -> str
         return f"{wd}, {month} {d.day}, {d.year}"
     if lg == "DE":
         return f"{wd}, {d.day}. {month} {d.year}"
-    if lg in ("ES", "IT"):
+    if lg in ("ES", "IT", "PT"):
         return f"{wd.capitalize()} {d.day} {month} {d.year}"
     return f"{wd.capitalize()} {d.day} {month} {d.year}"
 

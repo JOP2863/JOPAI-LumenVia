@@ -2118,7 +2118,7 @@ def _run_multilang_from_cell_selection(
         else:
             by_sel["FR"] = fr_kinds
 
-    order = [lg for lg in ("FR", "DE", "EN", "ES", "IT") if lg in by_sel]
+    order = [lg for lg in ("FR", "DE", "EN", "ES", "IT", "PT") if lg in by_sel]
     for extra in by_sel:
         if extra not in order:
             order.append(extra)
