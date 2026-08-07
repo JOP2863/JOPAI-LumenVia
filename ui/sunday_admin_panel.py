@@ -51,8 +51,9 @@ def _ready_cell_html(
     url: str | None,
     icon: str,
     voice_info: str | None = None,
+    has_ambiance: bool | None = None,
 ) -> str:
-    """Case prête : ✅ + lien, et éventuellement « ? » inline (popup CSS au clic)."""
+    """Case prête : ✅ + lien, « ? » voix, et 🎶 si bande-son (inline, nowrap)."""
     if url:
         main = (
             f'<a href="{html_escape(url)}" target="_blank" rel="noopener" '
@@ -63,9 +64,14 @@ def _ready_cell_html(
     # Tout sur une seule ligne (nowrap) pour ne pas gonfler la hauteur des rangées.
     parts = [
         '<span style="display:inline-flex;align-items:center;justify-content:center;'
-        'gap:0.2rem;white-space:nowrap;line-height:1.2;">',
+        'gap:0.15rem;white-space:nowrap;line-height:1.2;">',
         f"<span>✅ {main}</span>",
     ]
+    if has_ambiance is True and kind in ("synth_audio", "readings_audio"):
+        parts.append(
+            '<span class="lv-amb" title="Bande-son / ambiance (intro · nappe · outro)" '
+            'aria-label="Ambiance audio">🎶</span>'
+        )
     if voice_info and kind in ("synth_audio", "readings_audio"):
         tip = html_escape(voice_info)
         parts.append(
@@ -116,6 +122,14 @@ _MEDIA_STATUS_TABLE_CSS = """
 .lv-vq:focus .lv-vq-tip,
 .lv-vq:focus-within .lv-vq-tip {
   display: block;
+}
+.lv-amb {
+  display: inline-block;
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 0;
+  cursor: help;
+  opacity: 0.92;
 }
 /* Tableau HTML — colonnes stables mobile (scroll horizontal si besoin). */
 .lv-ml-matrix-wrap {
@@ -177,6 +191,7 @@ def _matrix_cell_html(
             url=_status_url(row, kind),
             icon=icon,
             voice_info=_voice_info_for_cell(row, kind),
+            has_ambiance=_ambiance_for_cell(row, kind),
         )
     return '<span class="lv-ml-miss">—</span>'
 
@@ -218,6 +233,14 @@ def _voice_info_for_cell(row: LangMediaStatus, kind: str) -> str | None:
     return None
 
 
+def _ambiance_for_cell(row: LangMediaStatus, kind: str) -> bool | None:
+    if kind == "synth_audio":
+        return row.synth_audio_ambiance
+    if kind == "readings_audio":
+        return row.readings_audio_ambiance
+    return None
+
+
 def _load_media_rows(*, cfg: object, date_str: str) -> list[LangMediaStatus]:
     """Statut médias via cache Streamlit (évite GCS à chaque clic)."""
     sa_json = service_account_json_fingerprint(getattr(cfg, "gcp_service_account", None))
@@ -252,6 +275,8 @@ def _load_media_rows(*, cfg: object, date_str: str) -> list[LangMediaStatus]:
                     readings_audio_voice=d.get("readings_audio_voice"),
                     synth_audio_voice_info=d.get("synth_audio_voice_info"),
                     readings_audio_voice_info=d.get("readings_audio_voice_info"),
+                    synth_audio_ambiance=d.get("synth_audio_ambiance"),
+                    readings_audio_ambiance=d.get("readings_audio_ambiance"),
                 )
             )
         except Exception:
@@ -458,7 +483,8 @@ def _sunday_multilang_admin_fragment(
     st.markdown("##### Médias par langue")
     st.caption(
         "Coche les cases des médias à produire, puis **Générer la sélection**. "
-        "Les ✅ ouvrent le fichier déjà publié ; clique **?** à côté d’un audio pour la voix TTS. "
+        "Les ✅ ouvrent le fichier déjà publié ; **?** = voix TTS ; "
+        "**🎶** = bande-son / ambiance (intro · nappe · outro). "
         "Règle d’or : synthèse **FR** puis localisation · lectures audio = lectionnaire natif."
     )
     st.markdown(_MEDIA_STATUS_TABLE_CSS, unsafe_allow_html=True)

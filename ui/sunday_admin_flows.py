@@ -41,6 +41,7 @@ from core.config import resolve_gemini_api_key
 from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
 from core.readings_cache_loader import load_liturgy_from_readings_cache
 from core.sunday_gemini_tts import (
+    last_tts_ambiance,
     last_tts_route,
     mark_vertex_tts_allowlist_blocked,
     tts_readings_audio_bytes,
@@ -50,6 +51,11 @@ from core.sunday_gemini_tts import (
 from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import update_loading_overlay
+
+
+def _audio_ambiance_sheet_flag() -> str:
+    """Colonne Sheets ``ambiance`` : 1 si mix bande-son, 0 sinon."""
+    return "1" if last_tts_ambiance() else "0"
 
 
 def _pdf_illustration_description_localized(
@@ -487,6 +493,7 @@ def _run_incremental_sunday_outputs(
                             "duration_tts_s": _sheet_seconds(duration_readings_tts_s),
                             "duration_upload_s": _sheet_seconds(duration_readings_upload_s),
                             "tts_route": readings_tts_route or "",
+                            "ambiance": _audio_ambiance_sheet_flag(),
                         },
                     )
                     readings_path_this_run = readings_path
@@ -1066,6 +1073,7 @@ def _run_generate_sunday_flow(
                 "duration_tts_s": _sheet_seconds(perf.get("audio_vertex_s")),
                 "duration_upload_s": _sheet_seconds(perf.get("upload_audio_s")),
                 "tts_route": audio_route or "",
+                "ambiance": _audio_ambiance_sheet_flag(),
             },
         )
 
@@ -1168,6 +1176,7 @@ def _run_generate_sunday_flow(
                         "duration_tts_s": _sheet_seconds(perf.get("readings_tts_s")),
                         "duration_upload_s": _sheet_seconds(perf.get("readings_upload_s")),
                         "tts_route": readings_tts_route or "",
+                        "ambiance": _audio_ambiance_sheet_flag(),
                     },
                 )
                 try:
@@ -1625,6 +1634,7 @@ def _run_publish_lang_from_fr_pivot(
                     "gcs_path": a_path,
                     "kind": "synthese",
                     "tts_route": last_tts_route() or "",
+                    "ambiance": _audio_ambiance_sheet_flag(),
                 },
             )
             done.append(f"audio synthèse {lg}")
@@ -1695,6 +1705,7 @@ def _run_publish_lang_from_fr_pivot(
                         "gcs_path": r_path,
                         "kind": "lectures",
                         "tts_route": last_tts_route() or "",
+                        "ambiance": _audio_ambiance_sheet_flag(),
                     },
                 )
                 done.append(f"audio lectures {lg}")

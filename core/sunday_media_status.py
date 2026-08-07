@@ -15,6 +15,7 @@ from core.locale_codes import DEFAULT_PREF_LANGUE, normalize_pref_langue
 from core.readings_cache_loader import rdc_zone_for_pref_langue
 from core.storage import blob_exists
 from core.sunday_existing_outputs import (
+    audio_ambiance_for_gen,
     audio_voice_for_gen,
     fetch_existing_sunday_bundle,
     has_readings_audio_for_gen,
@@ -43,6 +44,9 @@ class LangMediaStatus:
     readings_audio_voice: str | None = None
     synth_audio_voice_info: str | None = None
     readings_audio_voice_info: str | None = None
+    # True = bande-son / ambiance ; False = voix seule ; None = inconnu (anciens fichiers)
+    synth_audio_ambiance: bool | None = None
+    readings_audio_ambiance: bool | None = None
 
     @property
     def ready_count(self) -> int:
@@ -207,13 +211,21 @@ def media_status_for_lang(
 
     synth_voice: str | None = None
     readings_voice: str | None = None
+    synth_amb: bool | None = None
+    readings_amb: bool | None = None
     if gen_eid and (synth_audio or readings):
         if synth_audio:
             synth_voice = audio_voice_for_gen(
                 gs=gs, cfg=cfg, gen_entity_id=gen_eid, readings=False
             )
+            synth_amb = audio_ambiance_for_gen(
+                gs=gs, cfg=cfg, gen_entity_id=gen_eid, readings=False
+            )
         if readings:
             readings_voice = audio_voice_for_gen(
+                gs=gs, cfg=cfg, gen_entity_id=gen_eid, readings=True
+            )
+            readings_amb = audio_ambiance_for_gen(
                 gs=gs, cfg=cfg, gen_entity_id=gen_eid, readings=True
             )
 
@@ -241,6 +253,8 @@ def media_status_for_lang(
         )
         if readings_voice
         else None,
+        synth_audio_ambiance=synth_amb,
+        readings_audio_ambiance=readings_amb,
     )
 
 

@@ -329,11 +329,9 @@ def top_nav() -> str:
     email = str(st.session_state.get("auth_email_lc") or "").strip()
     is_admin = bool(st.session_state.get("admin_authenticated"))
     compact_nav = _use_compact_top_nav()
-    route_now = str(st.session_state.get("route") or "")
-    is_public_chrome = not route_now.startswith("admin")
 
-    # Logo + drapeaux langue (public) : barre pleine largeur sur mobile, sinon haut droite.
-    if is_public_chrome and compact_nav:
+    # Logo + drapeaux langue (public + debug admin) : pleine largeur mobile, sinon haut droite.
+    if compact_nav:
         try:
             from core.ui_locale import render_public_lang_flags
 
@@ -350,13 +348,12 @@ def top_nav() -> str:
             if logo_path.is_file():
                 st.image(str(logo_path), width=56)
         with right:
-            if is_public_chrome:
-                try:
-                    from core.ui_locale import render_public_lang_flags
+            try:
+                from core.ui_locale import render_public_lang_flags
 
-                    render_public_lang_flags()
-                except Exception:
-                    pass
+                render_public_lang_flags()
+            except Exception:
+                pass
 
     render_reading_comfort_expander()
 

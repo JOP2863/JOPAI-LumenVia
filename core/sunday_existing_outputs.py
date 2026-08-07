@@ -182,6 +182,52 @@ def audio_voice_for_gen(
     readings: bool,
 ) -> str | None:
     """Nom de voix TTS (table ``audio``) pour synthèse ou lectures d’une génération."""
+    row = _latest_audio_row_for_gen(
+        gs=gs, cfg=cfg, gen_entity_id=gen_entity_id, readings=readings
+    )
+    if not row:
+        return None
+    v = str(row.get("voice") or "").strip()
+    return v or None
+
+
+def audio_ambiance_for_gen(
+    *,
+    gs: object,
+    cfg: object,
+    gen_entity_id: str,
+    readings: bool,
+) -> bool | None:
+    """
+    True / False si la colonne ``ambiance`` est renseignée ; ``None`` si inconnu
+    (anciennes lignes avant suivi bande-son).
+    """
+    row = _latest_audio_row_for_gen(
+        gs=gs, cfg=cfg, gen_entity_id=gen_entity_id, readings=readings
+    )
+    if not row:
+        return None
+    raw = str(row.get("ambiance") or "").strip().casefold()
+    if not raw:
+        # Ancien marquage éventuel dans tts_route
+        route = str(row.get("tts_route") or "").casefold()
+        if "+ambiance" in route or "|amb" in route:
+            return True
+        return None
+    if raw in ("1", "oui", "yes", "true", "x", "ambiance"):
+        return True
+    if raw in ("0", "non", "no", "false"):
+        return False
+    return None
+
+
+def _latest_audio_row_for_gen(
+    *,
+    gs: object,
+    cfg: object,
+    gen_entity_id: str,
+    readings: bool,
+) -> dict | None:
     ge = str(gen_entity_id or "").strip()
     if not ge:
         return None
@@ -201,9 +247,7 @@ def audio_voice_for_gen(
         ]
         if not rows:
             return None
-        aud = sorted(rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
-        v = str(aud.get("voice") or "").strip()
-        return v or None
+        return sorted(rows, key=lambda r: str(r.get("created_at") or ""), reverse=True)[0]
     except Exception:
         return None
 

@@ -815,6 +815,8 @@ def default_tables() -> list[TableSpec]:
                     "duration_tts_s",
                     "duration_upload_s",
                     "tts_route",
+                    # 1 = mix intro/bed/outro appliqué (bibliothèque ou secours synthétique)
+                    "ambiance",
                 ]
             ),
         ),

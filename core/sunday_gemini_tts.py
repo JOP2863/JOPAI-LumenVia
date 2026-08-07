@@ -42,6 +42,7 @@ _VERTEX_TTS_MODELS = (
 )
 
 _LAST_TTS_ROUTE_SESSION_KEY = "lumenvia_last_tts_route"
+_LAST_TTS_AMBIANCE_SESSION_KEY = "lumenvia_last_tts_ambiance"
 
 # Pause entre sections liturgiques / sous-sections de synthèse.
 _LITURGY_SECTION_PAUSE_MS = 750
@@ -486,11 +487,30 @@ def last_tts_route() -> str:
         return ""
 
 
+def last_tts_ambiance() -> bool:
+    """True si le dernier TTS a reçu un mix intro/bed/outro (session Streamlit)."""
+    try:
+        import streamlit as st  # type: ignore
+
+        return bool(st.session_state.get(_LAST_TTS_AMBIANCE_SESSION_KEY))
+    except Exception:
+        return False
+
+
 def _set_last_tts_route(route: str) -> None:
     try:
         import streamlit as st  # type: ignore
 
         st.session_state[_LAST_TTS_ROUTE_SESSION_KEY] = route
+    except Exception:
+        pass
+
+
+def _set_last_tts_ambiance(applied: bool) -> None:
+    try:
+        import streamlit as st  # type: ignore
+
+        st.session_state[_LAST_TTS_AMBIANCE_SESSION_KEY] = bool(applied)
     except Exception:
         pass
 
@@ -771,6 +791,7 @@ def tts_spoken_audio_bytes(
     elif not route:
         route = "gemini_api"
     _set_last_tts_route(route)
+    _set_last_tts_ambiance(False)
     b_out, mime_out, ext_out = normalize_audio_bytes(audio_bytes=joined, mime_type="audio/wav")
     if apply_ambiance and mime_out == "audio/wav" and b_out[:4] == b"RIFF":
         try:
@@ -782,7 +803,7 @@ def tts_spoken_audio_bytes(
                 sunday_date=sunday_date,
             )
         except Exception:
-            pass
+            _set_last_tts_ambiance(False)
     return b_out, mime_out, ext_out
 
 
@@ -821,7 +842,7 @@ def _maybe_dress_with_ambiance(
         except Exception:
             gcs = None
     seed = f"{sunday_date.isoformat() if sunday_date else ''}|{cible}|{pref_langue or 'FR'}"
-    dressed, _meta = dress_tts_with_library(
+    dressed, meta = dress_tts_with_library(
         speech_wav,
         gcs=gcs,
         bucket_name=bucket or "",
@@ -831,6 +852,13 @@ def _maybe_dress_with_ambiance(
         seed=seed,
         allow_synthetic_fallback=True,
     )
+    applied = bool(
+        (meta or {}).get("intro")
+        or (meta or {}).get("outro")
+        or (meta or {}).get("bed")
+        or (meta or {}).get("source")
+    )
+    _set_last_tts_ambiance(applied)
     return dressed
 
 

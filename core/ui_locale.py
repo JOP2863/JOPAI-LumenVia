@@ -72,16 +72,19 @@ def switch_public_lang(code: object | None, *, sync_sunday: bool = True) -> str:
 
 
 def render_public_lang_flags() -> None:
-    """Barre de drapeaux (haut droite) — public uniquement ; admin non concerné."""
-    route = str(st.session_state.get("route") or "")
-    if route.startswith("admin"):
-        return
+    """Barre de drapeaux (haut droite) — chrome public + debug admin.
+
+    L’admin reste rédigé en français ; changer la langue ici n’affecte que le chrome
+    public (nav, titres pages publiques, etc.) — utile pour tester le multilangue.
+    """
     try:
-        from core.sunday_view_locale import lang_flag_html
+        from core.sunday_view_locale import LANG_FLAGS, lang_flag_html
     except Exception:
+        LANG_FLAGS = {}  # type: ignore[assignment]
         lang_flag_html = None  # type: ignore[assignment]
 
     cur = get_ui_lang()
+    is_admin = bool(st.session_state.get("admin_authenticated"))
     st.markdown(
         """
 <style>
@@ -91,59 +94,78 @@ div[class*="st-key-lv_pub_lang_flags"] {
   width: 100%;
 }
 div[class*="st-key-lv_pub_lang_flags"] [data-testid="stHorizontalBlock"] {
-  gap: 0.25rem !important;
+  gap: 0.2rem !important;
   justify-content: flex-end !important;
 }
 div[class*="st-key-lv_pub_lang_flags"] [data-testid="column"] {
   flex: 0 0 auto !important;
   width: auto !important;
-  min-width: 2.1rem !important;
+  min-width: 1.85rem !important;
+  max-width: 2.2rem !important;
+}
+/* Drapeau seul : pas de code langue ; bouton transparent superposé. */
+div[class*="st-key-lv_pub_lang_flags"] [data-testid="stMarkdown"] {
+  margin-bottom: -2.05rem !important;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+div[class*="st-key-lv_pub_lang_flags"] .lv-flag-only img {
+  margin: 0 auto !important;
+  display: block;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(52, 46, 41, 0.14);
 }
 div[class*="st-key-lv_pub_lang_flags"] button {
-  min-height: 2rem !important;
-  padding: 0.2rem 0.25rem !important;
-  border-radius: 8px !important;
-  line-height: 1 !important;
+  position: relative;
+  z-index: 2;
+  min-height: 1.85rem !important;
+  height: 1.85rem !important;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  border: 2px solid transparent !important;
+  box-shadow: none !important;
 }
 div[class*="st-key-lv_pub_lang_flags"] button p,
 div[class*="st-key-lv_pub_lang_flags"] button span {
-  font-size: 0.72rem !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.02em !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
 }
-div[class*="st-key-lv_pub_lang_flags"] [data-testid="stMarkdown"] {
-  margin-bottom: -0.45rem !important;
-  text-align: center;
+div[class*="st-key-lv_pub_lang_flags"] button[kind="primary"],
+div[class*="st-key-lv_pub_lang_flags"] button[data-testid="baseButton-primary"] {
+  border-color: #0d9488 !important;
+  background: rgba(13, 148, 136, 0.12) !important;
 }
-div[class*="st-key-lv_pub_lang_flags"] .lv-flag-btn-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  line-height: 1;
-}
-div[class*="st-key-lv_pub_lang_flags"] .lv-flag-btn-label img {
-  margin: 0 auto !important;
-  display: block;
-  box-shadow: 0 0 0 1px rgba(52, 46, 41, 0.12);
+div[class*="st-key-lv_pub_lang_flags"] button:hover {
+  border-color: rgba(13, 148, 136, 0.55) !important;
+  background: rgba(13, 148, 136, 0.08) !important;
 }
 </style>
         """.strip(),
         unsafe_allow_html=True,
     )
     with st.container(key="lv_pub_lang_flags"):
+        if is_admin:
+            st.caption("Langue chrome public (debug)")
         cols = st.columns(len(SUPPORTED_UI_LANGS), gap="small")
         for col, lg in zip(cols, SUPPORTED_UI_LANGS):
             with col:
                 help_lbl = LANG_NATIVE_LABEL.get(lg, lg)
-                # Libellé bouton : drapeau CDN (HTML non supporté) → code + image au-dessus.
+                if is_admin:
+                    help_lbl = f"{help_lbl} — chrome public seulement (admin reste FR)"
                 if lang_flag_html is not None:
                     st.markdown(
-                        f'<div class="lv-flag-btn-label">{lang_flag_html(lg, height=16)}</div>',
+                        f'<div class="lv-flag-only">{lang_flag_html(lg, height=18)}</div>',
                         unsafe_allow_html=True,
                     )
+                # Libellé invisible : le drapeau CDN ci-dessus est le seul visuel.
+                # Repli emoji si l’image CDN échoue côté accessibilité (title/help).
+                _emoji = (LANG_FLAGS or {}).get(lg) or ""
                 clicked = st.button(
-                    lg,
+                    _emoji or "\u200b",
                     key=f"lv_pub_lang_{lg}",
                     help=help_lbl,
                     type="primary" if lg == cur else "secondary",
