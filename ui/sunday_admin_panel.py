@@ -131,49 +131,70 @@ _MEDIA_STATUS_TABLE_CSS = """
   cursor: help;
   opacity: 0.92;
 }
-/* Tableau HTML — colonnes stables mobile (scroll horizontal si besoin). */
-.lv-ml-matrix-wrap {
+.lv-ml-miss {
+  color: #9a8b6e;
+  font-size: 0.75rem;
+}
+/* Matrice widgets : une ligne = une langue ; scroll X mobile (pas de wrap). */
+div[class*="st-key-lv_ml_matrix"] {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
-  margin: 0 0 0.6rem 0;
+  margin: 0 0 0.55rem 0;
+  padding: 0.35rem 0.4rem 0.2rem 0.4rem;
   border: 1px solid rgba(212, 175, 55, 0.35);
   border-radius: 10px;
   background: rgba(255, 253, 246, 0.65);
 }
-table.lv-ml-matrix {
-  width: 100%;
-  min-width: 28rem;
-  border-collapse: collapse;
-  table-layout: fixed;
-  font-size: 0.82rem;
+div[class*="st-key-lv_ml_matrix"] > div {
+  min-width: 32rem;
 }
-table.lv-ml-matrix th,
-table.lv-ml-matrix td {
-  padding: 0.45rem 0.35rem;
-  text-align: center;
-  vertical-align: middle;
-  border-bottom: 1px solid rgba(212, 175, 55, 0.22);
-  white-space: nowrap;
+div[class*="st-key-lv_ml_matrix"] [data-testid="stHorizontalBlock"] {
+  flex-wrap: nowrap !important;
+  gap: 0.25rem !important;
+  align-items: center !important;
 }
-table.lv-ml-matrix th {
+div[class*="st-key-lv_ml_matrix"] [data-testid="column"] {
+  min-width: 0 !important;
+}
+div[class*="st-key-lv_ml_matrix"] [data-testid="stMarkdown"] {
+  margin-bottom: 0 !important;
+}
+div[class*="st-key-lv_ml_matrix"] .lv-ml-head {
   font-weight: 700;
   color: #6b5918;
-  background: rgba(180, 140, 60, 0.12);
   font-size: 0.72rem;
+  text-align: center;
+  line-height: 1.2;
+  white-space: nowrap;
 }
-table.lv-ml-matrix th:first-child,
-table.lv-ml-matrix td:first-child {
+div[class*="st-key-lv_ml_matrix"] .lv-ml-head-lang {
   text-align: left;
-  padding-left: 0.55rem;
-  width: 4.5rem;
+  padding-left: 0.15rem;
 }
-table.lv-ml-matrix tr:last-child td {
-  border-bottom: none;
+div[class*="st-key-lv_ml_matrix"] .lv-ml-cell {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.15rem;
+  min-height: 1.45rem;
+  white-space: nowrap;
 }
-table.lv-ml-matrix .lv-ml-miss {
-  color: #9a8b6e;
-  font-size: 0.75rem;
+div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] {
+  min-height: 0 !important;
+  margin: 0 !important;
+}
+div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] label {
+  gap: 0 !important;
+  justify-content: center !important;
+  min-height: 1.2rem !important;
+}
+div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] p {
+  display: none !important;
+}
+div[class*="st-key-lv_ml_matrix"] [data-testid="stCaptionContainer"] {
+  margin-top: 0.15rem !important;
 }
 </style>
 """
@@ -196,33 +217,66 @@ def _matrix_cell_html(
     return '<span class="lv-ml-miss">—</span>'
 
 
-def _render_media_status_html_table(
+def _render_media_status_matrix(
     *,
     rows: list[LangMediaStatus],
     current_lang: str,
+    date_str: str,
+    fr_has_text: bool,
 ) -> None:
-    """Matrice médias en HTML (pas st.columns) — fiable sur mobile."""
+    """Matrice médias : statut + case à cocher dans chaque cellule (produire / régénérer)."""
     headers = ("Langue", "Synthèse", "Audio synthèse", "Audio lectures", "PDF")
-    thead = "".join(f"<th>{html_escape(h)}</th>" for h in headers)
-    body_rows: list[str] = []
-    for r in rows:
-        mark = " ←" if r.lang == current_lang else ""
-        lang_cell = (
-            f"{lang_flag_html(r.lang, height=14)}"
-            f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}"
-        )
-        cells = [f"<td>{lang_cell}</td>"]
-        for kind, _attr, icon in _MEDIA_KINDS:
-            cells.append(f"<td>{_matrix_cell_html(row=r, kind=kind, icon=icon)}</td>")
-        body_rows.append("<tr>" + "".join(cells) + "</tr>")
-    html = (
-        '<div class="lv-ml-matrix-wrap">'
-        '<table class="lv-ml-matrix" role="table">'
-        f"<thead><tr>{thead}</tr></thead>"
-        f"<tbody>{''.join(body_rows)}</tbody>"
-        "</table></div>"
-    )
-    st.markdown(html, unsafe_allow_html=True)
+    col_weights = [1.05, 1.0, 1.15, 1.15, 0.95]
+
+    with st.container(key="lv_ml_matrix"):
+        head = st.columns(col_weights, gap="small")
+        for i, title in enumerate(headers):
+            cls = "lv-ml-head lv-ml-head-lang" if i == 0 else "lv-ml-head"
+            with head[i]:
+                st.markdown(
+                    f'<div class="{cls}">{html_escape(title)}</div>',
+                    unsafe_allow_html=True,
+                )
+
+        for r in rows:
+            cols = st.columns(col_weights, gap="small")
+            mark = " ←" if r.lang == current_lang else ""
+            with cols[0]:
+                st.markdown(
+                    f'{lang_flag_html(r.lang, height=14)}'
+                    f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}",
+                    unsafe_allow_html=True,
+                )
+            for i, (kind, _attr, icon) in enumerate(_MEDIA_KINDS):
+                ready = _status_ready(r, kind)
+                help_txt = _KIND_LABELS.get(kind, kind)
+                if ready:
+                    help_txt += " — cocher pour régénérer"
+                else:
+                    help_txt += " — cocher pour produire"
+                    if (
+                        not fr_has_text
+                        and r.lang != "FR"
+                        and kind in _KINDS_NEED_FR_PIVOT
+                    ):
+                        help_txt += " (nécessitera la synthèse FR pivot)"
+                with cols[i + 1]:
+                    status_col, check_col = st.columns([4, 1], gap="small")
+                    with status_col:
+                        st.markdown(
+                            f'<div class="lv-ml-cell">'
+                            f"{_matrix_cell_html(row=r, kind=kind, icon=icon)}"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with check_col:
+                        st.checkbox(
+                            "↺" if ready else "+",
+                            value=False,
+                            key=_cell_key(date_str, r.lang, kind),
+                            help=help_txt,
+                            label_visibility="collapsed",
+                        )
 
 
 def _voice_info_for_cell(row: LangMediaStatus, kind: str) -> str | None:
@@ -499,9 +553,8 @@ def _sunday_multilang_admin_fragment(
 
     st.markdown("##### Médias par langue")
     st.caption(
-        "Coche les médias à **produire** ou à **régénérer**, puis lance la sélection. "
-        "Les ✅ ouvrent le fichier publié ; **?** = voix TTS ; "
-        "**🎶** = bande-son / ambiance (intro · nappe · outro). "
+        "Dans chaque case : ✅ / picto = déjà publié (lien) · cocher = **produire** ou **régénérer**. "
+        "**?** = voix TTS · **🎶** = bande-son. "
         "Règle d’or : synthèse **FR** puis localisation · lectures audio = lectionnaire natif."
     )
     st.markdown(_MEDIA_STATUS_TABLE_CSS, unsafe_allow_html=True)
@@ -525,12 +578,6 @@ def _sunday_multilang_admin_fragment(
         for kind, _attr, _icon in _MEDIA_KINDS
         if not _status_ready(r, kind)
     ]
-    ready_keys = [
-        _cell_key(date_str, r.lang, kind)
-        for r in rows
-        for kind, _attr, _icon in _MEDIA_KINDS
-        if _status_ready(r, kind)
-    ]
     if st.session_state.pop(f"_adm_ml_select_all_{date_str}", False):
         for k in all_keys:
             st.session_state[k] = True
@@ -538,59 +585,11 @@ def _sunday_multilang_admin_fragment(
         for k in all_keys:
             st.session_state[k] = False
 
-    # HTML table (pas st.columns) — colonnes stables sur mobile / Streamlit Cloud.
-    _render_media_status_html_table(rows=rows, current_lang=current_lang)
-
-    def _render_kind_checkboxes(
-        *,
-        title: str,
-        only_ready: bool,
-        expanded: bool,
-    ) -> None:
-        keys_here = ready_keys if only_ready else missing_keys
-        if not keys_here:
-            return
-        with st.expander(title, expanded=expanded):
-            for r in rows:
-                kinds_here = [
-                    (kind, icon)
-                    for kind, _attr, icon in _MEDIA_KINDS
-                    if _status_ready(r, kind) == only_ready
-                ]
-                if not kinds_here:
-                    continue
-                st.markdown(
-                    f"{lang_flag_html(r.lang, height=14)} **{html_escape(r.lang)}**",
-                    unsafe_allow_html=True,
-                )
-                cols_m = st.columns(min(4, len(kinds_here)))
-                for i, (kind, icon) in enumerate(kinds_here):
-                    help_txt = _KIND_LABELS.get(kind, kind)
-                    if only_ready:
-                        help_txt += " — régénérer (nouvelle version)"
-                    elif (
-                        not fr_has_text
-                        and r.lang != "FR"
-                        and kind in _KINDS_NEED_FR_PIVOT
-                    ):
-                        help_txt += " (nécessitera la synthèse FR pivot)"
-                    with cols_m[i % len(cols_m)]:
-                        st.checkbox(
-                            f"{icon} {_KIND_LABELS.get(kind, kind)}",
-                            value=False,
-                            key=_cell_key(date_str, r.lang, kind),
-                            help=help_txt,
-                        )
-
-    _render_kind_checkboxes(
-        title="Sélectionner les médias manquants à produire",
-        only_ready=False,
-        expanded=bool(missing_keys),
-    )
-    _render_kind_checkboxes(
-        title="Régénérer des médias déjà publiés",
-        only_ready=True,
-        expanded=not missing_keys and bool(ready_keys),
+    _render_media_status_matrix(
+        rows=rows,
+        current_lang=current_lang,
+        date_str=date_str,
+        fr_has_text=fr_has_text,
     )
 
     selected, force_kinds, auto_notes, _auto_fr = collect_table_selection(
@@ -613,9 +612,7 @@ def _sunday_multilang_admin_fragment(
     elif n_missing:
         st.caption(f"Aucun média sélectionné · **{n_missing}** manquant(s).")
     else:
-        st.caption(
-            "Tous les médias sont déjà publiés — ouvre **Régénérer** pour en reproduire."
-        )
+        st.caption("Tous publiés — coche une case du tableau pour régénérer.")
 
     b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
     with b_sel:
@@ -739,7 +736,7 @@ def render_sunday_multilang_admin(
     include_catechese_bridge: bool = True,
     include_catechese_pdf: bool = True,
 ) -> None:
-    """Tableau des livrables : ✅ + lien si prêt, case à cocher si manquant."""
+    """Tableau des livrables : ✅ + picto + case (produire / régénérer) dans chaque cellule."""
     _sunday_multilang_admin_fragment(
         cfg=cfg,
         gs=gs,
