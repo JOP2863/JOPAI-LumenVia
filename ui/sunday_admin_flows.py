@@ -1461,9 +1461,10 @@ def _run_publish_lang_from_fr_pivot(
     need_synth_audio = generate_synth_audio and (force or not status.synth_audio)
     need_readings = generate_readings_audio and (force or not status.readings_audio)
     need_pdf = generate_pdf and (force or not status.pdf)
-    need_text = (generate_synth_text or need_synth_audio or need_pdf) and (
-        force or not status.synth_text
-    )
+    # Texte : seulement si demandé explicitement, ou manquant alors qu’audio synthèse / PDF en a besoin.
+    need_text = generate_synth_text and (force or not status.synth_text)
+    if (need_synth_audio or need_pdf) and not status.synth_text:
+        need_text = True
 
     if not (need_text or need_synth_audio or need_readings or need_pdf):
         return {
@@ -2023,14 +2024,20 @@ def _run_multilang_from_cell_selection(
     pct: int = 20,
     include_takeaways: bool = True,
     include_catechese_bridge: bool = True,
+    force_kinds: set[tuple[str, str]] | None = None,
     _overlay: object | None = None,
 ) -> dict[str, str]:
     """
     Génération granulaire depuis le tableau (paires langue × média).
+
+    ``force_kinds`` : paires déjà publiées à régénérer (ex. retester la bande-son).
     """
     from core.readings_cache_loader import rdc_zone_for_pref_langue
 
     day = str(getattr(identity, "date", "") or "").strip()[:10]
+    force_set = {
+        (coerce_liturgy_pref_langue(a), str(b)) for a, b in (force_kinds or set())
+    }
     by_sel: dict[str, set[str]] = {}
     for lg0, kind in selected:
         lg = coerce_liturgy_pref_langue(lg0)
@@ -2051,13 +2058,18 @@ def _run_multilang_from_cell_selection(
         for lg, kinds in by_sel.items()
     )
     fr_kinds = by_sel.get("FR", set())
+    force_fr_text = ("FR", "synth_text") in force_set
 
-    if needs_fr_pivot and not fr_text.strip():
+    if needs_fr_pivot and (not fr_text.strip() or force_fr_text):
         if _overlay is not None:
             _flow_overlay_step(
                 _overlay,
                 "LumenVia · FR — rédaction synthèse (Vertex)…",
-                hint="Pivot français requis.",
+                hint=(
+                    "Pivot français — régénération."
+                    if force_fr_text
+                    else "Pivot français requis."
+                ),
             )
         total_words = sum(
             len(str(getattr(texts, k, "") or "").split())
@@ -2068,6 +2080,8 @@ def _run_multilang_from_cell_selection(
                 "evangile",
             )
         )
+        gen_fr_pdf = "pdf" in fr_kinds
+        gen_fr_readings = "readings_audio" in fr_kinds
         fr_flow = _run_generate_sunday_flow(
             _overlay=_overlay or st.empty(),
             identity=identity,
@@ -2077,8 +2091,8 @@ def _run_multilang_from_cell_selection(
             pct=int(pct),
             include_takeaways=include_takeaways,
             include_catechese_bridge=include_catechese_bridge,
-            generate_pdf="pdf" in fr_kinds,
-            generate_readings_audio="readings_audio" in fr_kinds,
+            generate_pdf=gen_fr_pdf,
+            generate_readings_audio=gen_fr_readings,
             debug=False,
             cfg=cfg,
             pref_langue="FR",
@@ -2092,8 +2106,13 @@ def _run_multilang_from_cell_selection(
         fr_text, _fr_eid = _load_fr_master_synthesis_text(
             gs=gs, gcs=gcs, cfg=cfg, date_str=day
         )
-        # FR text + optional media already handled by generate flow — drop synth_text from FR set
+        # Le flux Vertex produit texte + audio synthèse (+ PDF/lectures si demandés).
         fr_kinds.discard("synth_text")
+        fr_kinds.discard("synth_audio")
+        if gen_fr_pdf:
+            fr_kinds.discard("pdf")
+        if gen_fr_readings:
+            fr_kinds.discard("readings_audio")
         if not fr_kinds:
             by_sel.pop("FR", None)
         else:
@@ -2121,7 +2140,7 @@ def _run_multilang_from_cell_selection(
                 f"LumenVia · {lg} ({i}/{len(order)}) — {' · '.join(labels)}…",
                 hint="Progression détaillée : localisation / TTS / PDF selon la sélection.",
             )
-        # Si FR vient d'être généré via Vertex et qu'il ne reste rien, skip
+        force_lg = any((lg, k) in force_set for k in kinds)
         res = _run_publish_lang_from_fr_pivot(
             cfg=cfg,
             gs=gs,
@@ -2135,7 +2154,7 @@ def _run_multilang_from_cell_selection(
             generate_synth_audio="synth_audio" in kinds,
             generate_pdf="pdf" in kinds,
             include_catechese_pdf=include_catechese_pdf,
-            force=False,
+            force=force_lg,
             _overlay=_overlay,
         )
         messages.append(str(res.get("message") or lg))

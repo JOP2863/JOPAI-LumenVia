@@ -1,4 +1,4 @@
-"""Panneau admin Dimanche — tableau médias interactif (cases à cocher sur les manquants)."""
+"""Panneau admin Dimanche — tableau médias (produire / régénérer par case)."""
 
 from __future__ import annotations
 
@@ -296,20 +296,23 @@ def collect_table_selection(
     *,
     rows: list[LangMediaStatus],
     date_str: str,
-) -> tuple[list[tuple[str, str]], list[str], bool]:
+) -> tuple[list[tuple[str, str]], set[tuple[str, str]], list[str], bool]:
     """
-    Lit les cases cochées du tableau.
+    Lit les cases cochées du tableau (manquants + régénérations).
 
-    Retourne ``(sélection [(lang, kind)], notes, auto_fr_synth)``.
+    Retourne ``(sélection, force_kinds, notes, auto_fr_synth)``.
+    ``force_kinds`` = paires déjà publiées cochées pour régénération.
     """
     by_lang = {r.lang: r for r in rows}
     selected: list[tuple[str, str]] = []
+    force_kinds: set[tuple[str, str]] = set()
     for r in rows:
         for kind, _attr, _icon in _MEDIA_KINDS:
-            if _status_ready(r, kind):
+            if not bool(st.session_state.get(_cell_key(date_str, r.lang, kind), False)):
                 continue
-            if bool(st.session_state.get(_cell_key(date_str, r.lang, kind), False)):
-                selected.append((r.lang, kind))
+            selected.append((r.lang, kind))
+            if _status_ready(r, kind):
+                force_kinds.add((r.lang, kind))
 
     notes: list[str] = []
     auto_fr = False
@@ -346,21 +349,25 @@ def collect_table_selection(
         if item not in seen:
             seen.add(item)
             ordered.append(item)
-    return ordered, notes, auto_fr
+    return ordered, force_kinds, notes, auto_fr
 
 
 def plan_from_table_selection(
     *,
     rows: list[LangMediaStatus],
     selected: list[tuple[str, str]],
+    force_kinds: set[tuple[str, str]] | None = None,
 ) -> list[str]:
     by_lang = {r.lang: r for r in rows}
+    force = force_kinds or set()
     lines: list[str] = []
     for lg, kind in selected:
         label = _KIND_LABELS.get(kind, kind)
         row = by_lang.get(lg)
         extra = ""
-        if lg == "FR" and kind == "synth_text" and row and not row.synth_text:
+        if (lg, kind) in force:
+            extra = " — **régénération**"
+        elif lg == "FR" and kind == "synth_text" and row and not row.synth_text:
             extra = " — rédaction Vertex (pivot)"
         elif lg != "FR" and kind == "synth_text":
             extra = " — localisation depuis FR"
@@ -421,6 +428,15 @@ def _sunday_multilang_admin_fragment(
             (str(a), str(b))
             for a, b in (tuple(x) if not isinstance(x, tuple) else x for x in sel_now)
         ]
+        force_raw = list(
+            st.session_state.pop(f"_adm_ml_table_force_{date_str}", None) or []
+        )
+        force_now = {
+            (str(a), str(b))
+            for a, b in (
+                tuple(x) if not isinstance(x, tuple) else x for x in force_raw
+            )
+        }
         if gcs is None:
             st.session_state[_flash_key] = ("error", "GCS indisponible.")
         elif not sel_now:
@@ -453,6 +469,7 @@ def _sunday_multilang_admin_fragment(
                     pct=pct_run,
                     include_takeaways=take_run,
                     include_catechese_bridge=cate_run,
+                    force_kinds=force_now,
                     _overlay=ov,
                 )
                 level = str(result.get("level") or "info")
@@ -482,8 +499,8 @@ def _sunday_multilang_admin_fragment(
 
     st.markdown("##### Médias par langue")
     st.caption(
-        "Coche les cases des médias à produire, puis **Générer la sélection**. "
-        "Les ✅ ouvrent le fichier déjà publié ; **?** = voix TTS ; "
+        "Coche les médias à **produire** ou à **régénérer**, puis lance la sélection. "
+        "Les ✅ ouvrent le fichier publié ; **?** = voix TTS ; "
         "**🎶** = bande-son / ambiance (intro · nappe · outro). "
         "Règle d’or : synthèse **FR** puis localisation · lectures audio = lectionnaire natif."
     )
@@ -497,41 +514,61 @@ def _sunday_multilang_admin_fragment(
     fr_row = by_lang.get("FR")
     fr_has_text = bool(fr_row and fr_row.synth_text)
 
+    all_keys = [
+        _cell_key(date_str, r.lang, kind)
+        for r in rows
+        for kind, _attr, _icon in _MEDIA_KINDS
+    ]
     missing_keys = [
         _cell_key(date_str, r.lang, kind)
         for r in rows
         for kind, _attr, _icon in _MEDIA_KINDS
         if not _status_ready(r, kind)
     ]
+    ready_keys = [
+        _cell_key(date_str, r.lang, kind)
+        for r in rows
+        for kind, _attr, _icon in _MEDIA_KINDS
+        if _status_ready(r, kind)
+    ]
     if st.session_state.pop(f"_adm_ml_select_all_{date_str}", False):
-        for k in missing_keys:
+        for k in all_keys:
             st.session_state[k] = True
     if st.session_state.pop(f"_adm_ml_deselect_all_{date_str}", False):
-        for k in missing_keys:
+        for k in all_keys:
             st.session_state[k] = False
 
     # HTML table (pas st.columns) — colonnes stables sur mobile / Streamlit Cloud.
     _render_media_status_html_table(rows=rows, current_lang=current_lang)
 
-    # Cases à cocher hors tableau (évite le wrap Streamlit des colonnes).
-    if missing_keys:
-        with st.expander("Sélectionner les médias manquants à produire", expanded=True):
+    def _render_kind_checkboxes(
+        *,
+        title: str,
+        only_ready: bool,
+        expanded: bool,
+    ) -> None:
+        keys_here = ready_keys if only_ready else missing_keys
+        if not keys_here:
+            return
+        with st.expander(title, expanded=expanded):
             for r in rows:
-                miss_kinds = [
+                kinds_here = [
                     (kind, icon)
                     for kind, _attr, icon in _MEDIA_KINDS
-                    if not _status_ready(r, kind)
+                    if _status_ready(r, kind) == only_ready
                 ]
-                if not miss_kinds:
+                if not kinds_here:
                     continue
                 st.markdown(
                     f"{lang_flag_html(r.lang, height=14)} **{html_escape(r.lang)}**",
                     unsafe_allow_html=True,
                 )
-                cols_m = st.columns(min(4, len(miss_kinds)))
-                for i, (kind, icon) in enumerate(miss_kinds):
+                cols_m = st.columns(min(4, len(kinds_here)))
+                for i, (kind, icon) in enumerate(kinds_here):
                     help_txt = _KIND_LABELS.get(kind, kind)
-                    if (
+                    if only_ready:
+                        help_txt += " — régénérer (nouvelle version)"
+                    elif (
                         not fr_has_text
                         and r.lang != "FR"
                         and kind in _KINDS_NEED_FR_PIVOT
@@ -545,25 +582,47 @@ def _sunday_multilang_admin_fragment(
                             help=help_txt,
                         )
 
-    selected, auto_notes, _auto_fr = collect_table_selection(rows=rows, date_str=date_str)
+    _render_kind_checkboxes(
+        title="Sélectionner les médias manquants à produire",
+        only_ready=False,
+        expanded=bool(missing_keys),
+    )
+    _render_kind_checkboxes(
+        title="Régénérer des médias déjà publiés",
+        only_ready=True,
+        expanded=not missing_keys and bool(ready_keys),
+    )
+
+    selected, force_kinds, auto_notes, _auto_fr = collect_table_selection(
+        rows=rows, date_str=date_str
+    )
     if auto_notes:
         for note in auto_notes:
             st.info(note, icon="ℹ️")
 
     n_sel = len(selected)
+    n_force = len(force_kinds)
     n_missing = len(missing_keys)
-    st.caption(
-        f"**{n_sel}** / {n_missing} média(s) manquant(s) sélectionné(s)."
-        if n_missing
-        else "Tous les médias sont déjà publiés."
-    )
+    if n_sel:
+        parts = [f"**{n_sel}** média(s) sélectionné(s)"]
+        if n_force:
+            parts.append(f"dont **{n_force}** en régénération")
+        if n_missing:
+            parts.append(f"· {n_missing} encore manquant(s) au total")
+        st.caption(" — ".join(parts) + ".")
+    elif n_missing:
+        st.caption(f"Aucun média sélectionné · **{n_missing}** manquant(s).")
+    else:
+        st.caption(
+            "Tous les médias sont déjà publiés — ouvre **Régénérer** pour en reproduire."
+        )
 
     b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
     with b_sel:
         if st.button(
             "Tout sélectionner",
             key=f"adm_ml_table_sel_all_{date_str}",
-            disabled=not missing_keys,
+            disabled=not all_keys,
             use_container_width=True,
         ):
             st.session_state[f"_adm_ml_select_all_{date_str}"] = True
@@ -572,7 +631,7 @@ def _sunday_multilang_admin_fragment(
         if st.button(
             "Tout désélectionner",
             key=f"adm_ml_table_desel_all_{date_str}",
-            disabled=not missing_keys,
+            disabled=not all_keys,
             use_container_width=True,
         ):
             st.session_state[f"_adm_ml_deselect_all_{date_str}"] = True
@@ -590,7 +649,7 @@ def _sunday_multilang_admin_fragment(
     @st.dialog("Confirmer la génération")
     def _confirm_dialog() -> None:
         plan = list(st.session_state.get(_plan_key) or [])
-        st.markdown(f"Dimanche **{date_str}** — éléments à produire :")
+        st.markdown(f"Dimanche **{date_str}** — éléments à produire / régénérer :")
         if not plan:
             st.info("Aucune sélection.")
         else:
@@ -613,12 +672,18 @@ def _sunday_multilang_admin_fragment(
             if st.button("Annuler", key=f"adm_ml_table_dlg_no_{date_str}"):
                 st.session_state.pop(_plan_key, None)
                 st.session_state.pop(_snap_key, None)
+                st.session_state.pop(f"_adm_ml_table_force_{date_str}", None)
                 st.rerun(scope="app")
 
     gen_disabled = gcs is None or not selected
     with b_gen:
+        gen_label = (
+            "Régénérer la sélection"
+            if force_kinds and len(force_kinds) == len(selected)
+            else "Générer la sélection"
+        )
         if st.button(
-            "Générer la sélection",
+            gen_label,
             type="primary",
             key=f"adm_ml_table_gen_{date_str}",
             disabled=gen_disabled,
@@ -628,9 +693,10 @@ def _sunday_multilang_admin_fragment(
                 st.error("GCS indisponible.")
             else:
                 st.session_state[_plan_key] = plan_from_table_selection(
-                    rows=rows, selected=selected
+                    rows=rows, selected=selected, force_kinds=force_kinds
                 )
                 st.session_state[_snap_key] = list(selected)
+                st.session_state[f"_adm_ml_table_force_{date_str}"] = list(force_kinds)
                 _confirm_dialog()
 
     with st.expander("Options de rédaction FR (si pivot à créer)", expanded=False):
