@@ -36,6 +36,10 @@ _MONTHS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Alias public — réutilisé par le chrome (ex. mini-calendrier « Dimanche ») pour éviter
+# de dupliquer les noms de mois par langue.
+MONTHS_BY_LANG = _MONTHS
+
 _WEEKDAYS: dict[str, tuple[str, ...]] = {
     "FR": ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"),
     "DE": ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"),

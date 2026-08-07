@@ -801,35 +801,35 @@ def _maybe_dress_with_ambiance(
     sid = str(getattr(cfg, "gsheet_id", "") or "").strip()
     bucket = str(getattr(cfg, "gcs_bucket_name", "") or "").strip()
     sa = getattr(cfg, "gcp_service_account", None) or {}
-    if not sid or not bucket or not sa:
-        return speech_wav
-    try:
-        gs = build_gspread_client(sa)
-        rows = fetch_records(
-            gspread_client=gs,
-            spreadsheet_id=sid,
-            table="audio_ambiance",
-            limit=0,
-            use_cache=True,
-        )
-    except Exception:
-        return speech_wav
-    clips = list_active_clips(rows)
-    if not clips:
-        return speech_wav
-    try:
-        gcs = build_gcs_client(sa)
-    except Exception:
-        return speech_wav
+    clips: list = []
+    gcs = None
+    if sid and bucket and sa:
+        try:
+            gs = build_gspread_client(sa)
+            rows = fetch_records(
+                gspread_client=gs,
+                spreadsheet_id=sid,
+                table="audio_ambiance",
+                limit=0,
+                use_cache=True,
+            )
+            clips = list_active_clips(rows)
+        except Exception:
+            clips = []
+        try:
+            gcs = build_gcs_client(sa)
+        except Exception:
+            gcs = None
     seed = f"{sunday_date.isoformat() if sunday_date else ''}|{cible}|{pref_langue or 'FR'}"
     dressed, _meta = dress_tts_with_library(
         speech_wav,
         gcs=gcs,
-        bucket_name=bucket,
+        bucket_name=bucket or "",
         clips=clips,
         cible=("lectures" if str(cible).lower().startswith("lect") else "synthese"),
         pref_langue=str(pref_langue or "FR"),
         seed=seed,
+        allow_synthetic_fallback=True,
     )
     return dressed
 

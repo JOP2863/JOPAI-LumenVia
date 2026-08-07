@@ -6,6 +6,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from core.ui_locale import t as _t
 from ui.reading_comfort import inject_reading_comfort_css, render_reading_comfort_expander
 
 
@@ -337,14 +338,32 @@ def top_nav() -> str:
     render_reading_comfort_expander()
 
     nbsp = "\u00A0"
-    labels = [
-        # Évite le markdown dans les labels (peut décaler le rendu). "𝗟𝘂𝗺𝗲𝗻𝗩𝗶𝗮" = LumenVia en gras unicode.
-        ("about", f"𝗟𝘂𝗺𝗲𝗻𝗩𝗶𝗮{nbsp}:\nc'est quoi?"),
-        ("sunday", "La lumière\ndu dimanche"),
-        ("memo", f"Mon\nAide‑Mémoire"),
-        ("join", "S'inscrire à la Newsletter"),
-        ("account", "Mon Compte"),
-    ]
+    try:
+        from core.ui_locale import t as _t
+
+        labels = [
+            ("about", _t("nav.about")),
+            ("sunday", _t("nav.sunday")),
+            ("memo", _t("nav.memo")),
+            ("join", _t("nav.join")),
+            ("account", _t("nav.account")),
+        ]
+        _feedback_lbl = _t("nav.feedback")
+        _menu_lbl = _t("nav.menu")
+        _logout_lbl = _t("nav.logout")
+        _connected_lbl = _t("nav.connected", email=email or "—")
+    except Exception:
+        labels = [
+            ("about", f"𝗟𝘂𝗺𝗲𝗻𝗩𝗶𝗮{nbsp}:\nc'est quoi?"),
+            ("sunday", "La lumière\ndu dimanche"),
+            ("memo", "Mon\nAide‑Mémoire"),
+            ("join", "S'inscrire à la Newsletter"),
+            ("account", "Mon Compte"),
+        ]
+        _feedback_lbl = "Donner\nVotre avis"
+        _menu_lbl = "Menu"
+        _logout_lbl = "Déconnexion"
+        _connected_lbl = f"🟢 Connecté · {email or 'session active'}"
 
     def _nav_popover_body() -> None:
         for route, label in labels:
@@ -352,7 +371,7 @@ def top_nav() -> str:
             if st.button(short, key=f"nav_m_{route}", use_container_width=True, type="secondary"):
                 st.session_state.route = route
                 st.rerun()
-        if st.button("Donner\nVotre avis", key="nav_m_feedback", use_container_width=True, type="secondary"):
+        if st.button(_feedback_lbl, key="nav_m_feedback", use_container_width=True, type="secondary"):
             st.session_state.route = "feedback"
             st.rerun()
         if is_admin:
@@ -363,7 +382,7 @@ def top_nav() -> str:
 
     if compact_nav:
         # Téléphone / iframe étroit : un seul “Menu”
-        with st.popover("Menu", use_container_width=True, key=_menu_pop_key):
+        with st.popover(_menu_lbl, use_container_width=True, key=_menu_pop_key):
             _nav_popover_body()
     else:
         # Tuile active : on colore l'entrée correspondant à la route courante.
@@ -416,9 +435,9 @@ div[class*="st-key-nav_feedback_beside_logout"] button[kind="secondary"] span {{
             # Avis déjà dans le Menu — pas de doublon à côté de Déconnexion
             b1, b3 = st.columns([3.5, 1.5], gap="small")
             with b1:
-                st.caption(f"🟢 Connecté · {email or 'session active'}")
+                st.caption(_connected_lbl)
             with b3:
-                if st.button("Déconnexion", key="auth_logout_nav", use_container_width=True):
+                if st.button(_logout_lbl, key="auth_logout_nav", use_container_width=True):
                     for k in ("auth_user_entity_id", "auth_email_lc"):
                         if k in st.session_state:
                             del st.session_state[k]
@@ -428,10 +447,10 @@ div[class*="st-key-nav_feedback_beside_logout"] button[kind="secondary"] span {{
         else:
             b1, b2, b3 = st.columns([3.35, 1.45, 1.95], gap="small")
             with b1:
-                st.caption(f"🟢 Connecté · {email or 'session active'}")
+                st.caption(_connected_lbl)
             with b2:
                 if st.button(
-                    "Donner\nVotre avis",
+                    _feedback_lbl,
                     key="nav_feedback_beside_logout",
                     type="secondary",
                     use_container_width=True,
@@ -439,7 +458,7 @@ div[class*="st-key-nav_feedback_beside_logout"] button[kind="secondary"] span {{
                     st.session_state.route = "feedback"
                     st.rerun()
             with b3:
-                if st.button("Déconnexion", key="auth_logout_nav", use_container_width=True):
+                if st.button(_logout_lbl, key="auth_logout_nav", use_container_width=True):
                     for k in ("auth_user_entity_id", "auth_email_lc"):
                         if k in st.session_state:
                             del st.session_state[k]

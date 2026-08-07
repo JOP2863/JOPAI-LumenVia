@@ -265,7 +265,7 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
             continue
         segments.append(("p", raw))
 
-    fb_url0 = ap.lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None)
+    fb_url0 = ap.lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None, lang=_lg_mail)
 
     def _newsletter_cta_href(bb0: str, right: str) -> str:
         """URL du bouton pill pour une ligne « … 👉 libellé » (corps newsletter)."""
@@ -480,6 +480,7 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
                     (chunk or "").strip(),
                     origin_for_href=origin0,
                     recipient_email=email0 or None,
+                    lang=_lg_mail,
                 )
                 pp = linkify_html_urls(pp)
                 # Met en valeur JOPAI© comme dans le footer (couleurs/typo).

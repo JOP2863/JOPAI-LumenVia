@@ -943,6 +943,14 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     vals["email"] = em
                     urec_lang = coerce_liturgy_pref_langue(user_pref_langue(urec))
                     vals["pref_langue"] = urec_lang
+                    try:
+                        from core.ui_locale import append_lang_query
+
+                        vals["url_app"] = append_lang_query(
+                            str(vals.get("url_app") or url_app), lang=urec_lang
+                        )
+                    except Exception:
+                        vals["url_app"] = url_app
                     if urec_lang not in _urls_by_lang:
                         _urls_by_lang[urec_lang] = weekly_email_signed_urls(
                             cfg=cfg,

@@ -698,7 +698,7 @@ def render_emailing_manual_broadcast(
                     ident0 = None
             origin = _lumenvia_app_origin_url() or ""
             url_app = (origin.rstrip("/") + "/?sunday=" + date_str) if origin else ""
-            # URLs FR de base ; surchargées par destinataire selon pref_langue.
+            # Enrichi par destinataire avec &lang= (pref_langue) plus bas.            # URLs FR de base ; surchargées par destinataire selon pref_langue.
             _zone_fr = rdc_zone_for_pref_langue("FR")
             _urls_send_fr = weekly_email_signed_urls(
                 cfg=cfg, gs=gs, date_str=date_str, zone=_zone_fr, pref_langue="FR"
@@ -833,6 +833,16 @@ def render_emailing_manual_broadcast(
                 except Exception:
                     pass
                 values2["message_actualite"] = note_use
+                # Liens app / préférences : langue du destinataire pour atterrissage multilangue.
+                try:
+                    from core.ui_locale import append_lang_query
+
+                    if values2.get("url_app"):
+                        values2["url_app"] = append_lang_query(
+                            str(values2.get("url_app") or ""), lang=urec_lang
+                        )
+                except Exception:
+                    pass
                 # Lien préférences: pré-remplit l'email sur "Nous rejoindre"
                 try:
                     from urllib.parse import quote_plus
@@ -840,7 +850,14 @@ def render_emailing_manual_broadcast(
                     quote_plus = None  # type: ignore[assignment]
                 if values2.get("origin") and to_email:
                     enc = quote_plus(to_email) if quote_plus else to_email
-                    values2["optout_url"] = values2["origin"].rstrip("/") + "/?route=join&email=" + enc
+                    _join = values2["origin"].rstrip("/") + "/?route=join&email=" + enc
+                    try:
+                        from core.ui_locale import append_lang_query
+
+                        _join = append_lang_query(_join, lang=urec_lang)
+                    except Exception:
+                        pass
+                    values2["optout_url"] = _join
                 rendered2 = render_weekly_email_template(
                     EmailTemplate(subject=subj_use, body=body_use), values=values2
                 )

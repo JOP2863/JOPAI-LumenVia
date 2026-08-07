@@ -117,29 +117,97 @@ _MEDIA_STATUS_TABLE_CSS = """
 .lv-vq:focus-within .lv-vq-tip {
   display: block;
 }
-/* Streamlit ≥1.57 : st.columns wrap=True → sur mobile chaque langue s’empile.
-   Forcer une vraie rangée + scroll horizontal (pas de stacked-per-language). */
-div[class*="st-key-lv_sunday_media_status_table"] {
-  overflow-x: auto !important;
+/* Tableau HTML — colonnes stables mobile (scroll horizontal si besoin). */
+.lv-ml-matrix-wrap {
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
-  margin: 0 0 0.35rem 0;
+  margin: 0 0 0.6rem 0;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 253, 246, 0.65);
 }
-div[class*="st-key-lv_sunday_media_status_table"] [data-testid="stHorizontalBlock"] {
-  flex-wrap: nowrap !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  min-width: 36rem;
+table.lv-ml-matrix {
+  width: 100%;
+  min-width: 28rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.82rem;
 }
-div[class*="st-key-lv_sunday_media_status_table"] [data-testid="column"] {
-  min-width: 0 !important;
-  flex-shrink: 1 !important;
+table.lv-ml-matrix th,
+table.lv-ml-matrix td {
+  padding: 0.45rem 0.35rem;
+  text-align: center;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.22);
+  white-space: nowrap;
 }
-div[class*="st-key-lv_sunday_media_status_table"] [data-testid="stCheckbox"] {
-  justify-content: center;
+table.lv-ml-matrix th {
+  font-weight: 700;
+  color: #6b5918;
+  background: rgba(180, 140, 60, 0.12);
+  font-size: 0.72rem;
+}
+table.lv-ml-matrix th:first-child,
+table.lv-ml-matrix td:first-child {
+  text-align: left;
+  padding-left: 0.55rem;
+  width: 4.5rem;
+}
+table.lv-ml-matrix tr:last-child td {
+  border-bottom: none;
+}
+table.lv-ml-matrix .lv-ml-miss {
+  color: #9a8b6e;
+  font-size: 0.75rem;
 }
 </style>
 """
+
+
+def _matrix_cell_html(
+    *,
+    row: LangMediaStatus,
+    kind: str,
+    icon: str,
+) -> str:
+    if _status_ready(row, kind):
+        return _ready_cell_html(
+            kind=kind,
+            url=_status_url(row, kind),
+            icon=icon,
+            voice_info=_voice_info_for_cell(row, kind),
+        )
+    return '<span class="lv-ml-miss">—</span>'
+
+
+def _render_media_status_html_table(
+    *,
+    rows: list[LangMediaStatus],
+    current_lang: str,
+) -> None:
+    """Matrice médias en HTML (pas st.columns) — fiable sur mobile."""
+    headers = ("Langue", "Synthèse", "Audio synthèse", "Audio lectures", "PDF")
+    thead = "".join(f"<th>{html_escape(h)}</th>" for h in headers)
+    body_rows: list[str] = []
+    for r in rows:
+        mark = " ←" if r.lang == current_lang else ""
+        lang_cell = (
+            f"{lang_flag_html(r.lang, height=14)}"
+            f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}"
+        )
+        cells = [f"<td>{lang_cell}</td>"]
+        for kind, _attr, icon in _MEDIA_KINDS:
+            cells.append(f"<td>{_matrix_cell_html(row=r, kind=kind, icon=icon)}</td>")
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    html = (
+        '<div class="lv-ml-matrix-wrap">'
+        '<table class="lv-ml-matrix" role="table">'
+        f"<thead><tr>{thead}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table></div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def _voice_info_for_cell(row: LangMediaStatus, kind: str) -> str | None:
@@ -416,49 +484,36 @@ def _sunday_multilang_admin_fragment(
         for k in missing_keys:
             st.session_state[k] = False
 
-    # Conteneur clé : CSS anti-wrap mobile (voir _MEDIA_STATUS_TABLE_CSS).
-    with st.container(key="lv_sunday_media_status_table"):
-        h = st.columns([1.35, 1, 1, 1, 1], gap="small")
-        headers = ("Langue", "Synthèse", "Audio synthèse", "Audio lectures", "PDF")
-        for col, title in zip(h, headers):
-            with col:
-                st.markdown(
-                    f"<div style='font-size:0.78rem;font-weight:700;color:#6b5918;"
-                    f"text-align:center;'>{html_escape(title)}</div>",
-                    unsafe_allow_html=True,
-                )
+    # HTML table (pas st.columns) — colonnes stables sur mobile / Streamlit Cloud.
+    _render_media_status_html_table(rows=rows, current_lang=current_lang)
 
-        for r in rows:
-            cols = st.columns([1.35, 1, 1, 1, 1], gap="small")
-            mark = " ←" if r.lang == current_lang else ""
-            with cols[0]:
+    # Cases à cocher hors tableau (évite le wrap Streamlit des colonnes).
+    if missing_keys:
+        with st.expander("Sélectionner les médias manquants à produire", expanded=True):
+            for r in rows:
+                miss_kinds = [
+                    (kind, icon)
+                    for kind, _attr, icon in _MEDIA_KINDS
+                    if not _status_ready(r, kind)
+                ]
+                if not miss_kinds:
+                    continue
                 st.markdown(
-                    f"<div style='padding-top:0.35rem;'>{lang_flag_html(r.lang, height=14)}"
-                    f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}</div>",
+                    f"{lang_flag_html(r.lang, height=14)} **{html_escape(r.lang)}**",
                     unsafe_allow_html=True,
                 )
-            for col, (kind, _attr, icon) in zip(cols[1:], _MEDIA_KINDS):
-                with col:
-                    if _status_ready(r, kind):
-                        st.markdown(
-                            _ready_cell_html(
-                                kind=kind,
-                                url=_status_url(r, kind),
-                                icon=icon,
-                                voice_info=_voice_info_for_cell(r, kind),
-                            ),
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        help_txt = _KIND_LABELS.get(kind, kind)
-                        if (
-                            not fr_has_text
-                            and r.lang != "FR"
-                            and kind in _KINDS_NEED_FR_PIVOT
-                        ):
-                            help_txt += " (nécessitera la synthèse FR pivot)"
+                cols_m = st.columns(min(4, len(miss_kinds)))
+                for i, (kind, icon) in enumerate(miss_kinds):
+                    help_txt = _KIND_LABELS.get(kind, kind)
+                    if (
+                        not fr_has_text
+                        and r.lang != "FR"
+                        and kind in _KINDS_NEED_FR_PIVOT
+                    ):
+                        help_txt += " (nécessitera la synthèse FR pivot)"
+                    with cols_m[i % len(cols_m)]:
                         st.checkbox(
-                            icon,
+                            f"{icon} {_KIND_LABELS.get(kind, kind)}",
                             value=False,
                             key=_cell_key(date_str, r.lang, kind),
                             help=help_txt,

@@ -5,11 +5,6 @@ from __future__ import annotations
 import streamlit as st
 
 _LV_COMFORT_OPTS: tuple[str, ...] = ("standard", "large", "xlarge")
-_LABELS: dict[str, str] = {
-    "standard": "Standard",
-    "large": "Grand",
-    "xlarge": "Très grand",
-}
 
 
 def inject_reading_comfort_css() -> None:
@@ -78,17 +73,50 @@ section[data-testid="stMain"] [data-testid="stMarkdownContainer"] li {{
 
 
 def render_reading_comfort_expander() -> None:
-    """Expander « Confort de lecture » avec radio 3 niveaux (state clé ``lv_text_comfort``)."""
+    """Expander confort de lecture + sélecteur de langue UI public (FR/DE/EN/ES/IT)."""
+    try:
+        from core.ui_locale import SUPPORTED_UI_LANGS, get_ui_lang, set_ui_lang, t
+    except Exception:
+        t = None  # type: ignore[assignment]
+        get_ui_lang = None  # type: ignore[assignment]
+        set_ui_lang = None  # type: ignore[assignment]
+        SUPPORTED_UI_LANGS = ("FR",)  # type: ignore[assignment]
+
+    title = t("comfort.title") if t else "Confort de lecture — taille du texte"
+    caption = t("comfort.caption") if t else (
+        "Agrandit les textes des pages et des lectures pour un meilleur confort visuel."
+    )
+    size_label = t("comfort.size_label") if t else "Taille du texte"
+    labels = {
+        "standard": t("comfort.standard") if t else "Standard",
+        "large": t("comfort.large") if t else "Grand",
+        "xlarge": t("comfort.xlarge") if t else "Très grand",
+    }
     with st.container(key="lv_reading_comfort_wrap"):
-        with st.expander("Confort de lecture — taille du texte", expanded=False):
-            st.caption(
-                "Agrandit les textes des pages et des lectures pour un meilleur confort visuel."
-            )
+        with st.expander(title, expanded=False):
+            st.caption(caption)
             st.radio(
-                "Taille du texte",
+                size_label,
                 options=list(_LV_COMFORT_OPTS),
-                format_func=lambda v: _LABELS.get(v, v),
+                format_func=lambda v: labels.get(v, v),
                 key="lv_text_comfort",
                 horizontal=True,
                 label_visibility="visible",
             )
+            if get_ui_lang and set_ui_lang and t:
+                cur = get_ui_lang()
+                opts = list(SUPPORTED_UI_LANGS)
+                idx = opts.index(cur) if cur in opts else 0
+                pick = st.selectbox(
+                    t("comfort.language_label"),
+                    options=opts,
+                    index=idx,
+                    key="lv_ui_lang_picker",
+                    help=t("comfort.language_caption"),
+                )
+                if pick and pick != cur:
+                    set_ui_lang(pick)
+                    # Atterrissage cohérent : la langue du contenu « Dimanche » suit le choix chrome.
+                    if pick in SUPPORTED_UI_LANGS:
+                        st.session_state["sunday_view_pref_langue"] = pick
+                    st.rerun()

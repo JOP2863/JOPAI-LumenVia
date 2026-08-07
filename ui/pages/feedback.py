@@ -104,7 +104,12 @@ def _schedule_feedback_survey_notify_email(
 
 def render_feedback() -> None:
     """Questionnaire flash post-envoi (Sheets RSTN `experience_feedback`)."""
-    st.title("Donner votre avis")
+    try:
+        from core.ui_locale import t
+
+        st.title(t("feedback.title"))
+    except Exception:
+        st.title("Donner votre avis")
     st.markdown(
         """
 **« LumenVia est un chemin que nous construisons ensemble.**  

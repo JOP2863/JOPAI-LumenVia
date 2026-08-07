@@ -209,6 +209,16 @@ Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
     with c3:
         st.metric("Prioritaires", sum(1 for c in active if c.preferred))
 
+    n_mix = sum(1 for c in active if c.role in ("intro", "outro", "bed"))
+    if n_mix == 0:
+        st.warning(
+            "Aucun clip **intro / outro / bed** actif — le mix TTS ne peut pas utiliser la "
+            "bibliothèque AAMB (vos 6 clips « écoute » ne participent pas au mix). "
+            "Sans **ffmpeg**, l’import Freesound (MP3) échoue ; un **secours synthétique** "
+            "(cloche / orgue / nappe générés en WAV) s’applique automatiquement à la génération TTS. "
+            "Pour des sons curatés : installez ffmpeg, puis réimportez le catalogue."
+        )
+
     st.subheader("Importer le catalogue curaté (12 pistes)")
     from core.audio_library_import import (
         load_seed_catalog,
@@ -234,9 +244,22 @@ Le fichier GCS reste (traçabilité) ; on n’efface pas physiquement en V1.
     if not ffmpeg_ok:
         st.warning(
             "**ffmpeg** non détecté : les intros/outros/beds (MP3/OGG) échoueront à la conversion. "
-            "Installe ffmpeg puis **redémarre Streamlit**. "
+            "Sur Streamlit Cloud, installez ffmpeg via `packages.txt` (`ffmpeg`) puis redéployez. "
+            "En local : installez ffmpeg et **redémarrez Streamlit**. "
             "Les chants d’écoute Wikimedia peuvent être stockés en OGG sans conversion."
         )
+    # packages.txt hint for Cloud
+    try:
+        from pathlib import Path as _P
+
+        pkg = _P(__file__).resolve().parents[2] / "packages.txt"
+        if not ffmpeg_ok and pkg.is_file() and "ffmpeg" not in pkg.read_text(encoding="utf-8", errors="ignore").lower():
+            st.info(
+                "Astuce Cloud : ajoutez une ligne `ffmpeg` dans `packages.txt` à la racine du dépôt "
+                "pour que Streamlit Cloud l’installe au déploiement."
+            )
+    except Exception:
+        pass
     force_reimport = st.checkbox(
         "Forcer le ré-import (même si déjà Actif)",
         value=False,

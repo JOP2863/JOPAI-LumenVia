@@ -293,34 +293,55 @@ def dress_tts_with_library(
     pref_langue: str = "FR",
     seed: str = "",
     bed_gain: float = DEFAULT_BED_GAIN,
+    allow_synthetic_fallback: bool = True,
 ) -> tuple[bytes, dict[str, str]]:
     """
     Applique la bibliothèque si des clips matchent.
 
+    Si aucun intro/outro/bed utilisable (ex. AAMB ne contient que ``ecoute`` faute
+    de ffmpeg), bascule sur des WAV synthétisés stdlib (``allow_synthetic_fallback``).
+
     Retourne ``(wav, meta)`` où meta contient les entity_id / titres utilisés (attribution).
     """
     meta: dict[str, str] = {}
-    if not speech_wav or gcs is None or not str(bucket_name or "").strip():
+    if not speech_wav:
         return speech_wav, meta
-    chosen = pick_ambiance_set(clips, cible=cible, pref_langue=pref_langue, seed=seed)
     intro_b = outro_b = bed_b = None
-    for role, clip in chosen.items():
-        if not clip:
-            continue
-        raw = load_clip_bytes_from_gcs(gcs=gcs, bucket_name=bucket_name, path=clip.gcs_path)
-        if not raw or raw[:4] != b"RIFF":
-            continue
-        if role == "intro":
-            intro_b = raw
-        elif role == "outro":
-            outro_b = raw
-        elif role == "bed":
-            bed_b = raw
-        meta[role] = clip.title
-        if clip.attribution:
-            meta[f"{role}_attribution"] = clip.attribution
-        if clip.licence:
-            meta[f"{role}_licence"] = clip.licence
+    if gcs is not None and str(bucket_name or "").strip():
+        chosen = pick_ambiance_set(clips, cible=cible, pref_langue=pref_langue, seed=seed)
+        for role, clip in chosen.items():
+            if not clip:
+                continue
+            raw = load_clip_bytes_from_gcs(gcs=gcs, bucket_name=bucket_name, path=clip.gcs_path)
+            if not raw or raw[:4] != b"RIFF":
+                continue
+            if role == "intro":
+                intro_b = raw
+            elif role == "outro":
+                outro_b = raw
+            elif role == "bed":
+                bed_b = raw
+            meta[role] = clip.title
+            if clip.attribution:
+                meta[f"{role}_attribution"] = clip.attribution
+            if clip.licence:
+                meta[f"{role}_licence"] = clip.licence
+    if not (intro_b or outro_b or bed_b):
+        if not allow_synthetic_fallback:
+            return speech_wav, meta
+        try:
+            from core.audio_ambiance_synth import synthetic_mix_wavs
+
+            syn = synthetic_mix_wavs()
+            intro_b = syn.get("intro")
+            outro_b = syn.get("outro")
+            bed_b = syn.get("bed")
+            meta["source"] = "synthetic_fallback"
+            meta["intro"] = "Cloche synthétique LumenVia"
+            meta["outro"] = "Orgue synthétique LumenVia"
+            meta["bed"] = "Nappe synthétique LumenVia"
+        except Exception:
+            return speech_wav, meta
     if not (intro_b or outro_b or bed_b):
         return speech_wav, meta
     dressed = dress_speech_wav(

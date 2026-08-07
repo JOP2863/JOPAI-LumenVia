@@ -11,8 +11,14 @@ _FEEDBACK_SURVEY_CTA_RE = re.compile(
 )
 
 
-def build_feedback_survey_url(*, base_url: str, recipient_email: str | None = None) -> str:
-    """``base_url`` sans slash final ; renvoie une URL absolue ou ``""`` si base vide."""
+def build_feedback_survey_url(
+    *, base_url: str, recipient_email: str | None = None, lang: str | None = None
+) -> str:
+    """``base_url`` sans slash final ; renvoie une URL absolue ou ``""`` si base vide.
+
+    ``lang`` (``pref_langue`` du destinataire) est ajouté en ``&lang=`` pour que la page
+    « Donner votre avis » s'affiche dans la langue de l'e-mail reçu.
+    """
     base = (base_url or "").strip().rstrip("/")
     if not base:
         return ""
@@ -23,6 +29,9 @@ def build_feedback_survey_url(*, base_url: str, recipient_email: str | None = No
             url += f"&email={quote_plus(em)}"
     except Exception:
         pass
+    lg = str(lang or "").strip().upper()
+    if lg:
+        url += f"&lang={lg}"
     return url
 
 

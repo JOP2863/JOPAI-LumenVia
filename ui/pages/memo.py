@@ -140,7 +140,12 @@ def render_memo() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.title("Mon Aide-Mémoire")
+    try:
+        from core.ui_locale import t
+
+        st.title(t("memo.title"))
+    except Exception:
+        st.title("Mon Aide-Mémoire")
     st.write("Espace réservé aux utilisateurs connectés.")
 
     cfg = load_config()

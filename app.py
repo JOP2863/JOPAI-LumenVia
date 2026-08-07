@@ -53,6 +53,7 @@ from core.sunday_readings_tts import (
     spoken_text_for_tts as _spoken_text_for_tts,
 )
 from core.synthesis_vertex_prompt import build_sunday_vertex_synthesis_prompt as _build_prompt
+from core.ui_locale import apply_lang_query_param as _apply_lang_query_param
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url, top_nav
 from ui.streamlit_caches import (
     adm_feedback_sheet_fetch_cached as _adm_feedback_sheet_fetch_cached,
@@ -78,17 +79,23 @@ def _public_app_listen_url(*, date_str: str) -> tuple[str | None, str | None]:
     return _public_app_listen_url_core(date_str=date_str, base_public_app_url=base or None)
 
 
-def lumenvia_feedback_survey_abs_url(origin: str | None, *, recipient_email: str | None = None) -> str:
+def lumenvia_feedback_survey_abs_url(
+    origin: str | None, *, recipient_email: str | None = None, lang: str | None = None
+) -> str:
     """URL absolue page « Donner votre avis » (lien depuis e-mails)."""
     base_raw = ((origin or "").strip() if origin else "") or (_lumenvia_app_origin_url() or "").strip()
-    return build_feedback_survey_url(base_url=base_raw.rstrip("/"), recipient_email=recipient_email)
+    return build_feedback_survey_url(base_url=base_raw.rstrip("/"), recipient_email=recipient_email, lang=lang)
 
 
 def lumenvia_wrap_feedback_cta_with_link(
-    fragment: str, *, origin_for_href: str | None = None, recipient_email: str | None = None
+    fragment: str,
+    *,
+    origin_for_href: str | None = None,
+    recipient_email: str | None = None,
+    lang: str | None = None,
 ) -> str:
     """Encapsule la phrase 👉 … Donner mon avis … en lien `<a>` (fragment HTML léger ou texte)."""
-    url = lumenvia_feedback_survey_abs_url(origin_for_href, recipient_email=recipient_email)
+    url = lumenvia_feedback_survey_abs_url(origin_for_href, recipient_email=recipient_email, lang=lang)
     return wrap_feedback_cta_with_link(fragment, survey_url=url)
 
 
@@ -152,6 +159,7 @@ def _lumenvia_narrow_nav_from_query() -> bool:
 
 def main() -> None:
     set_page_style()
+    _apply_lang_query_param()
     if _lumenvia_narrow_nav_from_query():
         st.session_state["lumenvia_narrow_nav"] = True
     if st.session_state.pop("_lumenvia_enable_phone_preview", False):
@@ -160,6 +168,14 @@ def main() -> None:
 
     if "route" not in st.session_state:
         st.session_state.route = "about"
+
+    # Langue UI public (?lang= depuis e-mail) — avant navigation.
+    try:
+        from core.ui_locale import apply_lang_query_param
+
+        apply_lang_query_param()
+    except Exception:
+        pass
 
     params = st.query_params
     adm = (params.get("admin") or "").strip().lower()

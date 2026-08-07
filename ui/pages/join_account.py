@@ -81,7 +81,12 @@ def render_join() -> None:
     # et ne doit pas remplacer l'écran newsletter quand l'utilisateur est connecté.
     cur_route = str(st.session_state.get("route") or "").strip().lower()
     is_account_view = cur_route == "account"
-    st.title("Mon compte" if is_account_view else "S'inscrire à la newsletter")
+    try:
+        from core.ui_locale import t
+
+        st.title(t("join.title_account") if is_account_view else t("join.title_newsletter"))
+    except Exception:
+        st.title("Mon compte" if is_account_view else "S'inscrire à la newsletter")
 
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
