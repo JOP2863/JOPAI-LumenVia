@@ -62,6 +62,98 @@ def set_ui_lang(code: object | None) -> None:
     st.session_state[SESSION_KEY] = coerce_ui_lang(code)
 
 
+def switch_public_lang(code: object | None, *, sync_sunday: bool = True) -> str:
+    """Change la langue chrome (+ alignement Dimanche) et renvoie le code appliqué."""
+    lg = coerce_ui_lang(code)
+    set_ui_lang(lg)
+    if sync_sunday:
+        st.session_state["sunday_view_pref_langue"] = lg
+    return lg
+
+
+def render_public_lang_flags() -> None:
+    """Barre de drapeaux (haut droite) — public uniquement ; admin non concerné."""
+    route = str(st.session_state.get("route") or "")
+    if route.startswith("admin"):
+        return
+    try:
+        from core.sunday_view_locale import lang_flag_html
+    except Exception:
+        lang_flag_html = None  # type: ignore[assignment]
+
+    cur = get_ui_lang()
+    st.markdown(
+        """
+<style>
+div[class*="st-key-lv_pub_lang_flags"] {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+div[class*="st-key-lv_pub_lang_flags"] [data-testid="stHorizontalBlock"] {
+  gap: 0.25rem !important;
+  justify-content: flex-end !important;
+}
+div[class*="st-key-lv_pub_lang_flags"] [data-testid="column"] {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 2.1rem !important;
+}
+div[class*="st-key-lv_pub_lang_flags"] button {
+  min-height: 2rem !important;
+  padding: 0.2rem 0.25rem !important;
+  border-radius: 8px !important;
+  line-height: 1 !important;
+}
+div[class*="st-key-lv_pub_lang_flags"] button p,
+div[class*="st-key-lv_pub_lang_flags"] button span {
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em !important;
+}
+div[class*="st-key-lv_pub_lang_flags"] [data-testid="stMarkdown"] {
+  margin-bottom: -0.45rem !important;
+  text-align: center;
+}
+div[class*="st-key-lv_pub_lang_flags"] .lv-flag-btn-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  line-height: 1;
+}
+div[class*="st-key-lv_pub_lang_flags"] .lv-flag-btn-label img {
+  margin: 0 auto !important;
+  display: block;
+  box-shadow: 0 0 0 1px rgba(52, 46, 41, 0.12);
+}
+</style>
+        """.strip(),
+        unsafe_allow_html=True,
+    )
+    with st.container(key="lv_pub_lang_flags"):
+        cols = st.columns(len(SUPPORTED_UI_LANGS), gap="small")
+        for col, lg in zip(cols, SUPPORTED_UI_LANGS):
+            with col:
+                help_lbl = LANG_NATIVE_LABEL.get(lg, lg)
+                # Libellé bouton : drapeau CDN (HTML non supporté) → code + image au-dessus.
+                if lang_flag_html is not None:
+                    st.markdown(
+                        f'<div class="lv-flag-btn-label">{lang_flag_html(lg, height=16)}</div>',
+                        unsafe_allow_html=True,
+                    )
+                clicked = st.button(
+                    lg,
+                    key=f"lv_pub_lang_{lg}",
+                    help=help_lbl,
+                    type="primary" if lg == cur else "secondary",
+                    use_container_width=True,
+                )
+                if clicked and lg != cur:
+                    switch_public_lang(lg, sync_sunday=True)
+                    st.rerun()
+
+
 def append_lang_query(url: str, *, lang: object | None) -> str:
     """Ajoute ``?lang=`` (ou ``&lang=``) à ``url`` — liens e-mail (``url_app``, ``optout_url``, …).
 

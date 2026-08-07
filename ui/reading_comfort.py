@@ -115,8 +115,12 @@ def render_reading_comfort_expander() -> None:
                     help=t("comfort.language_caption"),
                 )
                 if pick and pick != cur:
-                    set_ui_lang(pick)
-                    # Atterrissage cohérent : la langue du contenu « Dimanche » suit le choix chrome.
-                    if pick in SUPPORTED_UI_LANGS:
-                        st.session_state["sunday_view_pref_langue"] = pick
+                    try:
+                        from core.ui_locale import switch_public_lang
+
+                        switch_public_lang(pick, sync_sunday=True)
+                    except Exception:
+                        set_ui_lang(pick)
+                        if pick in SUPPORTED_UI_LANGS:
+                            st.session_state["sunday_view_pref_langue"] = pick
                     st.rerun()
