@@ -330,30 +330,25 @@ def top_nav() -> str:
     is_admin = bool(st.session_state.get("admin_authenticated"))
     compact_nav = _use_compact_top_nav()
 
-    # Logo + drapeaux langue (public + debug admin) : pleine largeur mobile, sinon haut droite.
-    if compact_nav:
-        try:
-            from core.ui_locale import render_public_lang_flags
+    # Drapeaux toujours en pleine largeur (haut droite) — 6 langues ne tiennent
+    # pas dans la colonne droite du logo (PT était coupé).
+    try:
+        from core.ui_locale import render_public_lang_flags
 
-            render_public_lang_flags()
-        except Exception:
-            pass
+        render_public_lang_flags()
+    except Exception:
+        pass
+
+    if compact_nav:
         if logo_path.is_file():
             _, mid, _ = st.columns([1, 1, 1])
             with mid:
                 st.image(str(logo_path), width=56)
     else:
-        _left, mid, right = st.columns([1.15, 1, 1.35], gap="small")
+        _left, mid, _right = st.columns([1.15, 1, 1.35], gap="small")
         with mid:
             if logo_path.is_file():
                 st.image(str(logo_path), width=56)
-        with right:
-            try:
-                from core.ui_locale import render_public_lang_flags
-
-                render_public_lang_flags()
-            except Exception:
-                pass
 
     render_reading_comfort_expander()
 

@@ -91,38 +91,48 @@ def render_public_lang_flags() -> None:
         }
 
     cur = get_ui_lang()
-    # Boutons taille fixe (ratio drapeau ~4:3) — pas use_container_width (étire l’image).
+    # Boutons taille fixe (ratio drapeau ~3:2) — pleine largeur, alignés à droite.
     css_rules: list[str] = [
         """
 div[class*="st-key-lv_pub_lang_flags"] {
   display: flex;
   justify-content: flex-end;
   width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 0 0.35rem 0;
+}
+div[class*="st-key-lv_pub_lang_flags"] > div {
+  width: 100%;
+  min-width: 0;
 }
 div[class*="st-key-lv_pub_lang_flags"] [data-testid="stHorizontalBlock"] {
-  gap: 0.32rem !important;
+  gap: 0.35rem !important;
   justify-content: flex-end !important;
-  width: auto !important;
+  flex-wrap: nowrap !important;
+  width: max-content !important;
+  max-width: none !important;
   margin-left: auto !important;
+  margin-right: 0 !important;
 }
 div[class*="st-key-lv_pub_lang_flags"] [data-testid="column"] {
-  flex: 0 0 1.65rem !important;
-  width: 1.65rem !important;
-  min-width: 1.65rem !important;
-  max-width: 1.65rem !important;
+  flex: 0 0 1.85rem !important;
+  width: 1.85rem !important;
+  min-width: 1.85rem !important;
+  max-width: 1.85rem !important;
 }
 div[class*="st-key-lv_pub_lang_flags"] button {
-  width: 1.65rem !important;
-  min-width: 1.65rem !important;
-  max-width: 1.65rem !important;
-  height: 1.2rem !important;
-  min-height: 1.2rem !important;
-  max-height: 1.2rem !important;
+  width: 1.85rem !important;
+  min-width: 1.85rem !important;
+  max-width: 1.85rem !important;
+  height: 1.25rem !important;
+  min-height: 1.25rem !important;
+  max-height: 1.25rem !important;
   padding: 0 !important;
   border-radius: 3px !important;
   border: 1.5px solid rgba(52, 46, 41, 0.22) !important;
   background-color: transparent !important;
-  background-size: 1.65rem 1.2rem !important;
+  background-size: 1.85rem 1.25rem !important;
   background-position: center !important;
   background-repeat: no-repeat !important;
   box-shadow: none !important;
