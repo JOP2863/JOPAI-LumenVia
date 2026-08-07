@@ -89,7 +89,7 @@ def render_public_lang_flags() -> None:
         }
 
     cur = get_ui_lang()
-    # CSS : drapeau en fond du bouton — pas de <a> (Streamlit ouvre sinon un nouvel onglet).
+    # Boutons taille fixe (ratio drapeau ~4:3) — pas use_container_width (étire l’image).
     css_rules: list[str] = [
         """
 div[class*="st-key-lv_pub_lang_flags"] {
@@ -98,28 +98,33 @@ div[class*="st-key-lv_pub_lang_flags"] {
   width: 100%;
 }
 div[class*="st-key-lv_pub_lang_flags"] [data-testid="stHorizontalBlock"] {
-  gap: 0.28rem !important;
+  gap: 0.32rem !important;
   justify-content: flex-end !important;
+  width: auto !important;
+  margin-left: auto !important;
 }
 div[class*="st-key-lv_pub_lang_flags"] [data-testid="column"] {
-  flex: 0 0 auto !important;
-  width: auto !important;
-  min-width: 1.7rem !important;
-  max-width: 2rem !important;
+  flex: 0 0 1.65rem !important;
+  width: 1.65rem !important;
+  min-width: 1.65rem !important;
+  max-width: 1.65rem !important;
 }
 div[class*="st-key-lv_pub_lang_flags"] button {
-  min-height: 1.35rem !important;
-  height: 1.35rem !important;
-  min-width: 1.7rem !important;
+  width: 1.65rem !important;
+  min-width: 1.65rem !important;
+  max-width: 1.65rem !important;
+  height: 1.2rem !important;
+  min-height: 1.2rem !important;
+  max-height: 1.2rem !important;
   padding: 0 !important;
   border-radius: 3px !important;
-  border: 1.5px solid rgba(52, 46, 41, 0.2) !important;
+  border: 1.5px solid rgba(52, 46, 41, 0.22) !important;
   background-color: transparent !important;
-  background-size: cover !important;
+  background-size: 1.65rem 1.2rem !important;
   background-position: center !important;
   background-repeat: no-repeat !important;
   box-shadow: none !important;
-  opacity: 0.78;
+  opacity: 0.82;
 }
 div[class*="st-key-lv_pub_lang_flags"] button p,
 div[class*="st-key-lv_pub_lang_flags"] button span {
@@ -129,7 +134,7 @@ div[class*="st-key-lv_pub_lang_flags"] button span {
 }
 div[class*="st-key-lv_pub_lang_flags"] button:hover {
   opacity: 1 !important;
-  border-color: rgba(95, 79, 58, 0.45) !important;
+  border-color: rgba(95, 79, 58, 0.5) !important;
   background-color: transparent !important;
 }
 """.strip()
@@ -137,8 +142,8 @@ div[class*="st-key-lv_pub_lang_flags"] button:hover {
     for lg in SUPPORTED_UI_LANGS:
         code = LANG_FLAG_CDN.get(lg, lg.lower()[:2])
         active = lg == cur
-        border = "rgba(95, 79, 58, 0.65)" if active else "rgba(52, 46, 41, 0.2)"
-        opacity = "1" if active else "0.78"
+        border = "rgba(95, 79, 58, 0.7)" if active else "rgba(52, 46, 41, 0.22)"
+        opacity = "1" if active else "0.82"
         css_rules.append(
             f'div[class*="st-key-lv_pub_lang_{lg}"] button {{'
             f' background-image: url("https://flagcdn.com/h20/{code}.png") !important;'
@@ -156,7 +161,7 @@ div[class*="st-key-lv_pub_lang_flags"] button:hover {
                     "\u200b",
                     key=f"lv_pub_lang_{lg}",
                     help=LANG_NATIVE_LABEL.get(lg, lg),
-                    use_container_width=True,
+                    use_container_width=False,
                 ):
                     if lg != cur:
                         switch_public_lang(lg, sync_sunday=True)
