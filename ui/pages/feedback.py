@@ -12,13 +12,9 @@ import streamlit as st
 from core.config import load_config
 from core.outbound import SmtpConfig
 from core.sheets_db import (
-    BASE_COLUMNS,
-    TableSpec,
     append_immutable_row,
     build_gspread_client,
-    ensure_table,
     utc_now_iso,
-    with_concat,
 )
 from ui.components import loading_overlay
 
@@ -135,32 +131,7 @@ En tant que premier passager de cette aventure, votre retour nous est précieux 
         st.warning("Enregistrement indisponible : configuration Google Sheets manquante.")
         return
 
-    from core.sheets_db import TableSpec, ensure_table
-
     gs = build_gspread_client(cfg.gcp_service_account)
-    ensure_table(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table=TableSpec(
-            name="experience_feedback",
-            columns=with_concat(
-                [
-                    *BASE_COLUMNS,
-                    "submitter_email",
-                    "emotion_global",
-                    "rating_illustration",
-                    "rating_synthesis",
-                    "rating_audio",
-                    "utility_liturgy",
-                    "touch_memorable",
-                    "wish_improve_one",
-                    "campaign_hint",
-                    "date_dimanche_hint",
-                    "source_route",
-                ]
-            ),
-        ),
-    )
 
     auth_em = str(st.session_state.get("auth_email_lc") or "").strip().lower()
 

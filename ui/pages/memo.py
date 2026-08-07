@@ -11,9 +11,14 @@ import streamlit as st
 from core.config import load_config
 from core.gcp_clients import build_gcs_client
 from core.pdf_graine_parole_mensuel import build_graine_parole_monthly_pdf_bytes, strip_light_markdown_to_plain
-from core.sheets_db import append_immutable_row, build_gspread_client, fetch_records
+from core.sheets_db import append_immutable_row, build_gspread_client
 from core.storage import download_bytes, upload_text
 from ui.components import loading_overlay
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    service_account_json_fingerprint,
+)
 
 
 def next_sunday(d: date) -> date:
@@ -155,6 +160,8 @@ def render_memo() -> None:
 
     gs = build_gspread_client(cfg.gcp_service_account)
     gcs = build_gcs_client(cfg.gcp_service_account)
+    sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+    sid = str(cfg.gsheet_id).strip()
 
     if "auth_user_entity_id" not in st.session_state:
         st.session_state.auth_user_entity_id = ""
@@ -174,7 +181,7 @@ def render_memo() -> None:
     zone = "france"
 
     try:
-        memos = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="memos", limit=500)
+        memos = list(adm_sheets_fetch_cached(sid, "memos", 500, sa_json) or [])
     except Exception:
         memos = []
     my_memos = [m for m in memos if str(m.get("user_entity_id", "")).strip() == user_entity_id]
@@ -236,7 +243,7 @@ def render_memo() -> None:
     if st.session_state.get("memo_prefill_requested") and st.session_state.get("memo_prefill_date") == date_str:
         ov = loading_overlay("LumenVia charge la dernière synthèse…")
         try:
-            gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=500)
+            gens = list(adm_sheets_fetch_cached(sid, "generations", 500, sa_json) or [])
             gens_day = [
                 g
                 for g in gens
@@ -262,7 +269,7 @@ def render_memo() -> None:
     if st.session_state.get("memo_inspire_requested") and st.session_state.get("memo_inspire_date") == date_str:
         ov = loading_overlay("LumenVia extrait un point à retenir…")
         try:
-            gens = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="generations", limit=500)
+            gens = list(adm_sheets_fetch_cached(sid, "generations", 500, sa_json) or [])
             gens_day = [
                 g
                 for g in gens
@@ -332,6 +339,7 @@ def render_memo() -> None:
                     "gen_entity_id": "",
                 },
             )
+            invalidate_adm_sheets_fetch_cache()
             st.success("OK — mémo enregistré.")
         finally:
             ov.empty()

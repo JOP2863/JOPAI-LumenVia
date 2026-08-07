@@ -2,30 +2,28 @@
 
 from __future__ import annotations
 
-import json
 from hashlib import sha256
 
 import streamlit as st
 
 from core.config import load_config
 from core.sheets_db import (
-    BASE_COLUMNS,
-    TableSpec,
     append_immutable_row,
     build_gspread_client,
-    ensure_table,
     sheet_row_status_is_live,
     utc_now_iso,
-    with_concat,
 )
 from core.vertex_gemini import VertexGeminiClient
 from ui.components import loading_overlay
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    service_account_json_fingerprint,
+)
 
 
 def render_admin_feedback_insights() -> None:
     """Synthèse IA des réponses au questionnaire (`experience_feedback`)."""
-    import app as ap  # lazy: évite import circulaire avec app.py
-
     st.title("Synthèse des retours (questionnaire)")
     st.caption(
         "À partir des lignes **Actif** de la table `experience_feedback`, génère une synthèse et des pistes d’action "
@@ -36,26 +34,10 @@ def render_admin_feedback_insights() -> None:
         st.error("Configuration `gcp_service_account` / `gsheet_id` manquante.")
         return
     gs = build_gspread_client(cfg.gcp_service_account)
-    ensure_table(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table=TableSpec(
-            name="feedback_insights",
-            columns=with_concat(
-                [
-                    *BASE_COLUMNS,
-                    "n_sample",
-                    "bundle_sha256",
-                    "model_used",
-                    "synthesis_text",
-                ]
-            ),
-        ),
-    )
     sid = str(cfg.gsheet_id).strip()
-    sa_json = json.dumps(cfg.gcp_service_account, sort_keys=True)
+    sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
     try:
-        rows = ap._adm_feedback_sheet_fetch_cached(sid, "experience_feedback", 1200, sa_json)
+        rows = list(adm_sheets_fetch_cached(sid, "experience_feedback", 1200, sa_json) or [])
     except Exception as e:
         st.error(f"Lecture `experience_feedback` impossible : {e}")
         return
@@ -135,7 +117,7 @@ def render_admin_feedback_insights() -> None:
     bundle_sig = sha256(f"{n_sample}\n{bundle}".encode("utf-8")).hexdigest()
 
     try:
-        ins_rows_all = ap._adm_feedback_sheet_fetch_cached(sid, "feedback_insights", 800, sa_json)
+        ins_rows_all = list(adm_sheets_fetch_cached(sid, "feedback_insights", 800, sa_json) or [])
     except Exception:
         ins_rows_all = []
 
@@ -218,10 +200,7 @@ def render_admin_feedback_insights() -> None:
                 },
             )
             st.success("Synthèse enregistrée dans la table `feedback_insights`.")
-            try:
-                ap._adm_feedback_sheet_fetch_cached.clear()
-            except Exception:
-                pass
+            invalidate_adm_sheets_fetch_cache()
         except Exception as e:
             st.exception(e)
         finally:

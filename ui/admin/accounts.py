@@ -84,12 +84,12 @@ def render_admin_accounts() -> None:
     gs = build_gspread_client(cfg.gcp_service_account)
     sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
     try:
-        users = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=6000)
+        users = list(adm_sheets_fetch_cached(cfg.gsheet_id, "users", 0, sa_json) or [])
     except Exception as e:
         st.error(f"Lecture `users` impossible : {e}")
         return
     try:
-        subs = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=6000)
+        subs = list(adm_sheets_fetch_cached(cfg.gsheet_id, "subscriptions", 0, sa_json) or [])
     except Exception:
         subs = []
 
@@ -318,6 +318,11 @@ def render_admin_accounts() -> None:
                             values_by_col_list=to_add_subs,
                             chunk_size=120,
                         )
+                        invalidate_fetch_records_cache(spreadsheet_id=cfg.gsheet_id, table="users")
+                        invalidate_fetch_records_cache(
+                            spreadsheet_id=cfg.gsheet_id, table="subscriptions"
+                        )
+                        invalidate_adm_sheets_fetch_cache()
                         # Message + reset UI (champs vidés + expander replié)
                         msg = f"Abonnés ajoutés : {added_u} utilisateur(s) créé(s), {added_s} abonnement(s) ajouté(s)."
                         if already_users:

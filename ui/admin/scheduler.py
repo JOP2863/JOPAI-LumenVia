@@ -16,16 +16,11 @@ from core.config import load_config
 from core.dev_notice import LUMENVIA_DEVELOPMENT_NOTICE
 from core.outbound import SmtpConfig
 from core.sheets_db import (
-    BASE_COLUMNS,
-    TableSpec,
     append_immutable_row,
     append_immutable_rows_bulk,
     build_gspread_client,
-    ensure_table,
-    fetch_records,
     sheet_row_status_is_live,
     utc_now_iso,
-    with_concat,
 )
 from core.subscriptions_util import subscription_is_active
 from core.weekly_email_urls import weekly_email_signed_urls
@@ -36,6 +31,11 @@ from ui.admin.broadcast_recipients import (
 )
 from ui.components import loading_overlay
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    service_account_json_fingerprint,
+)
 
 
 def render_admin_scheduler() -> None:
@@ -67,92 +67,16 @@ par identifiant de campagne.
         st.warning("Configuration Google Sheets manquante.")
         return
 
-    from core.sheets_db import TableSpec, ensure_table, with_concat, BASE_COLUMNS
-
     gs = build_gspread_client(cfg.gcp_service_account)
-
-    # Assure les tables
-    ensure_table(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table=TableSpec(
-            name="AliasTables",
-            columns=["#ID", "Statut", "Version", "Nom Complet Table", "Acronyme Table", "Description"],
-        ),
-    )
-    ensure_table(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table=TableSpec(
-            name="scheduler_campaigns",
-            columns=with_concat(
-                [
-                    *BASE_COLUMNS,
-                    "campaign_key",
-                    "name",
-                    "enabled",
-                    "timezone",
-                    "schedule_kind",
-                    "schedule_spec",
-                    "audience_kind",
-                    "audience_spec",
-                    "send_email",
-                    "send_sms",
-                    "email_template_key",
-                    "sms_template_key",
-                    "content_pdf",
-                    "content_audio",
-                    "content_illustration",
-                    "content_app_link",
-                ]
-            ),
-        ),
-    )
-    ensure_table(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table=TableSpec(
-            name="scheduler_runs",
-            columns=with_concat(
-                [
-                    *BASE_COLUMNS,
-                    "campaign_key",
-                    "run_kind",
-                    "status_detail",
-                    "started_at",
-                    "finished_at",
-                    "recipients_ok",
-                    "recipients_err",
-                    "error",
-                    "date_dimanche",
-                    "message_actualite",
-                    "template_key",
-                ]
-            ),
-        ),
-    )
-    ensure_table(
-        gspread_client=gs,
-        spreadsheet_id=cfg.gsheet_id,
-        table=TableSpec(
-            name="audiences",
-            columns=with_concat(
-                [
-                    *BASE_COLUMNS,
-                    "audience_key",
-                    "libelle",
-                    "description",
-                    "spec_aide",
-                ]
-            ),
-        ),
-    )
+    sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+    sid = str(cfg.gsheet_id).strip()
 
     from core.emailing import pick_latest_live_email_template
+    from core.sheets_db import invalidate_fetch_records_cache
 
-    # Seed audiences si table vide
+    # Seed audiences si table vide (pas d'ensure_table au runtime)
     try:
-        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audiences", limit=2000)
+        aud_rows = list(adm_sheets_fetch_cached(sid, "audiences", 2000, sa_json) or [])
     except Exception:
         aud_rows = []
     if not aud_rows:
@@ -194,13 +118,32 @@ par identifiant de campagne.
             },
         ]
         append_immutable_rows_bulk(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audiences", values_by_col_list=seed)
-        aud_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="audiences", limit=2000)
+        invalidate_fetch_records_cache(spreadsheet_id=sid, table="audiences")
+        invalidate_adm_sheets_fetch_cache()
+        try:
+            aud_rows = list(adm_sheets_fetch_cached(sid, "audiences", 2000, sa_json) or [])
+        except Exception:
+            aud_rows = []
 
-    st.subheader("Campagnes")
+    # Lectures partagées (cache TTL) — une fois pour toute la page
     try:
-        rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="scheduler_campaigns", limit=2000)
+        rows = list(adm_sheets_fetch_cached(sid, "scheduler_campaigns", 2000, sa_json) or [])
     except Exception:
         rows = []
+    try:
+        users_rows_shared = list(adm_sheets_fetch_cached(sid, "users", 0, sa_json) or [])
+    except Exception:
+        users_rows_shared = []
+    try:
+        subs_rows_shared = list(adm_sheets_fetch_cached(sid, "subscriptions", 0, sa_json) or [])
+    except Exception:
+        subs_rows_shared = []
+    try:
+        tpl_rows_shared = list(adm_sheets_fetch_cached(sid, "email_templates", 0, sa_json) or [])
+    except Exception:
+        tpl_rows_shared = []
+
+    st.subheader("Campagnes")
 
     default_key = "weekly_friday_lumenvia"
     with st.expander("Campagnes (activer / désactiver)", expanded=False):
@@ -285,6 +228,7 @@ par identifiant de campagne.
                     "content_app_link": str(base.get("content_app_link") or "true").strip(),
                 },
             )
+            invalidate_adm_sheets_fetch_cache()
 
         st.caption(
             "Note : le déclenchement automatique n’est pas encore branché côté cloud. "
@@ -367,6 +311,7 @@ par identifiant de campagne.
                             "content_app_link": "true",
                         },
                     )
+                    invalidate_adm_sheets_fetch_cache()
                     st.success("Campagne créée.")
             st.rerun()
 
@@ -483,10 +428,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
         # Valeurs du critère : assistées (pas de saisie libre)
         aud_spec = ""
         if aud_kind in ("by_country", "by_source", "by_email_list"):
-            try:
-                users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
-            except Exception:
-                users_rows = []
+            users_rows = users_rows_shared
             if aud_kind == "by_country":
                 countries = sorted({str(u.get("country") or "").strip() for u in users_rows if str(u.get("country") or "").strip()})
                 pick = st.selectbox("Pays", options=countries or ["FR"], index=0, key="adm_sched_country")
@@ -502,10 +444,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
 
         # Affichage explicite du destinataire dry-run (comme la page emailing)
         if aud_kind == "dry_run":
-            try:
-                users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
-            except Exception:
-                users_rows = []
+            users_rows = users_rows_shared
 
             def _is_email_ok(email: str) -> bool:
                 em = (email or "").strip().lower()
@@ -553,10 +492,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
 
         st.markdown("**Templates (formats)**")
         # Templates e-mail: sélection parmi les clés existantes
-        try:
-            tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
-        except Exception:
-            tpl_rows = []
+        tpl_rows = tpl_rows_shared
         email_keys = sorted({str(r.get("template_key") or "").strip() for r in tpl_rows if str(r.get("channel") or "").strip().lower() == "email" and str(r.get("template_key") or "").strip()})
         sms_keys = sorted({str(r.get("template_key") or "").strip() for r in tpl_rows if str(r.get("channel") or "").strip().lower() == "sms" and str(r.get("template_key") or "").strip()})
         cur_email_key = str(camp.get("email_template_key") or "weekly_friday_lumenvia").strip()
@@ -600,6 +536,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     "content_app_link": "true" if content_app else "false",
                 },
             )
+            invalidate_adm_sheets_fetch_cache()
             st.success("Réglages enregistrés.")
             st.rerun()
 
@@ -691,8 +628,8 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
         _tf_mail = lambda v: str(v or "").strip().lower() in ("true", "1", "oui", "yes")
         chan_em = _tf_mail(camp_snap.get("send_email"))
         chan_sm = _tf_mail(camp_snap.get("send_sms"))
-        users_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
-        subs_preview = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
+        users_preview = users_rows_shared
+        subs_preview = subs_rows_shared
         rec_preview = lumenvia_manual_broadcast_users(
             users_rows=users_preview,
             subs_rows=subs_preview,
@@ -820,8 +757,8 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                 do_sms = str(camp.get("send_sms") or "true").strip().lower() in ("true", "1", "oui", "yes")
                 email_tpl_key = str(camp.get("email_template_key") or "weekly_friday_lumenvia").strip()
     
-                users_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="users", limit=8000)
-                subs_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="subscriptions", limit=8000)
+                users_rows = users_rows_shared
+                subs_rows = subs_rows_shared
                 recipients = lumenvia_manual_broadcast_users(
                     users_rows=users_rows,
                     subs_rows=subs_rows,
@@ -834,7 +771,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     recipients = [u for u in recipients if str(u.get("email") or "").strip().lower() not in excluded_emails]
     
                 # template actif — même filtres vivants/langue FR que la page Emailing
-                tpl_rows = fetch_records(gspread_client=gs, spreadsheet_id=cfg.gsheet_id, table="email_templates", limit=0)
+                tpl_rows = tpl_rows_shared
     
                 tpl0 = pick_latest_live_email_template(
                     tpl_rows,

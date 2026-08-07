@@ -8,8 +8,13 @@ from pathlib import Path
 import streamlit as st
 
 from core.config import load_config
-from core.sheets_db import append_immutable_row, build_gspread_client, fetch_records
+from core.sheets_db import append_immutable_row, build_gspread_client
 from ui.components import loading_overlay
+from ui.streamlit_caches import (
+    adm_sheets_fetch_cached,
+    invalidate_adm_sheets_fetch_cache,
+    service_account_json_fingerprint,
+)
 
 _CDC_MARKDOWN_PATH = Path("data/cahier_des_charges.md")
 
@@ -71,6 +76,7 @@ def render_admin_cahier_charges() -> None:
                         "detail": detail.strip(),
                     },
                 )
+                invalidate_adm_sheets_fetch_cache()
                 st.success("Entrée ajoutée au journal.")
                 st.rerun()
             finally:
@@ -78,13 +84,8 @@ def render_admin_cahier_charges() -> None:
 
     if cfg.gsheet_id and cfg.gcp_service_account:
         try:
-            gs = build_gspread_client(cfg.gcp_service_account)
-            cl = fetch_records(
-                gspread_client=gs,
-                spreadsheet_id=cfg.gsheet_id,
-                table="admin_changelog",
-                limit=300,
-            )
+            sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
+            cl = list(adm_sheets_fetch_cached(str(cfg.gsheet_id), "admin_changelog", 300, sa_json) or [])
             cl_sorted = sorted(cl, key=lambda r: str(r.get("created_at", "")), reverse=True)
             st.markdown(f"**{len(cl_sorted)}** entrée(s) ; les 40 dernières :")
             for row in cl_sorted[:40]:
