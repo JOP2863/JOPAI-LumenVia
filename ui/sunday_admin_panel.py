@@ -78,7 +78,7 @@ def _ready_cell_html(
     return "".join(parts)
 
 
-_VOICE_POPUP_CSS = """
+_MEDIA_STATUS_TABLE_CSS = """
 <style>
 .lv-vq {
   position: relative;
@@ -116,6 +116,27 @@ _VOICE_POPUP_CSS = """
 .lv-vq:focus .lv-vq-tip,
 .lv-vq:focus-within .lv-vq-tip {
   display: block;
+}
+/* Streamlit ≥1.57 : st.columns wrap=True → sur mobile chaque langue s’empile.
+   Forcer une vraie rangée + scroll horizontal (pas de stacked-per-language). */
+div[class*="st-key-lv_sunday_media_status_table"] {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  margin: 0 0 0.35rem 0;
+}
+div[class*="st-key-lv_sunday_media_status_table"] [data-testid="stHorizontalBlock"] {
+  flex-wrap: nowrap !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  min-width: 36rem;
+}
+div[class*="st-key-lv_sunday_media_status_table"] [data-testid="column"] {
+  min-width: 0 !important;
+  flex-shrink: 1 !important;
+}
+div[class*="st-key-lv_sunday_media_status_table"] [data-testid="stCheckbox"] {
+  justify-content: center;
 }
 </style>
 """
@@ -372,7 +393,7 @@ def _sunday_multilang_admin_fragment(
         "Les ✅ ouvrent le fichier déjà publié ; clique **?** à côté d’un audio pour la voix TTS. "
         "Règle d’or : synthèse **FR** puis localisation · lectures audio = lectionnaire natif."
     )
-    st.markdown(_VOICE_POPUP_CSS, unsafe_allow_html=True)
+    st.markdown(_MEDIA_STATUS_TABLE_CSS, unsafe_allow_html=True)
     if gs is None or not getattr(cfg, "gsheet_id", None):
         st.warning("Sheets indisponible — statut multi-langues impossible.")
         return
@@ -395,52 +416,53 @@ def _sunday_multilang_admin_fragment(
         for k in missing_keys:
             st.session_state[k] = False
 
-    # En-tête
-    h = st.columns([1.35, 1, 1, 1, 1])
-    headers = ("Langue", "Synthèse", "Audio synthèse", "Audio lectures", "PDF")
-    for col, title in zip(h, headers):
-        with col:
-            st.markdown(
-                f"<div style='font-size:0.78rem;font-weight:700;color:#6b5918;"
-                f"text-align:center;'>{html_escape(title)}</div>",
-                unsafe_allow_html=True,
-            )
-
-    for r in rows:
-        cols = st.columns([1.35, 1, 1, 1, 1])
-        mark = " ←" if r.lang == current_lang else ""
-        with cols[0]:
-            st.markdown(
-                f"<div style='padding-top:0.35rem;'>{lang_flag_html(r.lang, height=14)}"
-                f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}</div>",
-                unsafe_allow_html=True,
-            )
-        for col, (kind, _attr, icon) in zip(cols[1:], _MEDIA_KINDS):
+    # Conteneur clé : CSS anti-wrap mobile (voir _MEDIA_STATUS_TABLE_CSS).
+    with st.container(key="lv_sunday_media_status_table"):
+        h = st.columns([1.35, 1, 1, 1, 1], gap="small")
+        headers = ("Langue", "Synthèse", "Audio synthèse", "Audio lectures", "PDF")
+        for col, title in zip(h, headers):
             with col:
-                if _status_ready(r, kind):
-                    st.markdown(
-                        _ready_cell_html(
-                            kind=kind,
-                            url=_status_url(r, kind),
-                            icon=icon,
-                            voice_info=_voice_info_for_cell(r, kind),
-                        ),
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    help_txt = _KIND_LABELS.get(kind, kind)
-                    if (
-                        not fr_has_text
-                        and r.lang != "FR"
-                        and kind in _KINDS_NEED_FR_PIVOT
-                    ):
-                        help_txt += " (nécessitera la synthèse FR pivot)"
-                    st.checkbox(
-                        icon,
-                        value=False,
-                        key=_cell_key(date_str, r.lang, kind),
-                        help=help_txt,
-                    )
+                st.markdown(
+                    f"<div style='font-size:0.78rem;font-weight:700;color:#6b5918;"
+                    f"text-align:center;'>{html_escape(title)}</div>",
+                    unsafe_allow_html=True,
+                )
+
+        for r in rows:
+            cols = st.columns([1.35, 1, 1, 1, 1], gap="small")
+            mark = " ←" if r.lang == current_lang else ""
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:0.35rem;'>{lang_flag_html(r.lang, height=14)}"
+                    f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}</div>",
+                    unsafe_allow_html=True,
+                )
+            for col, (kind, _attr, icon) in zip(cols[1:], _MEDIA_KINDS):
+                with col:
+                    if _status_ready(r, kind):
+                        st.markdown(
+                            _ready_cell_html(
+                                kind=kind,
+                                url=_status_url(r, kind),
+                                icon=icon,
+                                voice_info=_voice_info_for_cell(r, kind),
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        help_txt = _KIND_LABELS.get(kind, kind)
+                        if (
+                            not fr_has_text
+                            and r.lang != "FR"
+                            and kind in _KINDS_NEED_FR_PIVOT
+                        ):
+                            help_txt += " (nécessitera la synthèse FR pivot)"
+                        st.checkbox(
+                            icon,
+                            value=False,
+                            key=_cell_key(date_str, r.lang, kind),
+                            help=help_txt,
+                        )
 
     selected, auto_notes, _auto_fr = collect_table_selection(rows=rows, date_str=date_str)
     if auto_notes:
