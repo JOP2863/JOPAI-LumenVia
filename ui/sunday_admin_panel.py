@@ -223,10 +223,14 @@ def _render_media_status_matrix(
     current_lang: str,
     date_str: str,
     fr_has_text: bool,
-) -> None:
-    """Matrice médias : statut + case à cocher dans chaque cellule (produire / régénérer)."""
+) -> dict[str, bool]:
+    """Matrice médias : statut + case à cocher dans chaque cellule.
+
+    Retourne ``{cell_key: cochée}`` (valeur widget, fiable dans un fragment).
+    """
     headers = ("Langue", "Synthèse", "Audio synthèse", "Audio lectures", "PDF")
     col_weights = [1.05, 1.0, 1.15, 1.15, 0.95]
+    checked: dict[str, bool] = {}
 
     with st.container(key="lv_ml_matrix"):
         head = st.columns(col_weights, gap="small")
@@ -260,6 +264,9 @@ def _render_media_status_matrix(
                         and kind in _KINDS_NEED_FR_PIVOT
                     ):
                         help_txt += " (nécessitera la synthèse FR pivot)"
+                ck = _cell_key(date_str, r.lang, kind)
+                if ck not in st.session_state:
+                    st.session_state[ck] = False
                 with cols[i + 1]:
                     status_col, check_col = st.columns([4, 1], gap="small")
                     with status_col:
@@ -270,13 +277,16 @@ def _render_media_status_matrix(
                             unsafe_allow_html=True,
                         )
                     with check_col:
-                        st.checkbox(
-                            "↺" if ready else "+",
-                            value=False,
-                            key=_cell_key(date_str, r.lang, kind),
-                            help=help_txt,
-                            label_visibility="collapsed",
+                        # Pas de value= (sinon reset à False à chaque rerun du fragment).
+                        checked[ck] = bool(
+                            st.checkbox(
+                                "↺" if ready else "+",
+                                key=ck,
+                                help=help_txt,
+                                label_visibility="collapsed",
+                            )
                         )
+    return checked
 
 
 def _voice_info_for_cell(row: LangMediaStatus, kind: str) -> str | None:
@@ -350,6 +360,7 @@ def collect_table_selection(
     *,
     rows: list[LangMediaStatus],
     date_str: str,
+    checked: dict[str, bool] | None = None,
 ) -> tuple[list[tuple[str, str]], set[tuple[str, str]], list[str], bool]:
     """
     Lit les cases cochées du tableau (manquants + régénérations).
@@ -362,7 +373,12 @@ def collect_table_selection(
     force_kinds: set[tuple[str, str]] = set()
     for r in rows:
         for kind, _attr, _icon in _MEDIA_KINDS:
-            if not bool(st.session_state.get(_cell_key(date_str, r.lang, kind), False)):
+            ck = _cell_key(date_str, r.lang, kind)
+            if checked is not None:
+                is_on = bool(checked.get(ck, False))
+            else:
+                is_on = bool(st.session_state.get(ck, False))
+            if not is_on:
                 continue
             selected.append((r.lang, kind))
             if _status_ready(r, kind):
@@ -585,7 +601,7 @@ def _sunday_multilang_admin_fragment(
         for k in all_keys:
             st.session_state[k] = False
 
-    _render_media_status_matrix(
+    checked = _render_media_status_matrix(
         rows=rows,
         current_lang=current_lang,
         date_str=date_str,
@@ -593,7 +609,7 @@ def _sunday_multilang_admin_fragment(
     )
 
     selected, force_kinds, auto_notes, _auto_fr = collect_table_selection(
-        rows=rows, date_str=date_str
+        rows=rows, date_str=date_str, checked=checked
     )
     if auto_notes:
         for note in auto_notes:
@@ -613,35 +629,6 @@ def _sunday_multilang_admin_fragment(
         st.caption(f"Aucun média sélectionné · **{n_missing}** manquant(s).")
     else:
         st.caption("Tous publiés — coche une case du tableau pour régénérer.")
-
-    b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
-    with b_sel:
-        if st.button(
-            "Tout sélectionner",
-            key=f"adm_ml_table_sel_all_{date_str}",
-            disabled=not all_keys,
-            use_container_width=True,
-        ):
-            st.session_state[f"_adm_ml_select_all_{date_str}"] = True
-            st.rerun(scope="fragment")
-    with b_desel:
-        if st.button(
-            "Tout désélectionner",
-            key=f"adm_ml_table_desel_all_{date_str}",
-            disabled=not all_keys,
-            use_container_width=True,
-        ):
-            st.session_state[f"_adm_ml_deselect_all_{date_str}"] = True
-            st.rerun(scope="fragment")
-    with b_refresh:
-        if st.button(
-            "↻ Statut",
-            key=f"adm_ml_table_refresh_{date_str}",
-            help="Relire GCS/Sheets (ignore le cache ~75 s)",
-            use_container_width=True,
-        ):
-            invalidate_sunday_media_status_cache()
-            st.rerun(scope="fragment")
 
     @st.dialog("Confirmer la génération")
     def _confirm_dialog() -> None:
@@ -672,19 +659,42 @@ def _sunday_multilang_admin_fragment(
                 st.session_state.pop(f"_adm_ml_table_force_{date_str}", None)
                 st.rerun(scope="app")
 
-    gen_disabled = gcs is None or not selected
-    with b_gen:
-        gen_label = (
-            "Régénérer la sélection"
-            if force_kinds and len(force_kinds) == len(selected)
-            else "Générer la sélection"
-        )
+    b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
+    with b_sel:
         if st.button(
-            gen_label,
+            "Tout sélectionner",
+            key=f"adm_ml_table_sel_all_{date_str}",
+            disabled=not all_keys,
+            use_container_width=True,
+        ):
+            st.session_state[f"_adm_ml_select_all_{date_str}"] = True
+            st.rerun(scope="fragment")
+    with b_desel:
+        if st.button(
+            "Tout désélectionner",
+            key=f"adm_ml_table_desel_all_{date_str}",
+            disabled=not all_keys,
+            use_container_width=True,
+        ):
+            st.session_state[f"_adm_ml_deselect_all_{date_str}"] = True
+            st.rerun(scope="fragment")
+    with b_gen:
+        gen_disabled = gcs is None or not selected
+        if st.button(
+            "Lancer la sélection",
             type="primary",
             key=f"adm_ml_table_gen_{date_str}",
             disabled=gen_disabled,
             use_container_width=True,
+            help=(
+                "GCS indisponible."
+                if gcs is None
+                else (
+                    "Coche au moins un média dans le tableau."
+                    if not selected
+                    else "Produire ou régénérer les cases cochées."
+                )
+            ),
         ):
             if gcs is None:
                 st.error("GCS indisponible.")
@@ -695,6 +705,15 @@ def _sunday_multilang_admin_fragment(
                 st.session_state[_snap_key] = list(selected)
                 st.session_state[f"_adm_ml_table_force_{date_str}"] = list(force_kinds)
                 _confirm_dialog()
+    with b_refresh:
+        if st.button(
+            "↻ Statut",
+            key=f"adm_ml_table_refresh_{date_str}",
+            help="Relire GCS/Sheets (ignore le cache ~75 s)",
+            use_container_width=True,
+        ):
+            invalidate_sunday_media_status_cache()
+            st.rerun(scope="fragment")
 
     with st.expander("Options de rédaction FR (si pivot à créer)", expanded=False):
         st.caption("Utilisées uniquement lorsque la synthèse française doit être rédigée (Vertex).")
