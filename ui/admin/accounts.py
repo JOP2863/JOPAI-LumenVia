@@ -36,6 +36,7 @@ from core.sheets_db import (
     _resolve_table_name,
 )
 from core.subscriptions_util import latest_subscription_record, subscription_is_active
+from core.sunday_view_locale import lang_flag_html
 from ui.admin_secrets import admin_login_and_password
 from ui.components import loading_overlay
 from ui.streamlit_caches import (
@@ -809,6 +810,13 @@ def render_admin_accounts() -> None:
             created = str(u.get("created_at") or "").strip()
             src = str(u.get("source") or "").strip()
             uid = str(u.get("entity_id") or "").strip()
+            lg = user_pref_langue(u)
+            lang_cell = (
+                f"<span style='display:inline-flex;align-items:center;gap:0.25rem;white-space:nowrap;'>"
+                f"{lang_flag_html(lg, height=14)}"
+                f"<span style='opacity:0.9;'>{html_escape(lg)}</span>"
+                f"</span>"
+            )
             opt_txt = "—"
             if uid and title.lower().startswith("nous rejoindre"):
                 rec = latest_sub.get(uid)
@@ -820,6 +828,7 @@ def render_admin_accounts() -> None:
             body_rows.append(
                 "<tr>"
                 f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);'>{html_escape(em)}</td>"
+                f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);'>{lang_cell}</td>"
                 f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{html_escape(src or '—')}</td>"
                 f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{html_escape(opt_txt)}</td>"
                 f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);opacity:0.9;'>{html_escape(created or '—')}</td>"
@@ -832,13 +841,14 @@ def render_admin_accounts() -> None:
   <thead>
     <tr style="background:rgba(212,175,55,0.10);">
       <th style="text-align:left;padding:9px 10px;">E-mail</th>
+      <th style="text-align:left;padding:9px 10px;">Langue</th>
       <th style="text-align:left;padding:9px 10px;">Source</th>
       <th style="text-align:left;padding:9px 10px;">Opt-in</th>
       <th style="text-align:left;padding:9px 10px;">Créé le</th>
     </tr>
   </thead>
   <tbody>
-    {''.join(body_rows) if body_rows else '<tr><td colspan="4" style="padding:10px;opacity:0.75;">Aucun.</td></tr>'}
+    {''.join(body_rows) if body_rows else '<tr><td colspan="5" style="padding:10px;opacity:0.75;">Aucun.</td></tr>'}
   </tbody>
 </table>
 </div>
