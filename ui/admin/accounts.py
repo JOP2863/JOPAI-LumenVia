@@ -432,20 +432,32 @@ def render_admin_accounts() -> None:
                 "yes",
             ) or subscription_is_active(latest_sub_ed)
 
+            # Streamlit ignore `value=` / `index=` si la clé existe déjà en session :
+            # resynchroniser les champs quand l’e-mail sélectionné change.
+            if st.session_state.get("_adm_edit_sync_email") != em_pick:
+                st.session_state["adm_edit_fn"] = str(rp.get("first_name") or "").strip()
+                st.session_state["adm_edit_ln"] = str(rp.get("last_name") or "").strip()
+                st.session_state["adm_edit_ph"] = str(rp.get("phone_e164") or "").strip()
+                st.session_state["adm_edit_country"] = cur_country
+                st.session_state["adm_edit_pref_langue"] = cur_lang
+                st.session_state["adm_edit_optin"] = bool(cur_opt)
+                st.session_state["adm_edit_set_pwd"] = False
+                st.session_state["adm_edit_pwd"] = ""
+                st.session_state["adm_edit_pwd2"] = ""
+                st.session_state["adm_edit_send_welcome"] = True
+                st.session_state["_adm_edit_sync_email"] = em_pick
+
             with st.form("adm_edit_user_form"):
                 e_fn = st.text_input(
                     "Prénom",
-                    value=str(rp.get("first_name") or "").strip(),
                     key="adm_edit_fn",
                 )
                 e_ln = st.text_input(
                     "Nom",
-                    value=str(rp.get("last_name") or "").strip(),
                     key="adm_edit_ln",
                 )
                 e_ph = st.text_input(
                     "Téléphone (optionnel, E.164)",
-                    value=str(rp.get("phone_e164") or "").strip(),
                     key="adm_edit_ph",
                     placeholder="+33612345678",
                 )
@@ -454,7 +466,6 @@ def render_admin_accounts() -> None:
                     e_country = st.selectbox(
                         "Pays / nationalité",
                         options=pays_codes_ed,
-                        index=pays_codes_ed.index(cur_country) if cur_country in pays_codes_ed else 0,
                         format_func=lambda c: next((lab for code, lab in pays_opts_ed if code == c), c),
                         key="adm_edit_country",
                     )
@@ -462,19 +473,16 @@ def render_admin_accounts() -> None:
                     e_lang = st.selectbox(
                         "Préférence langue",
                         options=lang_codes_ed,
-                        index=lang_codes_ed.index(cur_lang) if cur_lang in lang_codes_ed else 0,
                         format_func=lambda c: next((lab for code, lab in langues_opts_ed if code == c), c),
                         key="adm_edit_pref_langue",
                     )
                 e_opt = st.checkbox(
                     "Opt-in newsletter (vendredi)",
-                    value=bool(cur_opt),
                     key="adm_edit_optin",
                 )
                 st.markdown("**Mot de passe**")
                 set_pwd = st.checkbox(
                     "Définir / réinitialiser le mot de passe",
-                    value=False,
                     key="adm_edit_set_pwd",
                 )
                 e_pwd = st.text_input(
@@ -491,7 +499,6 @@ def render_admin_accounts() -> None:
                 )
                 send_welcome = st.checkbox(
                     "Envoyer un e-mail d’instructions (connexion, mot de passe…)",
-                    value=True,
                     key="adm_edit_send_welcome",
                     help=(
                         "Si un nouveau mot de passe est défini, il est communiqué une fois "

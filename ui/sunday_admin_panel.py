@@ -140,7 +140,7 @@ div[class*="st-key-lv_ml_matrix"] {
   overflow: visible !important;
   max-width: 100%;
   margin: 0 0 0.55rem 0;
-  padding: 0.35rem 0.35rem 0.15rem 0.35rem;
+  padding: 0.35rem 0.35rem 0.65rem 0.35rem;
   border: 1px solid rgba(212, 175, 55, 0.35);
   border-radius: 10px;
   background: rgba(255, 253, 246, 0.65);
