@@ -256,37 +256,84 @@ def pdf_synthesis_listen_url(
     *,
     date_str: str,
     public_app_url: str | None,
-    gcs: object,
-    bucket_name: str,
+    gcs: object | None = None,
+    bucket_name: str = "",
     gcs_audio_path: str | None = None,
     gs: object | None = None,
     cfg: object | None = None,
     gen_entity_id: str | None = None,
+    pref_langue: object | None = None,
 ) -> tuple[str | None, str | None]:
     """
-    Lien « Écouter la synthèse » pour la couverture PDF.
+    Lien « Écouter » pour la couverture PDF.
 
-    Préfère une URL signée GCS (fichier ``Audio/…``) lorsqu’elle est disponible ;
-    sinon retombe sur le lien public app (``PUBLIC_APP_URL`` + ``?sunday=``).
+    Priorité : URL **publique durable** de l’app (``PUBLIC_APP_URL?sunday=…&lang=…``).
+    Les URL signées GCS expirent (souvent 7 jours) et cassent les fascicules déjà générés —
+    elles ne servent qu’en **repli** si aucune base publique n’est configurée.
     """
     from core.gcs_signed_urls import gcs_signed_url
+    from core.locale_codes import normalize_pref_langue
     from core.public_listen_url import public_app_listen_url
 
-    url, note = public_app_listen_url(date_str=date_str, base_public_app_url=public_app_url)
+    lg = normalize_pref_langue(pref_langue) if pref_langue is not None else None
+    url, note = public_app_listen_url(
+        date_str=date_str,
+        base_public_app_url=public_app_url,
+        lang=lg,
+    )
+    if url:
+        return url, note
+
+    # Repli temporaire uniquement (pas de PUBLIC_APP_URL) — lien à durée limitée.
     p = (gcs_audio_path or "").strip()
     if not p and gs is not None and cfg is not None:
         ge = str(gen_entity_id or "").strip()
         if ge:
             p = synthesis_audio_gcs_path_for_gen(gs=gs, cfg=cfg, gen_entity_id=ge) or ""
     bucket = str(bucket_name or "").strip()
-    if p and bucket:
+    if p and bucket and gcs is not None:
         try:
             signed = gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p)
             if signed:
-                return signed, note
+                return signed, (
+                    "Lien GCS temporaire (PUBLIC_APP_URL absent) — expire ; "
+                    "configure PUBLIC_APP_URL pour des liens PDF durables."
+                )
         except Exception:
             pass
-    return url, note
+    return None, None
+
+
+def pdf_readings_listen_url(
+    *,
+    date_str: str,
+    public_app_url: str | None,
+    pref_langue: object | None = None,
+    gcs: object | None = None,
+    bucket_name: str = "",
+    gcs_audio_path: str | None = None,
+) -> str | None:
+    """Lien « Écouter les lectures » sur la couverture PDF — même règle durable que la synthèse."""
+    from core.gcs_signed_urls import gcs_signed_url
+    from core.locale_codes import normalize_pref_langue
+    from core.public_listen_url import public_app_listen_url
+
+    lg = normalize_pref_langue(pref_langue) if pref_langue is not None else None
+    url, _ = public_app_listen_url(
+        date_str=date_str,
+        base_public_app_url=public_app_url,
+        lang=lg,
+    )
+    if url:
+        return url
+    p = (gcs_audio_path or "").strip()
+    bucket = str(bucket_name or "").strip()
+    if p and bucket and gcs is not None:
+        try:
+            return gcs_signed_url(gcs=gcs, bucket_name=bucket, path=p) or None
+        except Exception:
+            return None
+    return None
 
 
 def fetch_existing_sunday_bundle(

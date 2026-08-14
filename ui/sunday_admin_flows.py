@@ -37,9 +37,12 @@ from core.liturgy_theme import liturgical_accent_hex
 from core.vertex_gemini import VertexGeminiClient
 from core.voix_audio import pick_voice_name, resolve_voice
 from ui.streamlit_caches import service_account_json_fingerprint
-from core.gcs_signed_urls import gcs_signed_url
 from core.config import resolve_gemini_api_key
-from core.sunday_existing_outputs import has_readings_audio_for_gen, pdf_synthesis_listen_url
+from core.sunday_existing_outputs import (
+    has_readings_audio_for_gen,
+    pdf_readings_listen_url,
+    pdf_synthesis_listen_url,
+)
 from core.readings_cache_loader import load_liturgy_from_readings_cache
 from core.sunday_gemini_tts import (
     last_tts_ambiance,
@@ -538,6 +541,7 @@ def _run_incremental_sunday_outputs(
                     gs=gs,
                     cfg=cfg,
                     gen_entity_id=gen_eid,
+                    pref_langue=pref_langue,
                 )
                 synth_for_pdf = synth
                 if not include_catechese_pdf:
@@ -579,14 +583,16 @@ def _run_incremental_sunday_outputs(
                 rp_for_cover = (readings_path_this_run or "").strip() or (
                     (bundle_readings_gcs_path or "").strip()
                 )
-                readings_pdf_signed = None
+                readings_pdf_url = None
                 if rp_for_cover:
-                    try:
-                        readings_pdf_signed = gcs_signed_url(
-                            gcs=gcs, bucket_name=bucket, path=rp_for_cover
-                        ) or None
-                    except Exception:
-                        readings_pdf_signed = None
+                    readings_pdf_url = pdf_readings_listen_url(
+                        date_str=date_str,
+                        public_app_url=_base_pub or None,
+                        pref_langue=pref_langue,
+                        gcs=gcs,
+                        bucket_name=bucket,
+                        gcs_audio_path=rp_for_cover,
+                    )
                 ilus_desc_pdf = ""
                 if str(cfg.gsheet_id or "").strip():
                     try:
@@ -612,7 +618,7 @@ def _run_incremental_sunday_outputs(
                     synthesis_text=synth_for_pdf,
                     audio_listen_url=aud_url,
                     audio_listen_note=aud_note,
-                    audio_readings_listen_url=readings_pdf_signed,
+                    audio_readings_listen_url=readings_pdf_url,
                     illustration_description=_pdf_illustration_description_localized(
                         text_fr=ilus_desc_pdf or "",
                         pref_langue=pref_langue,
@@ -1181,13 +1187,21 @@ def _run_generate_sunday_flow(
                     },
                 )
                 try:
-                    readings_cover_signed = (
-                        gcs_signed_url(
-                            gcs=gcs,
-                            bucket_name=str(cfg.gcs_bucket_name).strip(),
-                            path=readings_path,
-                        )
-                        or None
+                    _base_pub_early = ""
+                    try:
+                        s = st.secrets
+                        _base_pub_early = str(
+                            s.get("PUBLIC_APP_URL") or s.get("public_app_url") or ""
+                        ).strip()
+                    except Exception:
+                        pass
+                    readings_cover_signed = pdf_readings_listen_url(
+                        date_str=date_str,
+                        public_app_url=_base_pub_early or None,
+                        pref_langue=pref_langue,
+                        gcs=gcs,
+                        bucket_name=str(cfg.gcs_bucket_name).strip(),
+                        gcs_audio_path=readings_path,
                     )
                 except Exception:
                     readings_cover_signed = None
@@ -1306,6 +1320,7 @@ def _run_generate_sunday_flow(
                 gcs=gcs,
                 bucket_name=str(cfg.gcs_bucket_name).strip(),
                 gcs_audio_path=audio_path or None,
+                pref_langue=pref_langue,
             )
             pdf_b = build_liturgy_sunday_pdf_bytes(
                 image_bytes=img_b,
@@ -1760,8 +1775,9 @@ def _run_publish_lang_from_fr_pivot(
                 gs=gs,
                 cfg=cfg,
                 gen_entity_id=gen_entity_id,
+                pref_langue=lg,
             )
-            readings_pdf_signed = None
+            readings_pdf_url = None
             try:
                 from core.sunday_existing_outputs import fetch_existing_readings_audio
 
@@ -1769,11 +1785,16 @@ def _run_publish_lang_from_fr_pivot(
                     gs=gs, gcs=gcs, cfg=cfg, date_str=day, zone=zone
                 )
                 if rpath:
-                    readings_pdf_signed = gcs_signed_url(
-                        gcs=gcs, bucket_name=bucket, path=rpath
+                    readings_pdf_url = pdf_readings_listen_url(
+                        date_str=day,
+                        public_app_url=_base_pub or None,
+                        pref_langue=lg,
+                        gcs=gcs,
+                        bucket_name=bucket,
+                        gcs_audio_path=rpath,
                     )
             except Exception:
-                readings_pdf_signed = None
+                readings_pdf_url = None
             back_cover_b = None
             try:
                 y = str(day)[:4]
@@ -1832,7 +1853,7 @@ def _run_publish_lang_from_fr_pivot(
                 synthesis_text=synth_for_pdf,
                 audio_listen_url=aud_url,
                 audio_listen_note=aud_note,
-                audio_readings_listen_url=readings_pdf_signed,
+                audio_readings_listen_url=readings_pdf_url,
                 illustration_description=_pdf_illustration_description_localized(
                     text_fr=ilus_desc or "",
                     pref_langue=lg,
