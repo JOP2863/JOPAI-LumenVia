@@ -184,19 +184,24 @@ def render_admin_emailing() -> None:
             "Laisser vide pour ne rien ajouter au prochain envoi."
         ),
     )
+
+    def _fill_proposed_actualite() -> None:
+        # Callback : s’exécute avant le rerun / avant le text_area (clé widget OK).
+        st.session_state["adm_email_message_actualite"] = PROPOSED_WEEKLY_ACTUALITE_MESSAGE
+
+    def _clear_actualite() -> None:
+        st.session_state["adm_email_message_actualite"] = ""
+
     c_prop, c_clear = st.columns(2)
     with c_prop:
-        if st.button(
+        st.button(
             "Remplir avec le texte proposé (nouveautés)",
             key="adm_email_actu_fill_proposed",
             help="Multilingue, ambiance audio, etc.",
-        ):
-            st.session_state["adm_email_message_actualite"] = PROPOSED_WEEKLY_ACTUALITE_MESSAGE
-            st.rerun()
+            on_click=_fill_proposed_actualite,
+        )
     with c_clear:
-        if st.button("Vider la mention", key="adm_email_actu_clear"):
-            st.session_state["adm_email_message_actualite"] = ""
-            st.rerun()
+        st.button("Vider la mention", key="adm_email_actu_clear", on_click=_clear_actualite)
     with st.expander("Aperçu du paragraphe injecté", expanded=False):
         from core.emailing import format_weekly_actualite_paragraph
 
