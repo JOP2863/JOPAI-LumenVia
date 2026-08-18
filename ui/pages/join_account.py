@@ -34,6 +34,7 @@ from core.sheets_db import (
     utc_now_iso,
 )
 from core.subscriptions_util import (
+    cap_weekly_langs,
     latest_subscription_record,
     subscription_is_active,
     weekly_subscription_langs,
@@ -317,10 +318,16 @@ def render_join() -> None:
                     value=bool(cur_o),
                     key="acct_news_optin",
                 )
+                _acct_lang_cap = user_pref_langue(rp)
+                if "acct_news_langs" in st.session_state:
+                    st.session_state["acct_news_langs"] = cap_weekly_langs(
+                        st.session_state["acct_news_langs"],
+                        account_lang=_acct_lang_cap,
+                    )
                 want_langs_ac = st.multiselect(
                     "Langues des e-mails du vendredi",
                     options=_lang_codes,
-                    default=list(cur_langs_ac),
+                    default=cap_weekly_langs(cur_langs_ac, account_lang=_acct_lang_cap),
                     format_func=lambda c: next((lab for code, lab in _langues_opts if code == c), c),
                     key="acct_news_langs",
                     max_selections=2,
@@ -722,10 +729,16 @@ def render_join() -> None:
                 value=bool(cur_opt_in),
                 key="join_me_optin",
             )
+            _me_lang_cap = normalize_pref_langue(st.session_state.get("pref_langue"))
+            if "join_me_optin_langs" in st.session_state:
+                st.session_state["join_me_optin_langs"] = cap_weekly_langs(
+                    st.session_state["join_me_optin_langs"],
+                    account_lang=_me_lang_cap,
+                )
             want_langs_me = st.multiselect(
                 "Langues des e-mails du vendredi",
                 options=_lang_codes,
-                default=list(auth_weekly_langs),
+                default=cap_weekly_langs(auth_weekly_langs, account_lang=_me_lang_cap),
                 format_func=lambda c: next((lab for code, lab in _langues_opts if code == c), c),
                 key="join_me_optin_langs",
                 max_selections=2,
@@ -822,10 +835,18 @@ def render_join() -> None:
             key="join_pref_langue",
             help="Langue de consultation LumenVia (e-mails et contenus).",
         )
+    if "join_weekly_langs" in st.session_state:
+        st.session_state["join_weekly_langs"] = cap_weekly_langs(
+            st.session_state["join_weekly_langs"],
+            account_lang=pref_langue,
+        )
     join_weekly_langs = st.multiselect(
         "Langues des e-mails du vendredi",
         options=_lang_codes,
-        default=[pref_langue] if pref_langue else [DEFAULT_PREF_LANGUE],
+        default=cap_weekly_langs(
+            [pref_langue] if pref_langue else [DEFAULT_PREF_LANGUE],
+            account_lang=pref_langue,
+        ),
         format_func=lambda c: next((lab for code, lab in _langues_opts if code == c), c),
         key="join_weekly_langs",
         max_selections=2,

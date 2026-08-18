@@ -74,3 +74,24 @@ def ordered_account_weekly_langs(account_lang: object, weekly_langs: list[str]) 
     if primary in langs:
         return [primary] + [x for x in langs if x != primary]
     return langs
+
+
+def cap_weekly_langs(
+    langs: list[object],
+    *,
+    account_lang: object | None = None,
+    max_count: int = 2,
+) -> list[str]:
+    """Ordre stable + plafond pour les multiselect Streamlit (max 2 langues)."""
+    normalized = [
+        normalize_pref_langue(x)
+        for x in (langs or [])
+        if str(x or "").strip()
+    ]
+    normalized = list(dict.fromkeys(normalized))
+    ordered = (
+        ordered_account_weekly_langs(account_lang or DEFAULT_PREF_LANGUE, normalized)
+        if account_lang is not None
+        else normalized
+    )
+    return ordered[: max(0, int(max_count))]

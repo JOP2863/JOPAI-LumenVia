@@ -36,6 +36,7 @@ from core.sheets_db import (
     _resolve_table_name,
 )
 from core.subscriptions_util import (
+    cap_weekly_langs,
     latest_subscription_record,
     ordered_account_weekly_langs,
     subscription_is_active,
@@ -470,7 +471,10 @@ def render_admin_accounts() -> None:
                 st.session_state["adm_edit_country"] = cur_country
                 st.session_state["adm_edit_pref_langue"] = cur_lang
                 st.session_state["adm_edit_optin"] = bool(cur_opt)
-                st.session_state["adm_edit_weekly_langs"] = list(cur_weekly_langs)
+                st.session_state["adm_edit_weekly_langs"] = cap_weekly_langs(
+                    cur_weekly_langs,
+                    account_lang=cur_lang,
+                )
                 st.session_state["adm_edit_set_pwd"] = False
                 st.session_state["adm_edit_pwd"] = ""
                 st.session_state["adm_edit_pwd2"] = ""
@@ -478,6 +482,12 @@ def render_admin_accounts() -> None:
                 st.session_state["_adm_edit_sync_email"] = em_pick
                 st.session_state["_adm_edit_force_resync"] = False
                 st.session_state["adm_edit_expanded"] = True
+
+            if "adm_edit_weekly_langs" in st.session_state:
+                st.session_state["adm_edit_weekly_langs"] = cap_weekly_langs(
+                    st.session_state["adm_edit_weekly_langs"],
+                    account_lang=cur_lang,
+                )
 
             e_opt = st.checkbox(
                 "Opt-in newsletter (vendredi)",
@@ -884,7 +894,10 @@ def render_admin_accounts() -> None:
             uid = str(u.get("entity_id") or "").strip()
             lg = user_pref_langue(u)
             weekly_langs = list(weekly_langs_by_uid.get(uid) or [])
-            ordered_langs = ordered_account_weekly_langs(lg, weekly_langs)
+            ordered_langs = cap_weekly_langs(
+                ordered_account_weekly_langs(lg, weekly_langs),
+                account_lang=lg,
+            )
             lang_cell = (
                 f"<span style='display:inline-flex;align-items:center;gap:0.35rem;white-space:nowrap;flex-wrap:wrap;'>"
                 + "".join(
