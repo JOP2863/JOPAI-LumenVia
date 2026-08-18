@@ -613,6 +613,7 @@ def default_tables() -> list[TableSpec]:
                     "type",
                     "zone",
                     "length_pref",
+                    "pref_langue",  # ISO 639-1 — une ligne active par langue newsletter
                     "opt_in",
                     "active",
                 ]

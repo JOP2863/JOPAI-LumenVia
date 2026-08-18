@@ -37,6 +37,7 @@ from core.sheets_db import (
 )
 from core.subscriptions_util import (
     latest_subscription_record,
+    ordered_account_weekly_langs,
     subscription_is_active,
     weekly_subscription_langs,
 )
@@ -391,7 +392,10 @@ def render_admin_accounts() -> None:
         if str(u.get("email") or "").strip()
     ]
 
-    with st.expander("Éditer un utilisateur / initialiser le mot de passe", expanded=False):
+    with st.expander(
+        "Éditer un utilisateur / initialiser le mot de passe",
+        expanded=st.session_state.get("adm_edit_expanded", False),
+    ):
         st.caption(
             "Corrige la fiche après création (prénom, pays, langue…) ou **définit un mot de passe** "
             "pour transformer un abonné newsletter en compte connectable."
@@ -399,10 +403,16 @@ def render_admin_accounts() -> None:
         if not edit_emails:
             st.info("Aucun utilisateur à éditer.")
         else:
+
+            def _adm_edit_email_changed() -> None:
+                st.session_state["_adm_edit_force_resync"] = True
+                st.session_state["adm_edit_expanded"] = True
+
             em_pick = st.selectbox(
                 "Utilisateur (e-mail)",
                 options=edit_emails,
                 key="adm_edit_user_email",
+                on_change=_adm_edit_email_changed,
             )
             rp = next(
                 (u for u in latest_for_edit if str(u.get("email") or "").strip().lower() == em_pick),
@@ -443,9 +453,17 @@ def render_admin_accounts() -> None:
             )
             cur_opt = bool(cur_weekly_langs)
 
-            # Streamlit ignore `value=` / `index=` si la clé existe déjà en session :
-            # resynchroniser les champs quand l’e-mail sélectionné change.
-            if st.session_state.get("_adm_edit_sync_email") != em_pick:
+            def _adm_edit_fields_need_sync() -> bool:
+                if st.session_state.get("_adm_edit_force_resync"):
+                    return True
+                if st.session_state.get("_adm_edit_sync_email") != em_pick:
+                    return True
+                rp_fn = str(rp.get("first_name") or "").strip()
+                if rp_fn and not str(st.session_state.get("adm_edit_fn") or "").strip():
+                    return True
+                return False
+
+            if _adm_edit_fields_need_sync():
                 st.session_state["adm_edit_fn"] = str(rp.get("first_name") or "").strip()
                 st.session_state["adm_edit_ln"] = str(rp.get("last_name") or "").strip()
                 st.session_state["adm_edit_ph"] = str(rp.get("phone_e164") or "").strip()
@@ -458,6 +476,22 @@ def render_admin_accounts() -> None:
                 st.session_state["adm_edit_pwd2"] = ""
                 st.session_state["adm_edit_send_welcome"] = True
                 st.session_state["_adm_edit_sync_email"] = em_pick
+                st.session_state["_adm_edit_force_resync"] = False
+                st.session_state["adm_edit_expanded"] = True
+
+            e_opt = st.checkbox(
+                "Opt-in newsletter (vendredi)",
+                key="adm_edit_optin",
+            )
+            e_weekly_langs = st.multiselect(
+                "Langues de la newsletter du vendredi",
+                options=lang_codes_ed,
+                format_func=lambda c: next((lab for code, lab in langues_opts_ed if code == c), c),
+                key="adm_edit_weekly_langs",
+                help="Jusqu’à 2 langues : un e-mail distinct sera envoyé pour chaque langue cochée.",
+                max_selections=2,
+                disabled=not bool(e_opt),
+            )
 
             with st.form("adm_edit_user_form"):
                 e_fn = st.text_input(
@@ -488,20 +522,6 @@ def render_admin_accounts() -> None:
                         format_func=lambda c: next((lab for code, lab in langues_opts_ed if code == c), c),
                         key="adm_edit_pref_langue",
                     )
-                e_opt = st.checkbox(
-                    "Opt-in newsletter (vendredi)",
-                    key="adm_edit_optin",
-                )
-                e_weekly_langs = st.multiselect(
-                    "Langues de la newsletter du vendredi",
-                    options=lang_codes_ed,
-                    default=list(cur_weekly_langs),
-                    format_func=lambda c: next((lab for code, lab in langues_opts_ed if code == c), c),
-                    key="adm_edit_weekly_langs",
-                    help="Jusqu’à 2 langues : un e-mail distinct sera envoyé pour chaque langue cochée.",
-                    max_selections=2,
-                    disabled=not bool(e_opt),
-                )
                 st.markdown("**Mot de passe**")
                 set_pwd = st.checkbox(
                     "Définir / réinitialiser le mot de passe",
@@ -534,6 +554,17 @@ def render_admin_accounts() -> None:
                 )
 
             if save_ed:
+                e_opt = bool(st.session_state.get("adm_edit_optin"))
+                e_weekly_langs = list(st.session_state.get("adm_edit_weekly_langs") or [])
+                e_fn = str(st.session_state.get("adm_edit_fn") or "")
+                e_ln = str(st.session_state.get("adm_edit_ln") or "")
+                e_ph = str(st.session_state.get("adm_edit_ph") or "")
+                e_country = st.session_state.get("adm_edit_country")
+                e_lang = st.session_state.get("adm_edit_pref_langue")
+                set_pwd = bool(st.session_state.get("adm_edit_set_pwd"))
+                e_pwd = str(st.session_state.get("adm_edit_pwd") or "")
+                e_pwd2 = str(st.session_state.get("adm_edit_pwd2") or "")
+                send_welcome = bool(st.session_state.get("adm_edit_send_welcome"))
                 errs: list[str] = []
                 if e_ph.strip() and not re.match(r"^\+\d{8,15}$", e_ph.strip()):
                     errs.append("Téléphone invalide (format +41… / +33…).")
@@ -706,6 +737,8 @@ def render_admin_accounts() -> None:
                             msg_ok += " Mot de passe initialisé — l’utilisateur peut se connecter."
                         msg_ok += mail_note
                         st.session_state["adm_addsub_flash"] = msg_ok
+                        st.session_state["_adm_edit_force_resync"] = True
+                        st.session_state["adm_edit_expanded"] = True
                         st.rerun()
                     finally:
                         ov_ed.empty()
@@ -851,8 +884,7 @@ def render_admin_accounts() -> None:
             uid = str(u.get("entity_id") or "").strip()
             lg = user_pref_langue(u)
             weekly_langs = list(weekly_langs_by_uid.get(uid) or [])
-            ordered_langs = [lg] + [x for x in weekly_langs if x != lg]
-            ordered_langs = list(dict.fromkeys(ordered_langs))
+            ordered_langs = ordered_account_weekly_langs(lg, weekly_langs)
             lang_cell = (
                 f"<span style='display:inline-flex;align-items:center;gap:0.35rem;white-space:nowrap;flex-wrap:wrap;'>"
                 + "".join(
