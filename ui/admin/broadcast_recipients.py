@@ -6,7 +6,10 @@ import re
 
 from core.locale_codes import normalize_pref_langue, user_pref_langue
 from core.sheets_db import sheet_row_status_is_live
-from core.subscriptions_util import cap_weekly_langs, weekly_subscription_langs
+from core.subscriptions_util import (
+    cap_weekly_langs,
+    weekly_subscription_langs_for_user,
+)
 
 
 def is_broadcast_email_ok(email: str) -> bool:
@@ -49,14 +52,14 @@ def weekly_lang_user_clones(
     user: dict | None,
     subs_rows: list[dict],
     *,
+    users_rows: list[dict] | None = None,
     fallback_account_lang: bool = True,
 ) -> list[dict]:
     """Une fiche clonée par langue newsletter active (max 2)."""
     u = dict(user or {})
-    uid = str(u.get("entity_id") or "").strip()
     account_lang = user_pref_langue(u)
     langs = cap_weekly_langs(
-        weekly_subscription_langs(subs_rows, uid, default_lang=account_lang) if uid else [],
+        weekly_subscription_langs_for_user(subs_rows, u, users_rows=users_rows),
         account_lang=account_lang,
     )
     if not langs:
@@ -153,34 +156,46 @@ def lumenvia_manual_broadcast_recipient_pairs(
         return [
             (uid0, clone)
             for clone in weekly_lang_user_clones(
-                u0, subs_rows, fallback_account_lang=True
+                u0,
+                subs_rows,
+                users_rows=users_rows,
+                fallback_account_lang=True,
             )
         ]
 
-    latest_sub = _weekly_subscriptions_by_uid_lang(users_rows, subs_rows)
-    by_uid_user = _latest_users_by_uid(users_rows)
-    out: list[tuple[str, dict]] = []
+    by_email_user: dict[str, dict] = {}
+    for u in users_rows:
+        if not sheet_row_status_is_live(u.get("status")):
+            continue
+        em0 = str(u.get("email") or "").strip().lower()
+        if not em0:
+            continue
+        prev = by_email_user.get(em0)
+        if not prev or str(u.get("created_at") or "") > str(prev.get("created_at") or ""):
+            by_email_user[em0] = u
 
-    for (uid0, sub_lang), subr in latest_sub.items():
-        if not _subscription_is_mailable(subr):
-            continue
-        urec = by_uid_user.get(uid0)
-        if not urec:
-            continue
-        urec = dict(urec)
-        urec["pref_langue"] = sub_lang
-        em = str(urec.get("email") or "").strip()
-        ph = str(urec.get("phone_e164") or "").strip()
-        has_em = is_broadcast_email_ok(em)
-        has_ph = is_broadcast_phone_ok(ph)
-        if for_email and for_sms:
-            if not has_em and not has_ph:
+    out: list[tuple[str, dict]] = []
+    for urec0 in by_email_user.values():
+        uid0 = str(urec0.get("entity_id") or "").strip()
+        clones = weekly_lang_user_clones(
+            urec0,
+            subs_rows,
+            users_rows=users_rows,
+            fallback_account_lang=False,
+        )
+        for urec in clones:
+            em = str(urec.get("email") or "").strip()
+            ph = str(urec.get("phone_e164") or "").strip()
+            has_em = is_broadcast_email_ok(em)
+            has_ph = is_broadcast_phone_ok(ph)
+            if for_email and for_sms:
+                if not has_em and not has_ph:
+                    continue
+            elif for_email and not has_em:
                 continue
-        elif for_email and not has_em:
-            continue
-        elif for_sms and not has_ph:
-            continue
-        out.append((uid0, urec))
+            elif for_sms and not has_ph:
+                continue
+            out.append((uid0 or em, urec))
     return out
 
 

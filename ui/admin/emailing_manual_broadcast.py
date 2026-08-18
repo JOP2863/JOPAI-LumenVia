@@ -110,13 +110,13 @@ def render_emailing_manual_broadcast(
         else fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="users", limit=9000, use_cache=True)
     )
     subs_rows_for_dry = (
-        adm_sheets_fetch_cached(gsheet_id, "subscriptions", 8000, sa_json)
+        adm_sheets_fetch_cached(gsheet_id, "subscriptions", 0, sa_json)
         if sa_json and gsheet_id
         else fetch_records(
             gspread_client=gs,
             spreadsheet_id=gsheet_id,
             table="subscriptions",
-            limit=8000,
+            limit=0,
             use_cache=True,
         )
     )
@@ -244,7 +244,10 @@ def render_emailing_manual_broadcast(
         if not str(base.get("email") or "").strip():
             base["email"] = em
         for clone in weekly_lang_user_clones(
-            base, subs_rows_for_dry, fallback_account_lang=True
+            base,
+            subs_rows_for_dry,
+            users_rows=users_rows_for_dry,
+            fallback_account_lang=True,
         ):
             preview_rows.append(
                 format_broadcast_recipient_preview_row_html(clone, email_fallback=em)
@@ -257,6 +260,13 @@ def render_emailing_manual_broadcast(
             "</tr>"
         )
     render_broadcast_recipient_preview(preview_rows, max_height_px=220)
+    n_test_sends = len(preview_rows)
+    if selected_test_emails:
+        st.caption(
+            f"**{n_test_sends} e-mail(s)** seront envoyés "
+            f"pour {len(selected_test_emails)} adresse(s) "
+            "(une ligne = une langue)."
+        )
     debug_verbose = False
 
     # Garde-fous supplémentaires si envoi "tous opt-in"
@@ -498,7 +508,10 @@ def render_emailing_manual_broadcast(
                         base["phone_e164"] = str(u0.get("phone_e164") or "").strip()
                     uid_test = str(base.get("entity_id") or "").strip() or "dry_run"
                     for clone in weekly_lang_user_clones(
-                        base, subs_rows, fallback_account_lang=True
+                        base,
+                        subs_rows,
+                        users_rows=users_rows,
+                        fallback_account_lang=True,
                     ):
                         recipients.append((uid_test, clone))
                 if not recipients:
@@ -511,7 +524,10 @@ def render_emailing_manual_broadcast(
                         dry_base["last_name"] = "JOPAI"
                     uid_dry = str(dry_base.get("entity_id") or "").strip() or "dry_run"
                     for clone in weekly_lang_user_clones(
-                        dry_base, subs_rows, fallback_account_lang=True
+                        dry_base,
+                        subs_rows,
+                        users_rows=users_rows,
+                        fallback_account_lang=True,
                     ):
                         recipients.append((uid_dry, clone))
 

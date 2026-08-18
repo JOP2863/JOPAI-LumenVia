@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from hashlib import sha256
+
 from core.locale_codes import DEFAULT_PREF_LANGUE, normalize_pref_langue
 
 
@@ -66,6 +69,61 @@ def weekly_subscription_langs(
         and subscription_is_active(row)
     ]
     return sorted(set(out))
+
+
+def hashed_email_user_entity_id(email: object) -> str:
+    em = str(email or "").strip().lower()
+    if not em:
+        return ""
+    return sha256(em.encode("utf-8")).hexdigest()[:24]
+
+
+def entity_ids_for_email(
+    users_rows: list[dict] | None,
+    email: object,
+    *,
+    extra_ids: Iterable[str] | None = None,
+) -> list[str]:
+    """Tous les ``entity_id`` déjà utilisés pour un e-mail (fiches live et historiques)."""
+    em = str(email or "").strip().lower()
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(uid: object) -> None:
+        u = str(uid or "").strip()
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+
+    hashed = hashed_email_user_entity_id(em)
+    _add(hashed)
+    for uid in extra_ids or []:
+        _add(uid)
+    for row in users_rows or []:
+        if str(row.get("email") or "").strip().lower() != em:
+            continue
+        _add(row.get("entity_id"))
+    return out
+
+
+def weekly_subscription_langs_for_user(
+    subs: list[dict],
+    user: dict | None,
+    *,
+    users_rows: list[dict] | None = None,
+) -> list[str]:
+    """Langues hebdo actives, en fusionnant toutes les fiches du même e-mail."""
+    u = user or {}
+    account_lang = normalize_pref_langue(u.get("pref_langue") or DEFAULT_PREF_LANGUE)
+    uids = entity_ids_for_email(
+        users_rows,
+        u.get("email"),
+        extra_ids=[str(u.get("entity_id") or "").strip()],
+    )
+    found: list[str] = []
+    for uid in uids:
+        found.extend(weekly_subscription_langs(subs, uid, default_lang=account_lang))
+    return list(dict.fromkeys(found))
 
 
 def ordered_account_weekly_langs(account_lang: object, weekly_langs: list[str]) -> list[str]:
