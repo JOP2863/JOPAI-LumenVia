@@ -786,20 +786,15 @@ def render_admin_accounts() -> None:
     if q:
         latest = [u for u in latest if q in str(u.get("email") or "").strip().lower()]
 
-    def _latest_sub_by_user_entity_id(sub_rows: list[dict]) -> dict[str, dict]:
-        by: dict[str, dict] = {}
-        for r in sub_rows:
-            if str(r.get("type") or "").strip() != "weekly_friday":
-                continue
-            uid = str(r.get("user_entity_id") or "").strip()
-            if not uid:
-                continue
-            prev = by.get(uid)
-            if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
-                by[uid] = r
-        return by
-
-    latest_sub = _latest_sub_by_user_entity_id(subs)
+    latest_by_uid = {
+        str(u.get("entity_id") or "").strip(): u
+        for u in latest
+        if str(u.get("entity_id") or "").strip()
+    }
+    weekly_langs_by_uid: dict[str, list[str]] = {
+        uid: weekly_subscription_langs(subs, uid, default_lang=user_pref_langue(u))
+        for uid, u in latest_by_uid.items()
+    }
 
     def _kind(u: dict) -> str:
         em = str(u.get("email") or "").strip().lower()
@@ -855,7 +850,7 @@ def render_admin_accounts() -> None:
             src = str(u.get("source") or "").strip()
             uid = str(u.get("entity_id") or "").strip()
             lg = user_pref_langue(u)
-            weekly_langs = weekly_subscription_langs(subs, uid, default_lang=lg) if uid else []
+            weekly_langs = list(weekly_langs_by_uid.get(uid) or [])
             ordered_langs = [lg] + [x for x in weekly_langs if x != lg]
             ordered_langs = list(dict.fromkeys(ordered_langs))
             lang_cell = (
