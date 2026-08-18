@@ -637,9 +637,31 @@ def render_admin_accounts() -> None:
 
                         target_weekly_langs = set(weekly_langs_n if e_opt else [])
                         current_weekly_langs = set(cur_weekly_langs if cur_opt else [])
-                        if target_weekly_langs != current_weekly_langs:
+                        latest_explicit_by_lang: dict[str, dict] = {}
+                        for srow in subs:
+                            if str(srow.get("user_entity_id") or "").strip() != auth_uid:
+                                continue
+                            if str(srow.get("type") or "").strip() != "weekly_friday":
+                                continue
+                            raw_lg = str(srow.get("pref_langue") or "").strip()
+                            if not raw_lg:
+                                continue
+                            lg0 = normalize_pref_langue(raw_lg)
+                            prev = latest_explicit_by_lang.get(lg0)
+                            if not prev or str(srow.get("created_at") or "") > str(
+                                prev.get("created_at") or ""
+                            ):
+                                latest_explicit_by_lang[lg0] = srow
+                        langs_to_write = {
+                            lg
+                            for lg in target_weekly_langs
+                            if lg not in current_weekly_langs
+                            or not str((latest_explicit_by_lang.get(lg) or {}).get("pref_langue") or "").strip()
+                        }
+                        langs_to_off = current_weekly_langs - target_weekly_langs
+                        if langs_to_write or langs_to_off:
                             length_pref_ed = str((latest_sub_ed or {}).get("length_pref") or "250")
-                            for lg in sorted(target_weekly_langs - current_weekly_langs):
+                            for lg in sorted(langs_to_write):
                                 append_immutable_row(
                                     gspread_client=gs,
                                     spreadsheet_id=cfg.gsheet_id,
@@ -657,7 +679,7 @@ def render_admin_accounts() -> None:
                                         "active": "true",
                                     },
                                 )
-                            for lg in sorted(current_weekly_langs - target_weekly_langs):
+                            for lg in sorted(langs_to_off):
                                 append_immutable_row(
                                     gspread_client=gs,
                                     spreadsheet_id=cfg.gsheet_id,

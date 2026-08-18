@@ -38,6 +38,9 @@ def weekly_subscription_langs(
             continue
         if str(s.get("type") or "").strip() != "weekly_friday":
             continue
+        st = str(s.get("status") or "").strip().lower()
+        if st.startswith("inactif") or st.startswith("inactive"):
+            continue
         raw_lg = str(s.get("pref_langue") or "").strip()
         if raw_lg:
             lg = normalize_pref_langue(raw_lg)

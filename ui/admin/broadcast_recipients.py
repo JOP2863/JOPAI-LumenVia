@@ -6,6 +6,7 @@ import re
 
 from core.locale_codes import normalize_pref_langue, user_pref_langue
 from core.sheets_db import sheet_row_status_is_live
+from core.subscriptions_util import cap_weekly_langs, weekly_subscription_langs
 
 
 def is_broadcast_email_ok(email: str) -> bool:
@@ -44,9 +45,36 @@ def _latest_users_by_uid(users_rows: list[dict]) -> dict[str, dict]:
     return by_uid_user
 
 
+def weekly_lang_user_clones(
+    user: dict | None,
+    subs_rows: list[dict],
+    *,
+    fallback_account_lang: bool = True,
+) -> list[dict]:
+    """Une fiche clonée par langue newsletter active (max 2)."""
+    u = dict(user or {})
+    uid = str(u.get("entity_id") or "").strip()
+    account_lang = user_pref_langue(u)
+    langs = cap_weekly_langs(
+        weekly_subscription_langs(subs_rows, uid, default_lang=account_lang) if uid else [],
+        account_lang=account_lang,
+    )
+    if not langs:
+        if not fallback_account_lang:
+            return []
+        langs = [account_lang] if account_lang else []
+    out: list[dict] = []
+    for lg in langs:
+        row = dict(u)
+        row["pref_langue"] = lg
+        out.append(row)
+    return out
+
+
 def _weekly_subscriptions_by_uid_lang(
     users_rows: list[dict], subs_rows: list[dict]
 ) -> dict[tuple[str, str], dict]:
+    """Dernière ligne ``weekly_friday`` par ``(user_entity_id, langue)``."""
     by_uid_user = _latest_users_by_uid(users_rows)
     by: dict[tuple[str, str], dict] = {}
     for r in subs_rows:
@@ -55,8 +83,30 @@ def _weekly_subscriptions_by_uid_lang(
         uid0 = str(r.get("user_entity_id") or "").strip()
         if not uid0:
             continue
+        raw_lg = str(r.get("pref_langue") or "").strip()
+        if not raw_lg:
+            continue
+        lg = normalize_pref_langue(raw_lg)
+        key = (uid0, lg)
+        prev = by.get(key)
+        if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+            by[key] = r
+    # Lignes historiques sans ``pref_langue`` : une seule langue = celle du compte.
+    latest_legacy: dict[str, dict] = {}
+    for r in subs_rows:
+        if str(r.get("type") or "").strip() != "weekly_friday":
+            continue
+        if str(r.get("pref_langue") or "").strip():
+            continue
+        uid0 = str(r.get("user_entity_id") or "").strip()
+        if not uid0:
+            continue
+        prev = latest_legacy.get(uid0)
+        if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+            latest_legacy[uid0] = r
+    for uid0, r in latest_legacy.items():
         u0 = by_uid_user.get(uid0) or {}
-        lg = normalize_pref_langue(r.get("pref_langue") or user_pref_langue(u0))
+        lg = user_pref_langue(u0)
         key = (uid0, lg)
         prev = by.get(key)
         if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
@@ -100,7 +150,12 @@ def lumenvia_manual_broadcast_recipient_pairs(
         if not u0:
             return []
         uid0 = str(u0.get("entity_id") or "").strip() or "dry_run"
-        return [(uid0, u0)]
+        return [
+            (uid0, clone)
+            for clone in weekly_lang_user_clones(
+                u0, subs_rows, fallback_account_lang=True
+            )
+        ]
 
     latest_sub = _weekly_subscriptions_by_uid_lang(users_rows, subs_rows)
     by_uid_user = _latest_users_by_uid(users_rows)

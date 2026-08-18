@@ -51,6 +51,7 @@ from ui.admin.broadcast_recipients import (
     lumenvia_manual_broadcast_recipient_pairs,
     lumenvia_manual_broadcast_users,
     render_broadcast_recipient_preview,
+    weekly_lang_user_clones,
 )
 from ui.components import loading_overlay
 from ui.navigation import lumenvia_app_origin_url as _lumenvia_app_origin_url
@@ -107,6 +108,17 @@ def render_emailing_manual_broadcast(
         adm_sheets_fetch_cached(gsheet_id, "users", 9000, sa_json)
         if sa_json and gsheet_id
         else fetch_records(gspread_client=gs, spreadsheet_id=gsheet_id, table="users", limit=9000, use_cache=True)
+    )
+    subs_rows_for_dry = (
+        adm_sheets_fetch_cached(gsheet_id, "subscriptions", 8000, sa_json)
+        if sa_json and gsheet_id
+        else fetch_records(
+            gspread_client=gs,
+            spreadsheet_id=gsheet_id,
+            table="subscriptions",
+            limit=8000,
+            use_cache=True,
+        )
     )
     dry_candidates = [
         u
@@ -218,19 +230,24 @@ def render_emailing_manual_broadcast(
 
     st.markdown("**Destinataires de test (aperçu)**")
     st.caption(
-        "Colonne langue = langue réellement utilisée pour le rendu de l’e-mail."
+        "Une ligne par langue d’abonnement : si le compte a FR et DE, deux e-mails distincts partent."
     )
     preview_rows: list[str] = []
     for em in selected_test_emails:
         u0 = _latest_user_by_email(em)
-        if u0:
-            preview_rows.append(format_broadcast_recipient_preview_row_html(u0, email_fallback=em))
-        else:
+        base = dict(u0) if u0 else {
+            "email": em,
+            "first_name": "Test",
+            "last_name": "JOPAI",
+            "pref_langue": "FR",
+        }
+        if not str(base.get("email") or "").strip():
+            base["email"] = em
+        for clone in weekly_lang_user_clones(
+            base, subs_rows_for_dry, fallback_account_lang=True
+        ):
             preview_rows.append(
-                format_broadcast_recipient_preview_row_html(
-                    {"email": em, "first_name": "Test", "last_name": "JOPAI", "pref_langue": "FR"},
-                    email_fallback=em,
-                )
+                format_broadcast_recipient_preview_row_html(clone, email_fallback=em)
             )
     if dry_phone_in and not selected_test_emails:
         preview_rows.append(
@@ -254,28 +271,8 @@ def render_emailing_manual_broadcast(
             icon="⚠️",
         )
         with st.expander("Aperçu des destinataires (avant envoi)", expanded=True):
-            users_preview = (
-                users_rows_for_dry
-                if sa_json and gsheet_id
-                else fetch_records(
-                    gspread_client=gs,
-                    spreadsheet_id=gsheet_id,
-                    table="users",
-                    limit=8000,
-                    use_cache=True,
-                )
-            )
-            subs_preview = (
-                adm_sheets_fetch_cached(gsheet_id, "subscriptions", 8000, sa_json)
-                if sa_json and gsheet_id
-                else fetch_records(
-                    gspread_client=gs,
-                    spreadsheet_id=gsheet_id,
-                    table="subscriptions",
-                    limit=8000,
-                    use_cache=True,
-                )
-            )
+            users_preview = users_rows_for_dry
+            subs_preview = subs_rows_for_dry
             rec_preview = lumenvia_manual_broadcast_users(
                 users_rows=users_preview,
                 subs_rows=subs_preview,
@@ -446,32 +443,8 @@ def render_emailing_manual_broadcast(
                     )
 
             # recipients
-            users_rows = (
-                users_rows_for_dry
-                if send_to_all and sa_json and gsheet_id
-                else (
-                    adm_sheets_fetch_cached(gsheet_id, "users", 8000, sa_json)
-                    if sa_json and gsheet_id
-                    else fetch_records(
-                        gspread_client=gs,
-                        spreadsheet_id=gsheet_id,
-                        table="users",
-                        limit=8000,
-                        use_cache=True,
-                    )
-                )
-            )
-            subs_rows = (
-                adm_sheets_fetch_cached(gsheet_id, "subscriptions", 8000, sa_json)
-                if sa_json and gsheet_id
-                else fetch_records(
-                    gspread_client=gs,
-                    spreadsheet_id=gsheet_id,
-                    table="subscriptions",
-                    limit=8000,
-                    use_cache=True,
-                )
-            )
+            users_rows = users_rows_for_dry
+            subs_rows = subs_rows_for_dry
 
             recipients: list[tuple[str, dict]] = []
             if send_to_all:
@@ -511,38 +484,36 @@ def render_emailing_manual_broadcast(
                 if limit_to_n > 0:
                     recipients = recipients[: int(limit_to_n)]
             else:
-                # Destinataires de test sélectionnés + fallback dry-run
-                # Important : conserver ``pref_langue`` du profil users (sinon envoi toujours en FR).
-                from core.locale_codes import user_pref_langue as _upl
-
+                # Destinataires de test : un envoi par langue d’abonnement (max 2).
                 recipients = []
                 for em in selected_test_emails:
                     u0 = _latest_user_by_email(em)
-                    recipients.append(
-                        (
-                            "dry_run",
-                            {
-                                "email": em.strip(),
-                                "phone_e164": str(u0.get("phone_e164") or "").strip(),
-                                "first_name": str(u0.get("first_name") or "Test").strip() or "Test",
-                                "last_name": str(u0.get("last_name") or "JOPAI").strip() or "JOPAI",
-                                "pref_langue": _upl(u0) if u0 else "FR",
-                            },
-                        )
-                    )
+                    base = dict(u0) if u0 else {}
+                    base["email"] = em.strip()
+                    if not str(base.get("first_name") or "").strip():
+                        base["first_name"] = "Test"
+                    if not str(base.get("last_name") or "").strip():
+                        base["last_name"] = "JOPAI"
+                    if not str(base.get("phone_e164") or "").strip() and u0:
+                        base["phone_e164"] = str(u0.get("phone_e164") or "").strip()
+                    uid_test = str(base.get("entity_id") or "").strip() or "dry_run"
+                    for clone in weekly_lang_user_clones(
+                        base, subs_rows, fallback_account_lang=True
+                    ):
+                        recipients.append((uid_test, clone))
                 if not recipients:
-                    recipients = [
-                        (
-                            "dry_run",
-                            {
-                                "email": dry_email_in.strip(),
-                                "phone_e164": dry_phone_in.strip(),
-                                "first_name": str(dry_user.get("first_name") or "Test").strip() or "Test",
-                                "last_name": str(dry_user.get("last_name") or "JOPAI").strip() or "JOPAI",
-                                "pref_langue": _upl(dry_user) if dry_user else "FR",
-                            },
-                        )
-                    ]
+                    dry_base = dict(dry_user) if dry_user else {}
+                    dry_base["email"] = dry_email_in.strip()
+                    dry_base["phone_e164"] = dry_phone_in.strip()
+                    if not str(dry_base.get("first_name") or "").strip():
+                        dry_base["first_name"] = "Test"
+                    if not str(dry_base.get("last_name") or "").strip():
+                        dry_base["last_name"] = "JOPAI"
+                    uid_dry = str(dry_base.get("entity_id") or "").strip() or "dry_run"
+                    for clone in weekly_lang_user_clones(
+                        dry_base, subs_rows, fallback_account_lang=True
+                    ):
+                        recipients.append((uid_dry, clone))
 
             from core.outbound import SmtpConfig, TwilioConfig, send_smtp_email, send_twilio_sms
             from core.sheets_db import TableSpec, ensure_table
