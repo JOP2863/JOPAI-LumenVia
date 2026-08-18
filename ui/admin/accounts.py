@@ -855,20 +855,23 @@ def render_admin_accounts() -> None:
             src = str(u.get("source") or "").strip()
             uid = str(u.get("entity_id") or "").strip()
             lg = user_pref_langue(u)
+            weekly_langs = weekly_subscription_langs(subs, uid, default_lang=lg) if uid else []
+            ordered_langs = [lg] + [x for x in weekly_langs if x != lg]
+            ordered_langs = list(dict.fromkeys(ordered_langs))
             lang_cell = (
-                f"<span style='display:inline-flex;align-items:center;gap:0.25rem;white-space:nowrap;'>"
-                f"{lang_flag_html(lg, height=14)}"
-                f"<span style='opacity:0.9;'>{html_escape(lg)}</span>"
-                f"</span>"
+                f"<span style='display:inline-flex;align-items:center;gap:0.35rem;white-space:nowrap;flex-wrap:wrap;'>"
+                + "".join(
+                    f"<span style='display:inline-flex;align-items:center;gap:0.2rem;'>"
+                    f"{lang_flag_html(code, height=14)}"
+                    f"<span style='opacity:0.9;'>{html_escape(code)}</span>"
+                    f"</span>"
+                    for code in ordered_langs
+                )
+                + "</span>"
             )
             opt_txt = "—"
             if uid and title.lower().startswith("nous rejoindre"):
-                rec = latest_sub.get(uid)
-                # Colonne dédiée si présente, sinon fallback sur `active`
-                if rec and str(rec.get("opt_in") or "").strip():
-                    opt_txt = "Oui" if str(rec.get("opt_in") or "").strip().lower() in ("true", "1", "oui", "yes") else "Non"
-                else:
-                    opt_txt = "Oui" if subscription_is_active(rec) else "Non"
+                opt_txt = "Oui" if weekly_langs else "Non"
             body_rows.append(
                 "<tr>"
                 f"<td style='padding:8px 10px;border-top:1px solid rgba(0,0,0,0.06);'>{html_escape(em)}</td>"
