@@ -218,7 +218,7 @@ def render_emailing_manual_broadcast(
 
     st.markdown("**Destinataires de test (aperçu)**")
     st.caption(
-        "Colonne langue = `pref_langue` du profil (`users`) : langue dans laquelle l’e-mail sera rendu."
+        "Colonne langue = langue réellement utilisée pour le rendu de l’e-mail."
     )
     preview_rows: list[str] = []
     for em in selected_test_emails:
@@ -349,7 +349,7 @@ def render_emailing_manual_broadcast(
                 )
             )
 
-            # Mini table (limite) : qui va recevoir + langue d’e-mail (profil)
+            # Mini table (limite) : qui va recevoir + langue d’e-mail
             show_n = st.slider(
                 "Afficher les N premiers destinataires (aperçu)",
                 min_value=10,
@@ -359,7 +359,7 @@ def render_emailing_manual_broadcast(
                 key="adm_email_preview_n",
             )
             st.caption(
-                "Colonnes : e-mail · prénom · nom · **langue d’envoi** (`pref_langue` du profil)."
+                "Colonnes : e-mail · prénom · nom · **langue d’envoi**."
             )
             render_broadcast_recipient_preview(
                 [

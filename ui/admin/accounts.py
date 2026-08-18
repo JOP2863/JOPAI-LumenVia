@@ -35,7 +35,11 @@ from core.sheets_db import (
     utc_now_iso,
     _resolve_table_name,
 )
-from core.subscriptions_util import latest_subscription_record, subscription_is_active
+from core.subscriptions_util import (
+    latest_subscription_record,
+    subscription_is_active,
+    weekly_subscription_langs,
+)
 from core.sunday_view_locale import lang_flag_html
 from ui.admin_secrets import admin_login_and_password
 from ui.components import loading_overlay
@@ -298,6 +302,7 @@ def render_admin_accounts() -> None:
                                     "user_entity_id": uid0,
                                     "type": "weekly_friday",
                                     "zone": "france",
+                                    "pref_langue": normalize_pref_langue(pref_langue),
                                     "length_pref": str(length_pref or "250").strip(),
                                     "opt_in": "true",
                                     "active": "true",
@@ -431,12 +436,12 @@ def render_admin_accounts() -> None:
 
             auth_uid = str(rp.get("entity_id") or "").strip() or sha256(em_pick.encode("utf-8")).hexdigest()[:24]
             latest_sub_ed = latest_subscription_record(subs, auth_uid, "weekly_friday")
-            cur_opt = str((latest_sub_ed or {}).get("opt_in") or "").strip().lower() in (
-                "true",
-                "1",
-                "oui",
-                "yes",
-            ) or subscription_is_active(latest_sub_ed)
+            cur_weekly_langs = weekly_subscription_langs(
+                subs,
+                auth_uid,
+                default_lang=cur_lang,
+            )
+            cur_opt = bool(cur_weekly_langs)
 
             # Streamlit ignore `value=` / `index=` si la clé existe déjà en session :
             # resynchroniser les champs quand l’e-mail sélectionné change.
@@ -447,6 +452,7 @@ def render_admin_accounts() -> None:
                 st.session_state["adm_edit_country"] = cur_country
                 st.session_state["adm_edit_pref_langue"] = cur_lang
                 st.session_state["adm_edit_optin"] = bool(cur_opt)
+                st.session_state["adm_edit_weekly_langs"] = list(cur_weekly_langs)
                 st.session_state["adm_edit_set_pwd"] = False
                 st.session_state["adm_edit_pwd"] = ""
                 st.session_state["adm_edit_pwd2"] = ""
@@ -486,6 +492,16 @@ def render_admin_accounts() -> None:
                     "Opt-in newsletter (vendredi)",
                     key="adm_edit_optin",
                 )
+                e_weekly_langs = st.multiselect(
+                    "Langues de la newsletter du vendredi",
+                    options=lang_codes_ed,
+                    default=list(cur_weekly_langs),
+                    format_func=lambda c: next((lab for code, lab in langues_opts_ed if code == c), c),
+                    key="adm_edit_weekly_langs",
+                    help="Jusqu’à 2 langues : un e-mail distinct sera envoyé pour chaque langue cochée.",
+                    max_selections=2,
+                    disabled=not bool(e_opt),
+                )
                 st.markdown("**Mot de passe**")
                 set_pwd = st.checkbox(
                     "Définir / réinitialiser le mot de passe",
@@ -521,6 +537,10 @@ def render_admin_accounts() -> None:
                 errs: list[str] = []
                 if e_ph.strip() and not re.match(r"^\+\d{8,15}$", e_ph.strip()):
                     errs.append("Téléphone invalide (format +41… / +33…).")
+                weekly_langs_n = [normalize_pref_langue(x) for x in (e_weekly_langs or [])]
+                if e_opt and not weekly_langs_n:
+                    weekly_langs_n = [normalize_pref_langue(e_lang)]
+                weekly_langs_n = list(dict.fromkeys(weekly_langs_n))[:2]
                 if set_pwd:
                     if len(e_pwd or "") < 8:
                         errs.append("Mot de passe : 8 caractères minimum.")
@@ -574,27 +594,46 @@ def render_admin_accounts() -> None:
                             version=next_ver,
                         )
 
-                        # Opt-in newsletter si changement
-                        if bool(e_opt) != bool(cur_opt):
-                            sub_ent = sha256(
-                                f"sub|{auth_uid}|adm_edit|{utc_now_iso()}".encode("utf-8")
-                            ).hexdigest()[:24]
-                            append_immutable_row(
-                                gspread_client=gs,
-                                spreadsheet_id=cfg.gsheet_id,
-                                table="subscriptions",
-                                values_by_col={
-                                    "entity_id": sub_ent,
-                                    "user_entity_id": auth_uid,
-                                    "type": "weekly_friday",
-                                    "zone": "france",
-                                    "length_pref": str(
-                                        (latest_sub_ed or {}).get("length_pref") or "250"
-                                    ),
-                                    "opt_in": "true" if e_opt else "false",
-                                    "active": "true" if e_opt else "false",
-                                },
-                            )
+                        target_weekly_langs = set(weekly_langs_n if e_opt else [])
+                        current_weekly_langs = set(cur_weekly_langs if cur_opt else [])
+                        if target_weekly_langs != current_weekly_langs:
+                            length_pref_ed = str((latest_sub_ed or {}).get("length_pref") or "250")
+                            for lg in sorted(target_weekly_langs - current_weekly_langs):
+                                append_immutable_row(
+                                    gspread_client=gs,
+                                    spreadsheet_id=cfg.gsheet_id,
+                                    table="subscriptions",
+                                    values_by_col={
+                                        "entity_id": sha256(
+                                            f"sub|{auth_uid}|adm_edit|{lg}|{utc_now_iso()}".encode("utf-8")
+                                        ).hexdigest()[:24],
+                                        "user_entity_id": auth_uid,
+                                        "type": "weekly_friday",
+                                        "zone": "france",
+                                        "pref_langue": lg,
+                                        "length_pref": length_pref_ed,
+                                        "opt_in": "true",
+                                        "active": "true",
+                                    },
+                                )
+                            for lg in sorted(current_weekly_langs - target_weekly_langs):
+                                append_immutable_row(
+                                    gspread_client=gs,
+                                    spreadsheet_id=cfg.gsheet_id,
+                                    table="subscriptions",
+                                    values_by_col={
+                                        "entity_id": sha256(
+                                            f"sub|{auth_uid}|adm_edit_off|{lg}|{utc_now_iso()}".encode("utf-8")
+                                        ).hexdigest()[:24],
+                                        "user_entity_id": auth_uid,
+                                        "type": "weekly_friday",
+                                        "zone": "france",
+                                        "pref_langue": lg,
+                                        "length_pref": length_pref_ed,
+                                        "opt_in": "false",
+                                        "active": "false",
+                                    },
+                                )
 
                         mail_note = ""
                         if send_welcome:

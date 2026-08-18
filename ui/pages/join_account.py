@@ -33,7 +33,11 @@ from core.sheets_db import (
     sheet_row_status_is_live,
     utc_now_iso,
 )
-from core.subscriptions_util import latest_subscription_record, subscription_is_active
+from core.subscriptions_util import (
+    latest_subscription_record,
+    subscription_is_active,
+    weekly_subscription_langs,
+)
 from ui.admin_secrets import admin_login_and_password
 from ui.components import loading_overlay
 
@@ -300,40 +304,74 @@ def render_join() -> None:
             if not is_admin_sess and rp:
                 st.divider()
                 st.subheader("Newsletter")
+                _langues_opts, _pays_opts_unused = _locale_select_options(gs=gs, cfg=cfg)
+                _lang_codes = [c for c, _ in _langues_opts] or [DEFAULT_PREF_LANGUE]
                 auth_uid_ac = str(user_entity_id).strip()
                 latest_ac_sub = latest_subscription_record(subs, auth_uid_ac, "weekly_friday")
-                cur_o = str((latest_ac_sub or {}).get("opt_in") or "").strip().lower() in ("true", "1", "oui", "yes")
+                cur_langs_ac = weekly_subscription_langs(
+                    subs, auth_uid_ac, default_lang=user_pref_langue(rp)
+                )
+                cur_o = bool(cur_langs_ac)
                 want_o = st.checkbox(
                     "Je souhaite recevoir les e-mails du vendredi (opt-in)",
                     value=bool(cur_o),
                     key="acct_news_optin",
                 )
+                want_langs_ac = st.multiselect(
+                    "Langues des e-mails du vendredi",
+                    options=_lang_codes,
+                    default=list(cur_langs_ac),
+                    format_func=lambda c: next((lab for code, lab in _langues_opts if code == c), c),
+                    key="acct_news_langs",
+                    max_selections=2,
+                    disabled=not bool(want_o),
+                )
                 if st.button("Enregistrer les préférences newsletter", type="secondary", key="acct_news_save"):
                     ov_n = loading_overlay("Enregistrement…")
                     try:
-                        cur_act = str((latest_ac_sub or {}).get("active") or "").strip().lower() in (
-                            "true",
-                            "1",
-                            "oui",
-                            "yes",
-                            "active",
-                        )
-                        if (bool(want_o) != cur_o) or (bool(want_o) != cur_act):
-                            sub_ent = sha256(f"sub|{auth_uid_ac}|acct|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
-                            append_immutable_row(
-                                gspread_client=gs,
-                                spreadsheet_id=cfg.gsheet_id,
-                                table="subscriptions",
-                                values_by_col={
-                                    "entity_id": sub_ent,
-                                    "user_entity_id": auth_uid_ac,
-                                    "type": "weekly_friday",
-                                    "zone": "france",
-                                    "length_pref": str((latest_ac_sub or {}).get("length_pref") or "250"),
-                                    "opt_in": "true" if want_o else "false",
-                                    "active": "true" if want_o else "false",
-                                },
-                            )
+                        target_langs_ac = [normalize_pref_langue(x) for x in (want_langs_ac or [])]
+                        if want_o and not target_langs_ac:
+                            target_langs_ac = [user_pref_langue(rp)]
+                        target_set_ac = set(target_langs_ac[:2] if want_o else [])
+                        current_set_ac = set(cur_langs_ac if cur_o else [])
+                        if target_set_ac != current_set_ac:
+                            length_pref_ac = str((latest_ac_sub or {}).get("length_pref") or "250")
+                            for lg in sorted(target_set_ac - current_set_ac):
+                                append_immutable_row(
+                                    gspread_client=gs,
+                                    spreadsheet_id=cfg.gsheet_id,
+                                    table="subscriptions",
+                                    values_by_col={
+                                        "entity_id": sha256(
+                                            f"sub|{auth_uid_ac}|acct|{lg}|{utc_now_iso()}".encode("utf-8")
+                                        ).hexdigest()[:24],
+                                        "user_entity_id": auth_uid_ac,
+                                        "type": "weekly_friday",
+                                        "zone": "france",
+                                        "pref_langue": lg,
+                                        "length_pref": length_pref_ac,
+                                        "opt_in": "true",
+                                        "active": "true",
+                                    },
+                                )
+                            for lg in sorted(current_set_ac - target_set_ac):
+                                append_immutable_row(
+                                    gspread_client=gs,
+                                    spreadsheet_id=cfg.gsheet_id,
+                                    table="subscriptions",
+                                    values_by_col={
+                                        "entity_id": sha256(
+                                            f"sub|{auth_uid_ac}|acct_off|{lg}|{utc_now_iso()}".encode("utf-8")
+                                        ).hexdigest()[:24],
+                                        "user_entity_id": auth_uid_ac,
+                                        "type": "weekly_friday",
+                                        "zone": "france",
+                                        "pref_langue": lg,
+                                        "length_pref": length_pref_ac,
+                                        "opt_in": "false",
+                                        "active": "false",
+                                    },
+                                )
                         st.success("Préférences enregistrées.")
                         _invalidate_account_sheets_caches(cfg)
                         st.rerun()
@@ -636,6 +674,7 @@ def render_join() -> None:
                                         "user_entity_id": new_uid,
                                         "type": "weekly_friday",
                                         "zone": "france",
+                                        "pref_langue": DEFAULT_PREF_LANGUE,
                                         "length_pref": "250",
                                         "opt_in": "true",
                                         "active": "true",
@@ -664,7 +703,12 @@ def render_join() -> None:
     auth_email_lc = str(st.session_state.get("auth_email_lc") or "").strip().lower()
     auth_uid = sha256(auth_email_lc.encode("utf-8")).hexdigest()[:24] if auth_email_lc else ""
     auth_latest_sub = latest_subscription_record(subs, auth_uid, "weekly_friday") if auth_uid else None
-    auth_is_in = bool(auth_uid) and subscription_is_active(auth_latest_sub)
+    auth_weekly_langs = (
+        weekly_subscription_langs(subs, auth_uid, default_lang=st.session_state.get("pref_langue"))
+        if auth_uid
+        else []
+    )
+    auth_is_in = bool(auth_uid) and bool(auth_weekly_langs)
 
     if auth_email_lc:
         st.caption(
@@ -672,35 +716,67 @@ def render_join() -> None:
             "en renseignant ses informations plus bas."
         )
         with st.expander("Mes préférences newsletter", expanded=False):
-            cur_opt_in = str((auth_latest_sub or {}).get("opt_in") or "").strip().lower() in ("true", "1", "oui", "yes")
+            cur_opt_in = bool(auth_weekly_langs)
             want_opt_in = st.checkbox(
                 "Je souhaite recevoir les e-mails du vendredi (opt-in)",
                 value=bool(cur_opt_in),
                 key="join_me_optin",
             )
+            want_langs_me = st.multiselect(
+                "Langues des e-mails du vendredi",
+                options=_lang_codes,
+                default=list(auth_weekly_langs),
+                format_func=lambda c: next((lab for code, lab in _langues_opts if code == c), c),
+                key="join_me_optin_langs",
+                max_selections=2,
+                disabled=not bool(want_opt_in),
+            )
             if st.button("Enregistrer", type="primary", key="join_me_optin_save"):
                 ov = loading_overlay("Enregistrement…")
                 try:
-                    # Append-only : nouvelle ligne subscriptions si changement
-                    cur_active = str((auth_latest_sub or {}).get("active") or "").strip().lower() in ("true", "1", "oui", "yes", "active")
-                    target_opt_in = bool(want_opt_in)
-                    target_active = bool(want_opt_in)
-                    if (target_opt_in != cur_opt_in) or (target_active != cur_active):
-                        sub_entity = sha256(f"sub|{auth_uid}|prefs|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
-                        append_immutable_row(
-                            gspread_client=gs,
-                            spreadsheet_id=cfg.gsheet_id,
-                            table="subscriptions",
-                            values_by_col={
-                                "entity_id": sub_entity,
-                                "user_entity_id": auth_uid,
-                                "type": "weekly_friday",
-                                "zone": "france",
-                                "length_pref": str((auth_latest_sub or {}).get("length_pref") or "250"),
-                                "opt_in": "true" if target_opt_in else "false",
-                                "active": "true" if target_active else "false",
-                            },
-                        )
+                    target_langs_me = [normalize_pref_langue(x) for x in (want_langs_me or [])]
+                    if want_opt_in and not target_langs_me:
+                        target_langs_me = [normalize_pref_langue(st.session_state.get("pref_langue"))]
+                    target_set_me = set(target_langs_me[:2] if want_opt_in else [])
+                    current_set_me = set(auth_weekly_langs if cur_opt_in else [])
+                    if target_set_me != current_set_me:
+                        length_pref_me = str((auth_latest_sub or {}).get("length_pref") or "250")
+                        for lg in sorted(target_set_me - current_set_me):
+                            append_immutable_row(
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table="subscriptions",
+                                values_by_col={
+                                    "entity_id": sha256(
+                                        f"sub|{auth_uid}|prefs|{lg}|{utc_now_iso()}".encode("utf-8")
+                                    ).hexdigest()[:24],
+                                    "user_entity_id": auth_uid,
+                                    "type": "weekly_friday",
+                                    "zone": "france",
+                                    "pref_langue": lg,
+                                    "length_pref": length_pref_me,
+                                    "opt_in": "true",
+                                    "active": "true",
+                                },
+                            )
+                        for lg in sorted(current_set_me - target_set_me):
+                            append_immutable_row(
+                                gspread_client=gs,
+                                spreadsheet_id=cfg.gsheet_id,
+                                table="subscriptions",
+                                values_by_col={
+                                    "entity_id": sha256(
+                                        f"sub|{auth_uid}|prefs_off|{lg}|{utc_now_iso()}".encode("utf-8")
+                                    ).hexdigest()[:24],
+                                    "user_entity_id": auth_uid,
+                                    "type": "weekly_friday",
+                                    "zone": "france",
+                                    "pref_langue": lg,
+                                    "length_pref": length_pref_me,
+                                    "opt_in": "false",
+                                    "active": "false",
+                                },
+                            )
                     st.success("Préférences enregistrées.")
                     _invalidate_account_sheets_caches(cfg)
                     st.rerun()
@@ -746,6 +822,15 @@ def render_join() -> None:
             key="join_pref_langue",
             help="Langue de consultation LumenVia (e-mails et contenus).",
         )
+    join_weekly_langs = st.multiselect(
+        "Langues des e-mails du vendredi",
+        options=_lang_codes,
+        default=[pref_langue] if pref_langue else [DEFAULT_PREF_LANGUE],
+        format_func=lambda c: next((lab for code, lab in _langues_opts if code == c), c),
+        key="join_weekly_langs",
+        max_selections=2,
+        help="Si tu coches 2 langues, tu recevras 2 e-mails distincts chaque vendredi.",
+    )
     phone_e164 = st.text_input(
         "Téléphone (optionnel, format international)",
         key="join_phone_e164",
@@ -765,7 +850,8 @@ def render_join() -> None:
 
     uid = sha256(email_lc.encode("utf-8")).hexdigest()[:24] if email_lc else ""
     latest_sub = latest_subscription_record(subs, uid, "weekly_friday") if uid else None
-    already_in = bool(uid) and subscription_is_active(latest_sub)
+    current_join_langs = weekly_subscription_langs(subs, uid, default_lang=pref_langue) if uid else []
+    already_in = bool(uid) and bool(current_join_langs)
 
     if auth_email_lc:
         st.caption("Astuce : si tu es déjà connecté, ce formulaire sert surtout à inscrire quelqu’un d’autre.")
@@ -776,21 +862,25 @@ def render_join() -> None:
         if st.button("Se désinscrire", type="secondary", key="join_opt_out_btn"):
             ov = loading_overlay("Désinscription…")
             try:
-                sub_entity = sha256(f"sub|{uid}|optout|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
-                append_immutable_row(
-                    gspread_client=gs,
-                    spreadsheet_id=cfg.gsheet_id,
-                    table="subscriptions",
-                    values_by_col={
-                        "entity_id": sub_entity,
-                        "user_entity_id": uid,
-                        "type": "weekly_friday",
-                        "zone": "france",
-                        "length_pref": str((latest_sub or {}).get("length_pref") or "250"),
-                        "opt_in": "false",
-                        "active": "false",
-                    },
-                )
+                length_pref_join = str((latest_sub or {}).get("length_pref") or "250")
+                for lg in (current_join_langs or [normalize_pref_langue(pref_langue)]):
+                    append_immutable_row(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="subscriptions",
+                        values_by_col={
+                            "entity_id": sha256(
+                                f"sub|{uid}|optout|{lg}|{utc_now_iso()}".encode("utf-8")
+                            ).hexdigest()[:24],
+                            "user_entity_id": uid,
+                            "type": "weekly_friday",
+                            "zone": "france",
+                            "pref_langue": normalize_pref_langue(lg),
+                            "length_pref": length_pref_join,
+                            "opt_in": "false",
+                            "active": "false",
+                        },
+                    )
                 st.success("Désinscription enregistrée.")
                 _invalidate_account_sheets_caches(cfg)
                 st.rerun()
@@ -823,24 +913,34 @@ def render_join() -> None:
                     },
                 )
             latest_before = latest_subscription_record(subs, user_entity_id, "weekly_friday")
-            if subscription_is_active(latest_before):
+            target_join_langs = [normalize_pref_langue(x) for x in (join_weekly_langs or [])]
+            if not target_join_langs:
+                target_join_langs = [normalize_pref_langue(pref_langue or DEFAULT_PREF_LANGUE)]
+            current_before_langs = set(
+                weekly_subscription_langs(subs, user_entity_id, default_lang=pref_langue)
+            )
+            target_before_langs = set(target_join_langs[:2])
+            if target_before_langs and target_before_langs.issubset(current_before_langs):
                 st.info("Tu étais déjà inscrit — aucune nouvelle ligne nécessaire.")
             else:
-                sub_entity = sha256(f"sub|{user_entity_id}|{utc_now_iso()}".encode("utf-8")).hexdigest()[:24]
-                append_immutable_row(
-                    gspread_client=gs,
-                    spreadsheet_id=cfg.gsheet_id,
-                    table="subscriptions",
-                    values_by_col={
-                        "entity_id": sub_entity,
-                        "user_entity_id": user_entity_id,
-                        "type": "weekly_friday",
-                        "zone": "france",
-                        "length_pref": "250",
-                        "opt_in": "true",
-                        "active": "true",
-                    },
-                )
+                for lg in sorted(target_before_langs - current_before_langs):
+                    append_immutable_row(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="subscriptions",
+                        values_by_col={
+                            "entity_id": sha256(
+                                f"sub|{user_entity_id}|{lg}|{utc_now_iso()}".encode("utf-8")
+                            ).hexdigest()[:24],
+                            "user_entity_id": user_entity_id,
+                            "type": "weekly_friday",
+                            "zone": "france",
+                            "pref_langue": lg,
+                            "length_pref": "250",
+                            "opt_in": "true",
+                            "active": "true",
+                        },
+                    )
                 should_refresh = True
         finally:
             ov.empty()

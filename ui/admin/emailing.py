@@ -33,6 +33,13 @@ from ui.streamlit_caches import (
     service_account_json_fingerprint,
 )
 
+_TEMP_ACTUALITE_UNTIL = date(2026, 8, 22)
+_TEMP_ACTUALITE_MESSAGE = (
+    "Nouveauté LumenVia : il est désormais possible de recevoir La Lumière du Dimanche "
+    "dans deux langues pour un même compte. Si vous souhaitez activer une seconde langue, "
+    "vous pouvez le faire depuis votre espace Mon compte."
+)
+
 
 def render_admin_emailing() -> None:
     import app as ap  # lazy: évite import circulaire avec app.py
@@ -87,6 +94,14 @@ def render_admin_emailing() -> None:
         PROPOSED_WEEKLY_ACTUALITE_MESSAGE,
         strip_redundant_cette_semaine_lead,
     )
+
+    def _proposed_actualite_message_for_today() -> str:
+        try:
+            if date.today() <= _TEMP_ACTUALITE_UNTIL:
+                return _TEMP_ACTUALITE_MESSAGE
+        except Exception:
+            pass
+        return PROPOSED_WEEKLY_ACTUALITE_MESSAGE
 
     try:
         rows = adm_sheets_fetch_cached(cfg.gsheet_id, "email_templates", 0, sa_json)
@@ -156,7 +171,9 @@ def render_admin_emailing() -> None:
     _actu_from_sheet = strip_redundant_cette_semaine_lead(
         str((current or {}).get("status_note") or "")
     )
-    _actu_default = _actu_from_sheet or PROPOSED_WEEKLY_ACTUALITE_MESSAGE
+    _actu_default = _proposed_actualite_message_for_today()
+    if not _actu_default.strip():
+        _actu_default = _actu_from_sheet or PROPOSED_WEEKLY_ACTUALITE_MESSAGE
     if "adm_email_message_actualite" not in st.session_state:
         st.session_state["adm_email_message_actualite"] = _actu_default
     else:
@@ -187,7 +204,7 @@ def render_admin_emailing() -> None:
 
     def _fill_proposed_actualite() -> None:
         # Callback : s’exécute avant le rerun / avant le text_area (clé widget OK).
-        st.session_state["adm_email_message_actualite"] = PROPOSED_WEEKLY_ACTUALITE_MESSAGE
+        st.session_state["adm_email_message_actualite"] = _proposed_actualite_message_for_today()
 
     def _clear_actualite() -> None:
         st.session_state["adm_email_message_actualite"] = ""

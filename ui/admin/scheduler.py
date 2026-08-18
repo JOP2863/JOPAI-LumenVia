@@ -699,7 +699,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                         if str(u.get("email") or "").strip().lower() not in excluded_emails
                     ]
 
-                # Mini table (limite) : qui va recevoir + langue d’e-mail (profil)
+            # Mini table (limite) : qui va recevoir + langue d’e-mail
                 show_n = st.slider(
                     "Afficher les N premiers destinataires (aperçu)",
                     min_value=10,
@@ -709,7 +709,7 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                     key="adm_sched_preview_n",
                 )
                 st.caption(
-                    "Colonnes : e-mail · prénom · nom · **langue d’envoi** (`pref_langue` du profil)."
+                "Colonnes : e-mail · prénom · nom · **langue d’envoi**."
                 )
                 render_broadcast_recipient_preview(
                     [

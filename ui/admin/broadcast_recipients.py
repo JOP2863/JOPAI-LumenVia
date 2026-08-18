@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from core.locale_codes import normalize_pref_langue, user_pref_langue
 from core.sheets_db import sheet_row_status_is_live
 
 
@@ -41,6 +42,26 @@ def _latest_users_by_uid(users_rows: list[dict]) -> dict[str, dict]:
         if not prev or str(u.get("created_at") or "") > str(prev.get("created_at") or ""):
             by_uid_user[uid0] = u
     return by_uid_user
+
+
+def _weekly_subscriptions_by_uid_lang(
+    users_rows: list[dict], subs_rows: list[dict]
+) -> dict[tuple[str, str], dict]:
+    by_uid_user = _latest_users_by_uid(users_rows)
+    by: dict[tuple[str, str], dict] = {}
+    for r in subs_rows:
+        if str(r.get("type") or "").strip() != "weekly_friday":
+            continue
+        uid0 = str(r.get("user_entity_id") or "").strip()
+        if not uid0:
+            continue
+        u0 = by_uid_user.get(uid0) or {}
+        lg = normalize_pref_langue(r.get("pref_langue") or user_pref_langue(u0))
+        key = (uid0, lg)
+        prev = by.get(key)
+        if not prev or str(r.get("created_at") or "") > str(prev.get("created_at") or ""):
+            by[key] = r
+    return by
 
 
 def _subscription_is_mailable(subr: dict) -> bool:
@@ -81,16 +102,18 @@ def lumenvia_manual_broadcast_recipient_pairs(
         uid0 = str(u0.get("entity_id") or "").strip() or "dry_run"
         return [(uid0, u0)]
 
-    latest_sub = _weekly_subscriptions_by_uid(subs_rows)
+    latest_sub = _weekly_subscriptions_by_uid_lang(users_rows, subs_rows)
     by_uid_user = _latest_users_by_uid(users_rows)
     out: list[tuple[str, dict]] = []
 
-    for uid0, subr in latest_sub.items():
+    for (uid0, sub_lang), subr in latest_sub.items():
         if not _subscription_is_mailable(subr):
             continue
         urec = by_uid_user.get(uid0)
         if not urec:
             continue
+        urec = dict(urec)
+        urec["pref_langue"] = sub_lang
         em = str(urec.get("email") or "").strip()
         ph = str(urec.get("phone_e164") or "").strip()
         has_em = is_broadcast_email_ok(em)
@@ -135,10 +158,10 @@ def count_skipped_weekly_broadcast_recipients(
     for_sms: bool = False,
 ) -> dict[str, int]:
     """Compte les abonnements hebdo opt-in exclus (aperçu / message admin)."""
-    latest_sub = _weekly_subscriptions_by_uid(subs_rows)
+    latest_sub = _weekly_subscriptions_by_uid_lang(users_rows, subs_rows)
     by_uid_user = _latest_users_by_uid(users_rows)
     stats = {"no_user": 0, "no_email": 0, "no_phone": 0, "eligible": 0}
-    for uid0, subr in latest_sub.items():
+    for (uid0, _sub_lang), subr in latest_sub.items():
         if not _subscription_is_mailable(subr):
             continue
         urec = by_uid_user.get(uid0)
