@@ -1,0 +1,39 @@
+genome_version: 3.1.0
+POD_profile: local-first
+pod_id: JOPAI-LumenVia
+nomenclature: JOPAI-LumenVia
+famille_activite: arts_culture
+trajectoire: migration
+runtime_cible: node_typescript_postgresql_s3
+marqueurs:
+  obligatoire_retenu:
+  - MARQ-APP-ARCH
+  - MARQ-APP-FOUND
+  - MARQ-APP-PLAN
+  - MARQ-APP-REQ
+  - MARQ-APP-UX
+  - MARQ-DATA-NAMING
+  - MARQ-DATA-SOCLE
+  retenu:
+  - MARQ-APP-DOC-MAINT
+  - MARQ-APP-ISGC
+  - MARQ-APP-MEDIA
+  - MARQ-APP-MOBILE
+  - MARQ-APP-OBS
+  - MARQ-SEC-CARTO
+  - MARQ-SEC-CICD
+  - MARQ-SEC-DNS
+  - MARQ-SEC-INFRA
+  - MARQ-SEC-MAIL
+  reporte: []
+  exclu: []
+  hors_perimetre:
+  - MARQ-APP-B2C
+  - MARQ-APP-CRM
+  - MARQ-APP-IAM
+  - MARQ-SEC-HYBRID
+  - MARQ-SEC-TYPES
+utilitaires_retenus: []
+genome_paths:
+  primary: ../JOPAI/genome-dist/v3.1.0
+  note: Ne pas re-parser le Word — lire genome_markers.yaml

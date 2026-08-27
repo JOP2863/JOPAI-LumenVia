@@ -1,0 +1,26 @@
+projet:
+  nom: JOPAI-LumenVia
+  debut: '2026-08-26'
+  description: POD local-first — initialisé par NEXUS incubateur (cible Node/TS +
+    PostgreSQL + S3)
+statuts:
+  a_faire: À faire
+  en_cours: En cours
+  fait: Livré
+  reporte: Reporté
+  na: N/A
+temps_passe_heures: 0
+temps_passe_historique: []
+themes:
+- id: init
+  libelle: Initialisation — pack NEXUS
+  taches:
+  - id: pack
+    libelle: Pack incubateur validé (cdc, arbitrages, rules)
+    statut: fait
+    page: docs/
+  - id: mvp0
+    libelle: Premier jet Cursor — serveur TypeScript, schéma PostgreSQL, accès objet
+      S3 (UI nom+action)
+    statut: a_faire
+    page: src/server/

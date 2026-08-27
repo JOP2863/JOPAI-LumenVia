@@ -1,0 +1,18 @@
+---
+description: JOPAI-LumenVia — règles projet (pack incubateur NEXUS)
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# JOPAI-LumenVia
+
+- Profil POD : `local-first`
+- Génome : `docs/arbitrages.yaml` → `../JOPAI/genome-dist/v3.1.0/` (pas le Word)
+- Runtime cible produit : Node/TypeScript + PostgreSQL + objet S3
+- CDC : `docs/cdc.md`
+- Plan consolidé : `docs/avancement.yaml`
+- Galaxie : `docs/galaxie_manifest.yaml` (ne pas éditer JOPAI-NEXUS)
+- Marqueurs engagés uniquement — pas l'intégralité du génome Word
+- Streamlit / Sheets = maquetage éventuel, pas la vérité métier de production
+- Zéro secret dans Git · pas de dépendance runtime vers NEXUS

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+pod_id: JOPAI-LumenVia
+nom: JOPAI-LumenVia
+famille_code: A
+famille: arts_culture
+profil: local-first
+genome_version: 3.1.0
+chemin_depot: ../JOPAI-LumenVia
+environnements:
+- id: dev_local
+  provider: local_bat
+  actif: true
+  url: http://localhost:8510
+  launcher_bat: JOPAI-LUMEN.bat
+  launch_hint: _Lanceurs/JOPAI-LUMEN.bat
+- id: prod_streamlit
+  provider: streamlit_cloud
+  actif: false
+  url: null
+- id: prod_ovh
+  provider: docker_compose
+  actif: false
+  url: null
+telemetry:
+  isgc_file: data/isgc_telemetry.json
+  heartbeat_file: data/nexus_heartbeat.json
