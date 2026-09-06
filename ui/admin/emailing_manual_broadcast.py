@@ -800,16 +800,16 @@ def render_emailing_manual_broadcast(
                             _tpl_by_lang[urec_lang] = (
                                 str(_tpl_native.get("subject") or "").strip() or subject_rt,
                                 str(_tpl_native.get("body") or "").strip() or body_rt,
-                                str(_tpl_native.get("status_note") or "").strip() or note_fr,
+                                "",  # mention : toujours dérivée de note_fr (ci-dessous)
                             )
                         else:
-                            _tpl_by_lang[urec_lang] = (subject_rt, body_rt, note_fr)
+                            _tpl_by_lang[urec_lang] = (subject_rt, body_rt, "")
                             if urec_lang not in _missing_lang_tpl:
                                 _missing_lang_tpl.append(urec_lang)
-                subj_use, body_use, note_use = _tpl_by_lang.get(urec_lang) or (
+                subj_use, body_use, _note_tpl = _tpl_by_lang.get(urec_lang) or (
                     subject_rt,
                     body_rt,
-                    note_fr,
+                    "",
                 )
                 try:
                     from core.emailing import replace_mission_quote_in_text
@@ -819,6 +819,19 @@ def render_emailing_manual_broadcast(
                     )
                 except Exception:
                     pass
+                # Mention d’actualité : texte FR saisi (UI) traduit à la volée —
+                # ne pas réutiliser le status_note ETPL des semaines précédentes.
+                if urec_lang == "FR" or not note_fr.strip():
+                    note_use = note_fr
+                else:
+                    try:
+                        from core.emailing import localize_weekly_actualite_for_email
+
+                        note_use = localize_weekly_actualite_for_email(
+                            note_fr, pref_langue=urec_lang, cfg=cfg
+                        )
+                    except Exception:
+                        note_use = note_fr
                 values2["message_actualite"] = note_use
                 # Liens app / préférences : langue du destinataire pour atterrissage multilangue.
                 try:

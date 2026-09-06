@@ -406,6 +406,60 @@ def localize_illustration_description_for_email(
     return out
 
 
+_WEEKLY_ACTU_EMAIL_CACHE: dict[tuple[str, str], str] = {}
+
+
+def localize_weekly_actualite_for_email(
+    text_fr: str,
+    *,
+    pref_langue: object | None,
+    cfg: object | None = None,
+) -> str:
+    """
+    Traduit la mention d’actualité FR pour l’e-mail (cache process).
+    Source de vérité = texte saisi / RUNS en FR — pas le ``status_note`` ETPL figé
+    des semaines précédentes.
+    """
+    from core.email_template_localize import localize_email_field_from_fr
+    from core.prompt_locale import coerce_aip_langue
+
+    src = normalize_weekly_actualite_for_editor(text_fr)
+    if not src:
+        return ""
+    lg = coerce_aip_langue(pref_langue)
+    if lg == "FR":
+        return src
+    key = (lg, src)
+    cached = _WEEKLY_ACTU_EMAIL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    vertex = None
+    try:
+        sa = getattr(cfg, "gcp_service_account", None) if cfg is not None else None
+        if not sa:
+            from core.config import load_config
+
+            sa = getattr(load_config(), "gcp_service_account", None)
+        if sa:
+            from core.vertex_gemini import VertexGeminiClient
+
+            vertex = VertexGeminiClient(service_account_info=sa)
+    except Exception:
+        vertex = None
+    try:
+        out = localize_email_field_from_fr(
+            src,
+            target_lang=lg,
+            vertex_client=vertex,
+            field_kind="status_note",
+        )
+        out = (out or "").strip() or src
+    except Exception:
+        out = src
+    _WEEKLY_ACTU_EMAIL_CACHE[key] = out
+    return out
+
+
 def strip_redundant_cette_semaine_lead(message: str) -> str:
     """Retire un « Cette semaine, » en tête (déjà présent dans ``WEEKLY_ACTUALITE_LEAD``)."""
     return _CETTE_SEMAINE_LEAD_RE.sub("", (message or "").strip()).strip()

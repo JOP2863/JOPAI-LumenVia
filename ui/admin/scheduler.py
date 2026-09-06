@@ -956,14 +956,14 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                                 _tpl_by_lang[urec_lang] = (
                                     str(_tn.get("subject") or "").strip() or subj,
                                     str(_tn.get("body") or "").strip() or body,
-                                    str(_tn.get("status_note") or "").strip() or mention_sched,
+                                    "",  # mention : toujours dérivée de mention_sched FR
                                 )
                             else:
-                                _tpl_by_lang[urec_lang] = (subj, body, mention_sched)
-                    subj_use, body_use, note_use = _tpl_by_lang.get(urec_lang) or (
+                                _tpl_by_lang[urec_lang] = (subj, body, "")
+                    subj_use, body_use, _note_tpl = _tpl_by_lang.get(urec_lang) or (
                         subj,
                         body,
-                        mention_sched,
+                        "",
                     )
                     try:
                         from core.emailing import replace_mission_quote_in_text
@@ -973,6 +973,19 @@ padding:10px 12px;border-radius:10px;margin:6px 0 10px 0;">
                         )
                     except Exception:
                         pass
+                    # Mention d’actualité : pivot FR du run, traduit à la volée
+                    # (évite l’ancien status_note ETPL des semaines passées).
+                    if urec_lang == "FR" or not str(mention_sched or "").strip():
+                        note_use = mention_sched
+                    else:
+                        try:
+                            from core.emailing import localize_weekly_actualite_for_email
+
+                            note_use = localize_weekly_actualite_for_email(
+                                mention_sched, pref_langue=urec_lang, cfg=cfg
+                            )
+                        except Exception:
+                            note_use = mention_sched
                     vals["message_actualite"] = note_use
                     rendered = render_weekly_email_template(
                         EmailTemplate(subject=subj_use, body=body_use),

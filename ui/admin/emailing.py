@@ -242,7 +242,8 @@ def render_admin_emailing() -> None:
         "**Éditable ici** ; à l’enregistrement / sync, il est **traduit** dans ETPL (`status_note`) "
         "pour DE/EN/ES/IT/PT — l’envoi utilise la version de la langue du destinataire. "
         "À l’envoi (y compris test), une ligne **RUNS** garde la mention pour ce dimanche : "
-        "la prochaine génération pour la **même semaine** la recharge (puis ETPL, puis texte proposé)."
+        "la prochaine génération pour la **même semaine** la recharge (puis ETPL, puis texte proposé). "
+        "Les e-mails DE/EN/ES/IT/PT **traduisent à l’envoi** ce texte FR (pas l’ancien `status_note` ETPL)."
     )
     st.text_area(
         "Message d’actualité pour les destinataires (optionnel)",

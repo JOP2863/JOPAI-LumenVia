@@ -1,0 +1,23 @@
+---
+description: Périmètre workspace — rester dans ce dépôt ; hors périmètre = stop et attendre l'opérateur
+alwaysApply: true
+---
+
+# Périmètre workspace (strict)
+
+Ce dépôt (le dossier racine ouvert / racine de ce repo) est le **seul** périmètre de travail de cet agent.
+
+## Interdit sans accord explicite de l'opérateur
+- Lire, chercher, écrire, supprimer ou exécuter hors de ce dépôt (autre `JOPAI-*`, sibling, chemin absolu hors racine)
+- Traiter une demande clairement hors de ce workspace
+
+## Exception
+Uniquement les chemins **déjà autorisés** par une autre règle `alwaysApply` de **ce** dépôt (ex. génome documenté).
+
+## Si hors périmètre détecté
+1. **Stop** — aucune action hors dépôt.
+2. **Dire** brièvement : hors périmètre + ce qui est concerné.
+3. **Attendre** la décision de l'opérateur. C'est **lui** qui choisit, par exemple :
+   - ajouter le répertoire au workspace de **cet** agent, ou
+   - confier le travail à un autre agent / une autre fenêtre.
+4. **Ne pas** renvoyer, basculer, ni « passer le relais » vers un autre agent. Ne pas exécuter le travail ailleurs en attendant.
