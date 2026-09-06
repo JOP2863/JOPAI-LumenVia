@@ -285,7 +285,7 @@ div[class*="wrap_active"] button {
         <strong>FR</strong> : AELF production (non remplacé).
         <strong>DE / EN / ES / IT / PT</strong> : Evangelizo Reader Feed (<code>cached_liturgy_day</code>) —
         page Dimanche (sélecteur + drapeaux) + admin génération + écriture RDC automatique ;
-        codes Reader : DE / AM (EN) / SP (ES) / IT ; horizon ±30&nbsp;j.
+        codes Reader : DE / AM (EN) / SP (ES) / IT / PT ; horizon ±30&nbsp;j.
         Universalis = Lab / secours (pas la route produit EN).
         Checklist licences : <code>data/evangelizo_license_checklist.json</code> + Universalis.
         Reste : confirmation écrite Evangelizo pour e-mail/TTS/PDF larges + templates e-mail localisés.

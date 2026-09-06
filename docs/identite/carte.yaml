@@ -1,0 +1,31 @@
+version: 1
+pod_id: lumen_via
+nom: JOPAI-LumenVia
+typologie: arts_culture
+typologie_code: A
+cas: C
+statut: a_generer
+date: "2026-09-01"
+consomme_racine: true
+votes_60: non_applicable
+baseline_metier: Votre compagnon de recueillement et de compréhension liturgique.
+wordmark_texte: JOPAI-LumenVia
+palette:
+  petrole: "#0b2745"
+  turquoise: "#0d9488"
+  teal: "#2dd4bf"
+  or: "#c4a574"
+slots:
+  - id: icone
+    libelle: Icône
+    couche: B
+    fichier: librairie_visuelle/icone/icone_flamme.svg
+    source: atelier_pictos_galaxie_2026-09-01
+  - id: frise_16_9
+    libelle: Frise identitaire 16:9
+    couche: C
+    fichiers:
+      - data/frises/lumen_via.mp4
+marque_jopai: {}
+note: >
+  Picto Flamme + baseline votés atelier galaxie 2026-09-01. Couche A inchangée.

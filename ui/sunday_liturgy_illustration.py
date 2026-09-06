@@ -33,6 +33,10 @@ _MONTHS: dict[str, tuple[str, ...]] = {
         "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
         "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre",
     ),
+    "PT": (
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    ),
 }
 
 

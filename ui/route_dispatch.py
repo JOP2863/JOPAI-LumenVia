@@ -32,6 +32,15 @@ from ui.refactor_migration_control import render_admin_refactor_migration
 
 def dispatch_route(route: str) -> None:
     """Affiche la page correspondant à ``route`` (session)."""
+    # Battement NEXUS (jopai-obs-1) : parcours admin authentifié seulement, throttlé.
+    if str(route or "").startswith("admin") and st.session_state.get("admin_authenticated"):
+        try:
+            from core.obs_runtime import maybe_ecrire_battement_admin
+
+            maybe_ecrire_battement_admin()
+        except Exception:
+            pass
+
     if route == "about":
         render_about()
     elif route == "sunday":

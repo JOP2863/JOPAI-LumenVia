@@ -26,6 +26,7 @@ _LANG_LABELS: dict[str, str] = {
     "EN": "anglais",
     "ES": "espagnol",
     "IT": "italien",
+    "PT": "português",
 }
 
 
@@ -328,7 +329,7 @@ def _render_adapter_smoke_test() -> None:
             options=["universalis", "evangelizo"],
             format_func=lambda k: {
                 "universalis": "Universalis EN (JSONP)",
-                "evangelizo": "Evangelizo DE / ES(SP) / IT / EN(AM)",
+                "evangelizo": "Evangelizo DE / ES(SP) / IT / EN(AM) / PT",
             }[k],
             horizontal=True,
             key="lab_adapter_kind",
@@ -338,12 +339,13 @@ def _render_adapter_smoke_test() -> None:
         if kind == "evangelizo":
             e_lang = st.selectbox(
                 "Langue Reader",
-                options=["DE", "SP", "IT", "AM"],
+                options=["DE", "SP", "IT", "AM", "PT"],
                 format_func=lambda x: {
                     "DE": "DE — allemand",
                     "SP": "SP — espagnol (produit ES)",
                     "IT": "IT — italien",
                     "AM": "AM — anglais US (produit EN)",
+                    "PT": "PT — português (Portugal)",
                 }.get(x, x),
                 key="lab_ev_lang",
             )

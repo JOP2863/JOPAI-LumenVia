@@ -62,6 +62,17 @@ class GeminiTtsApiClient:
             r = self._session.post(url, json=payload, timeout=90)
             if r.status_code < 400:
                 raw: dict[str, Any] = r.json()
+                try:
+                    from core.gemini_usage import enregistrer_usage_depuis_reponse
+
+                    enregistrer_usage_depuis_reponse(
+                        modele=model,
+                        usage="tts",
+                        raw=raw,
+                        meta={"provider": "gemini_api", "voice": voice_name},
+                    )
+                except Exception:
+                    pass
                 b64, mime = _extract_inline_audio(raw)
                 audio = base64.b64decode(b64) if b64 else b""
                 return GeminiTtsResult(model=model, audio_bytes=audio, mime_type=mime or "audio/wav", raw=raw)

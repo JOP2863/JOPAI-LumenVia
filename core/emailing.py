@@ -411,6 +411,103 @@ def strip_redundant_cette_semaine_lead(message: str) -> str:
     return _CETTE_SEMAINE_LEAD_RE.sub("", (message or "").strip()).strip()
 
 
+def normalize_weekly_actualite_for_editor(message: str) -> str:
+    """
+    Corps éditable (sans préfixe auto ``WEEKLY_ACTUALITE_LEAD*``).
+    Utile au rechargement depuis RUNS / ETPL pour éviter un double « À noter… ».
+    """
+    msg = (message or "").strip()
+    if not msg:
+        return ""
+    norm_msg = msg.replace("’", "'")
+    for lead in WEEKLY_ACTUALITE_LEAD_BY_LANG.values():
+        o = (lead or "").strip()
+        if not o:
+            continue
+        norm_lead = o.replace("’", "'")
+        if not norm_msg.lower().startswith(norm_lead.lower()):
+            continue
+        # Avance dans ``msg`` en suivant ``norm_lead`` (’ et ' équivalents).
+        i = 0
+        j = 0
+        while j < len(norm_lead) and i < len(msg):
+            ci = msg[i]
+            if ci in ("'", "’") and norm_lead[j] == "'":
+                i += 1
+                j += 1
+            elif ci.lower() == norm_lead[j].lower():
+                i += 1
+                j += 1
+            else:
+                break
+        if j == len(norm_lead):
+            msg = msg[i:].lstrip()
+        break
+    return strip_redundant_cette_semaine_lead(msg)
+
+
+def latest_weekly_actualite_for_sunday(
+    runs_rows: list[dict] | None,
+    *,
+    date_dimanche: str,
+    campaign_key: str = "weekly_friday_lumenvia",
+) -> str:
+    """
+    Dernière mention ``message_actualite`` enregistrée dans RUNS pour ce dimanche
+    (envoi manuel, dry-run / test, ou scheduler) — corps normalisé pour l’éditeur.
+    """
+    day = str(date_dimanche or "").strip()[:10]
+    if not day or not runs_rows:
+        return ""
+    camp = str(campaign_key or "").strip()
+    best: tuple[str, str] | None = None  # (finished_or_started, message)
+    for rr in runs_rows:
+        if str(rr.get("date_dimanche") or "").strip()[:10] != day:
+            continue
+        if camp and str(rr.get("campaign_key") or "").strip() not in ("", camp):
+            continue
+        mention = normalize_weekly_actualite_for_editor(
+            str(rr.get("message_actualite") or "")
+        )
+        if not mention:
+            continue
+        stamp = (
+            str(rr.get("finished_at") or "").strip()
+            or str(rr.get("started_at") or "").strip()
+            or str(rr.get("created_at") or "").strip()
+        )
+        if best is None or stamp >= best[0]:
+            best = (stamp, mention)
+    return best[1] if best else ""
+
+
+def resolve_weekly_actualite_seed(
+    *,
+    date_dimanche: str,
+    runs_rows: list[dict] | None = None,
+    status_note_etpl: str = "",
+    proposed_fallback: str = "",
+    campaign_key: str = "weekly_friday_lumenvia",
+) -> str:
+    """
+    Priorité pour préremplir la mention d’actualité (même semaine) :
+    1) dernière mention RUNS pour ``date_dimanche``
+    2) ``status_note`` du template Actif (ETPL)
+    3) texte proposé (nouveautés) / défaut
+    """
+    from_runs = latest_weekly_actualite_for_sunday(
+        runs_rows, date_dimanche=date_dimanche, campaign_key=campaign_key
+    )
+    if from_runs:
+        return from_runs
+    from_etpl = normalize_weekly_actualite_for_editor(status_note_etpl)
+    if from_etpl:
+        return from_etpl
+    return normalize_weekly_actualite_for_editor(
+        proposed_fallback or PROPOSED_WEEKLY_ACTUALITE_MESSAGE
+    )
+
+
 def format_weekly_actualite_paragraph(
     message: str, *, pref_langue: object | None = None
 ) -> str:

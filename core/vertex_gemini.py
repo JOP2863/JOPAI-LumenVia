@@ -373,7 +373,14 @@ class VertexGeminiClient:
                         url, headers={**self._auth_header()}, json=payload, timeout=timeout_s
                     )
                     if r.status_code < 400:
-                        return r.json(), loc, model
+                        raw_ok: dict[str, Any] = r.json()
+                        _journaliser_appel_vertex(
+                            modele=model,
+                            location=loc,
+                            generation_config=generation_config,
+                            raw=raw_ok,
+                        )
+                        return raw_ok, loc, model
                     last_err = f"{loc}/{model} -> {r.status_code}: {r.text}"
                     if r.status_code == 429:
                         if attempt < max_attempts - 1:
@@ -388,6 +395,36 @@ class VertexGeminiClient:
         raise RuntimeError(
             "Aucun modèle Vertex Gemini n’a répondu. Dernière erreur: " + (last_err or "inconnue")
         )
+
+
+def _usage_kind_from_generation_config(generation_config: dict[str, Any] | None) -> str:
+    mods = (generation_config or {}).get("responseModalities") or []
+    mods_u = {str(x).strip().upper() for x in mods if x is not None}
+    if "AUDIO" in mods_u:
+        return "tts"
+    if "IMAGE" in mods_u:
+        return "image"
+    return "texte"
+
+
+def _journaliser_appel_vertex(
+    *,
+    modele: str,
+    location: str,
+    generation_config: dict[str, Any] | None,
+    raw: dict[str, Any],
+) -> None:
+    try:
+        from core.gemini_usage import enregistrer_usage_depuis_reponse
+
+        enregistrer_usage_depuis_reponse(
+            modele=f"{location}:{modele}" if location else modele,
+            usage=_usage_kind_from_generation_config(generation_config),
+            raw=raw,
+            meta={"provider": "vertex", "location": location},
+        )
+    except Exception:
+        pass
 
 
 def _extract_text(raw: dict[str, Any]) -> str:

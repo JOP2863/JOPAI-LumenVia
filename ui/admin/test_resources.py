@@ -44,6 +44,7 @@ from ui.admin.generation_perf_monitor import render_admin_generation_perf_monito
 # Clés session pour replier les expanders après reconnexion admin (voir `collapse_admin_test_resources_expanders`).
 _ADMIN_RES_EXPANDER_KEYS: tuple[str, ...] = (
     "adm_res_exp_default",
+    "adm_res_exp_isgc",
     "adm_res_exp_diag",
     "adm_res_exp_smoke",
     "adm_res_exp_perf",
@@ -91,7 +92,7 @@ def _render_admin_ai_pipeline_matrix() -> None:
 |---|---|---|---|
 | **Synthèse (texte)** | Oui | **Vertex AI** (GCP) | `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-pro-latest`… — prompt = lectures AELF + `Paramètres_IA` |
 | **Audio de la synthèse** | Oui (TTS) | **Vertex TTS** → repli **API Gemini** | `gemini-2.5-flash-preview-tts`… — lit le texte de la synthèse (pas les consignes `audio_style_*`) |
-| **Lectures (texte)** | Non | **AELF** (FR) / **Evangelizo** (DE·EN·ES·IT) + cache **`readings_cache`** (RDC) | Textes officiels du lectionnaire — pas de réécriture LLM ni traduction maison |
+| **Lectures (texte)** | Non | **AELF** (FR) / **Evangelizo** (DE·EN·ES·IT·PT) + cache **`readings_cache`** (RDC) | Textes officiels du lectionnaire — pas de réécriture LLM ni traduction maison |
 | **Audio des lectures** | Oui (TTS seul) | **Vertex TTS** → repli **API Gemini** | Même moteurs que la synthèse ; texte découpé par section liturgique (1re lecture, Psaume, Évangile…) |
 | **PDF du dimanche** | Non (assemblage) | **ReportLab** (Python) | Mise en page : illustration + lectures + synthèse + liens audio |
 | **Illustration (couverture)** | Oui *(à part)* | **Vertex** (image) | Générée sur la page admin illustrations, puis intégrée au PDF |
@@ -1489,8 +1490,74 @@ def _render_admin_prompts_editor_section(
             ov.empty()
 
 
+def _render_isgc_panel() -> None:
+    """Dernier cache ISGC (lecture seule) + bouton Mesurer. Pas de scan à l’ouverture."""
+    from core.obs_isgc_cache import lire_snapshot_integrite
+
+    integ = lire_snapshot_integrite()
+    isgc = integ.get("isgc") if isinstance(integ.get("isgc"), dict) else {}
+    depot = integ.get("depot") if isinstance(integ.get("depot"), dict) else {}
+    piliers = isgc.get("piliers") if isinstance(isgc.get("piliers"), dict) else {}
+    statut = str(integ.get("statut") or "absent")
+    if statut == "absent" or not isgc:
+        st.caption("Aucun cache d’intégrité pour l’instant — mesure à la demande uniquement.")
+    else:
+        age = isgc.get("ageCacheSec")
+        age_txt = "—"
+        try:
+            sec = int(age) if age is not None else None
+            if sec is not None:
+                if sec < 3600:
+                    age_txt = f"{sec // 60} min"
+                elif sec < 86400:
+                    age_txt = f"{sec // 3600} h"
+                else:
+                    age_txt = f"{sec // 86400} j"
+        except (TypeError, ValueError):
+            age_txt = "—"
+        st.markdown(
+            f"| Lettre | Score | Libellé | Âge cache |\n"
+            f"| --- | ---: | --- | --- |\n"
+            f"| {isgc.get('lettre') or '—'} | {isgc.get('score') if isgc.get('score') is not None else '—'} "
+            f"| {isgc.get('label') or '—'} | {age_txt} |\n"
+        )
+        st.markdown(
+            "| Granularité | Hypertrophie | Orchestration | Latence | Documentation |\n"
+            "| ---: | ---: | ---: | ---: | ---: |\n"
+            f"| {piliers.get('granularite', '—')} | {piliers.get('hypertrophie', '—')} "
+            f"| {piliers.get('orchestration', '—')} | {piliers.get('latence', '—')} "
+            f"| {piliers.get('documentation', '—')} |\n"
+        )
+        st.markdown(
+            "| Taille (Mo) | Fichiers | LOC | CDC | Stack | Déps |\n"
+            "| ---: | ---: | ---: | ---: | --- | --- |\n"
+            f"| {depot.get('tailleMo', '—')} | {depot.get('fichiers', '—')} "
+            f"| {depot.get('loc', '—')} | {depot.get('cdcLignes', '—')} "
+            f"| {depot.get('stack') or '—'} | {depot.get('deps') or '—'} |\n"
+        )
+    if st.button("Mesurer", key="adm_isgc_mesurer_btn"):
+        ov = loading_overlay("LumenVia mesure l’intégrité du dépôt…")
+        try:
+            from core.obs_isgc_scan import mesurer_isgc
+
+            mesurer_isgc()
+            st.success("Mesure enregistrée.")
+        except Exception:
+            st.error("La mesure n’a pas pu aboutir.")
+        finally:
+            ov.empty()
+        st.rerun()
+
+
 def render_admin_test_resources() -> None:
     st.title("Admin — Réglages & diagnostic")
+    with st.expander(
+        "Intégrité du dépôt (ISGC)",
+        expanded=False,
+        key="adm_res_exp_isgc",
+    ):
+        st.caption("Lecture du dernier cache — aucun parcours du dépôt à l’ouverture de cette page.")
+        _render_isgc_panel()
     cfg = load_config()
     if not cfg.gcp_service_account:
         st.error("`gcp_service_account` manquant dans `secrets.toml`.")

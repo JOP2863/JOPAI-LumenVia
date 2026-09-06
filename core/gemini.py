@@ -111,7 +111,19 @@ class GeminiClient:
         }
         r = self._session.post(url, json=payload, timeout=45)
         r.raise_for_status()
-        return r.json()
+        raw: dict[str, Any] = r.json()
+        try:
+            from core.gemini_usage import enregistrer_usage_depuis_reponse
+
+            enregistrer_usage_depuis_reponse(
+                modele=model,
+                usage="texte",
+                raw=raw,
+                meta={"provider": "gemini_api"},
+            )
+        except Exception:
+            pass
+        return raw
 
 
 def _dedupe(items: list[str]) -> list[str]:

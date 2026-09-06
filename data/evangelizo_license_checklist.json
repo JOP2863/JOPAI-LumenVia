@@ -1,7 +1,7 @@
 {
   "schema": "lumenvia.evangelizo_license.v1",
   "source_id": "evangelizo_reader_feed",
-  "reviewed_at": "2026-08-04",
+  "reviewed_at": "2026-08-31",
   "sources_consulted": [
     "https://feed.evangelizo.org/",
     "https://feed.evangelizo.org/v2/reader.php",

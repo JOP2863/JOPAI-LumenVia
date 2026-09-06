@@ -74,3 +74,9 @@ Assets marque : répertoire `assets/branding/` (`logo_mark.svg`, optionnel `favi
 - **Voix TTS Gemini** : table Sheets `Voix_Audio` (**VOIX**), alias dans `AliasTables` ; catalogue optionnel des noms de voix dans `data/gemini_tts_voices.json` (mis à jour quand Google enrichit les voix préconfigurées).
 - **Mémo « Graine de Parole »** : bouton d’inspiration (point « À retenir »), champ `resolution` (Sheets + corps Markdown GCS). **PDF mensuel** : prévoir un encart doré fin de document pour les résolutions (quand le générateur PDF sera branché).
 
+## Observabilité runtime NEXUS (`jopai-obs-1`)
+- Pas d’URL `/api/health` inventée. Le POD écrit `data/nexus_heartbeat.json` (throttle ~60 s, hors Git) via `core/obs_runtime.py`.
+- Canaux Runtime : `gemini` (payant, `data/gemini_usage.json`) + `aelf` / `evangelizo` / `universalis` (`tarif: gratuit`, `coutEur: 0`, hits dans `data/http_usage.json`). Pas de GCS en Runtime € (connectivité seulement). Pas de `tenants[]` (un foyer).
+- ISGC : snapshot `data/isgc_telemetry.json` recopié dans `contrat.integrite` — jamais un walk au boot / `maybe_ecrire_battement`. Scan = bouton **Mesurer** (admin Test ressources) ou `python -m core.obs_isgc_scan`.
+- Port lanceur officiel **8510** (`_Lanceurs/JOPAI-LUMEN.bat`). Ne pas toucher NEXUS.
+

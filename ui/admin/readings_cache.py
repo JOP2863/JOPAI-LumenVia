@@ -54,6 +54,7 @@ _LANG_LABELS = {
     "EN": "EN — Evangelizo (AM)",
     "ES": "ES — Evangelizo (SP)",
     "IT": "IT — Evangelizo",
+    "PT": "PT — Evangelizo (Portugal)",
 }
 
 

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.frise_identitaire import nom_et_baseline
 from ui.admin.test_resources import collapse_admin_test_resources_expanders
 from ui.admin_secrets import admin_login_and_password
+from ui.frise_banniere import render_titre_puis_frise
 
 
 def render_admin_login() -> None:
-    st.title("Connexion administration")
+    nom, baseline = nom_et_baseline()
+    render_titre_puis_frise(titre=nom, baseline=baseline)
+    st.subheader("Connexion administration")
     login_ok, pwd_ok = admin_login_and_password()
     if not (login_ok and pwd_ok):
         st.error(

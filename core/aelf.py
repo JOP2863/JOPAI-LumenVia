@@ -65,6 +65,12 @@ class AelfClient:
     def informations(self, date: str, zone: str = "france") -> AelfDayIdentity:
         url = f"{self.base_url}/v1/informations/{date}/{zone}"
         r = self._session.get(url, timeout=20)
+        try:
+            from core.obs_http_usage import noter_hit
+
+            noter_hit("aelf")
+        except Exception:
+            pass
         r.raise_for_status()
         payload: dict[str, Any] = r.json()
         data: dict[str, Any] = payload.get("informations", payload)
@@ -85,6 +91,12 @@ class AelfClient:
     def messes(self, date: str, zone: str = "france") -> AelfTexts:
         url = f"{self.base_url}/v1/messes/{date}/{zone}"
         r = self._session.get(url, timeout=20)
+        try:
+            from core.obs_http_usage import noter_hit
+
+            noter_hit("aelf")
+        except Exception:
+            pass
         r.raise_for_status()
         payload: dict[str, Any] = r.json()
 

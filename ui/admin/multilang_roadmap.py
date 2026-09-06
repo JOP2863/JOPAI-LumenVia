@@ -406,7 +406,7 @@ def _render_evangelizo_license_panel() -> None:
     if not data:
         st.warning("Checklist Evangelizo introuvable (`data/evangelizo_license_checklist.json`).")
         return
-    st.subheader("Licence Evangelizo — checklist (DE / EN / ES / IT)")
+    st.subheader("Licence Evangelizo — checklist (DE / EN / ES / IT / PT)")
     st.caption(f"Revue {data.get('reviewed_at') or '—'} · {data.get('summary_fr') or ''}")
     _render_license_items_table(data)
     stance = str(data.get("product_stance_fr") or "").strip()
@@ -466,7 +466,7 @@ def render_admin_multilang_roadmap() -> None:
 | Facade + dimanche `pref_langue` (AELF FR / Evangelizo) | Templates e-mail localisés |
 | E-mail : URLs + titre par `pref_langue` destinataire | Confirmation écrite Evangelizo canaux larges |
 | Admin génération : sélecteur langue + GCS `{LANG}/` | Attribution CC-BY visible côté auditeur (V2) |
-| Evangelizo = production DE/EN/ES/IT | Universalis reste Lab / secours |
+| Evangelizo = production DE/EN/ES/IT/PT | Universalis reste Lab / secours |
 | Atelier audio (CC0 / DP / CC-BY) | Mix ambiance sur TTS |
         """.strip()
     )

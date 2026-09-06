@@ -92,7 +92,8 @@ def render_admin_emailing() -> None:
         inject_weekly_actualite_into_email_body,
         WEEKLY_ACTUALITE_LEAD,
         PROPOSED_WEEKLY_ACTUALITE_MESSAGE,
-        strip_redundant_cette_semaine_lead,
+        normalize_weekly_actualite_for_editor,
+        resolve_weekly_actualite_seed,
     )
 
     def _proposed_actualite_message_for_today() -> str:
@@ -167,20 +168,72 @@ def render_admin_emailing() -> None:
     with st.expander("Balises supportées", expanded=False):
         st.code("\n".join([f"{{{{{t}}}}}" for t in supported_tags()]), language="text")
 
-    # Message d’actualité : défaut proposé → sinon dernière valeur ETPL (status_note) → session.
-    _actu_from_sheet = strip_redundant_cette_semaine_lead(
-        str((current or {}).get("status_note") or "")
-    )
-    _actu_default = _proposed_actualite_message_for_today()
-    if not _actu_default.strip():
-        _actu_default = _actu_from_sheet or PROPOSED_WEEKLY_ACTUALITE_MESSAGE
-    if "adm_email_message_actualite" not in st.session_state:
-        st.session_state["adm_email_message_actualite"] = _actu_default
+    # Dimanche cible (avant la mention) : sert à recharger RUNS pour la même semaine.
+    try:
+        today = date.today()
+        next_sun = today + timedelta(days=(6 - today.weekday()) % 7)
+    except Exception:
+        next_sun = date.today()
+    _d_seed = st.session_state.get("adm_email_sunday_pick")
+    if isinstance(_d_seed, date):
+        _sunday_for_actu = _d_seed
+    else:
+        try:
+            _sunday_for_actu = date.fromisoformat(str(_d_seed)[:10]) if _d_seed else next_sun
+        except Exception:
+            _sunday_for_actu = next_sun
+    _date_str_actu = _sunday_for_actu.isoformat()[:10]
+
+    # Message d’actualité : RUNS (même dimanche) → ETPL status_note → texte proposé.
+    # Brouillons par dimanche en session ; re-seed uniquement au changement de semaine.
+    try:
+        _runs_rows = adm_sheets_fetch_cached(cfg.gsheet_id, "scheduler_runs", 0, sa_json)
+    except Exception:
+        _runs_rows = []
+    from core.emailing import latest_weekly_actualite_for_sunday
+
+    _actu_by_sunday = st.session_state.setdefault("adm_email_actu_by_sunday", {})
+    if not isinstance(_actu_by_sunday, dict):
+        _actu_by_sunday = {}
+        st.session_state["adm_email_actu_by_sunday"] = _actu_by_sunday
+    if _date_str_actu not in _actu_by_sunday:
+        _from_runs = latest_weekly_actualite_for_sunday(
+            _runs_rows, date_dimanche=_date_str_actu
+        )
+        _from_etpl = normalize_weekly_actualite_for_editor(
+            str((current or {}).get("status_note") or "")
+        )
+        _existing = normalize_weekly_actualite_for_editor(
+            str(st.session_state.get("adm_email_message_actualite") or "")
+        )
+        if _from_runs:
+            _actu_by_sunday[_date_str_actu] = _from_runs
+        elif (
+            _existing
+            and st.session_state.get("adm_email_actu_for_sunday") is None
+        ):
+            # Brouillon déjà en session (ex. avant reload de page) : ne pas l’écraser
+            # par le texte proposé si aucun RUNS pour ce dimanche.
+            _actu_by_sunday[_date_str_actu] = _existing
+        elif _from_etpl:
+            _actu_by_sunday[_date_str_actu] = _from_etpl
+        else:
+            _actu_by_sunday[_date_str_actu] = resolve_weekly_actualite_seed(
+                date_dimanche=_date_str_actu,
+                runs_rows=_runs_rows,
+                status_note_etpl="",
+                proposed_fallback=_proposed_actualite_message_for_today(),
+            )
+    if st.session_state.get("adm_email_actu_for_sunday") != _date_str_actu:
+        st.session_state["adm_email_message_actualite"] = str(
+            _actu_by_sunday.get(_date_str_actu) or ""
+        )
+        st.session_state["adm_email_actu_for_sunday"] = _date_str_actu
     else:
         _cur_actu = str(st.session_state.get("adm_email_message_actualite") or "")
-        _cleaned = strip_redundant_cette_semaine_lead(_cur_actu)
+        _cleaned = normalize_weekly_actualite_for_editor(_cur_actu)
         if _cleaned != _cur_actu.strip():
-            st.session_state["adm_email_message_actualite"] = _cleaned or _actu_default
+            st.session_state["adm_email_message_actualite"] = _cleaned
 
     st.divider()
     st.markdown("##### Mention de début d’e-mail (chaque semaine)")
@@ -188,8 +241,8 @@ def render_admin_emailing() -> None:
         "Texte affiché **juste après le bonjour**. À adapter chaque vendredi avant l’envoi. "
         "**Éditable ici** ; à l’enregistrement / sync, il est **traduit** dans ETPL (`status_note`) "
         "pour DE/EN/ES/IT/PT — l’envoi utilise la version de la langue du destinataire. "
-        "À l’envoi, une ligne est écrite dans **RUNS** (`scheduler_runs`) avec la date du dimanche "
-        "et cette mention — **pas** dans OUTM."
+        "À l’envoi (y compris test), une ligne **RUNS** garde la mention pour ce dimanche : "
+        "la prochaine génération pour la **même semaine** la recharge (puis ETPL, puis texte proposé)."
     )
     st.text_area(
         "Message d’actualité pour les destinataires (optionnel)",
@@ -200,6 +253,10 @@ def render_admin_emailing() -> None:
             f"Préfixe automatique : « {WEEKLY_ACTUALITE_LEAD.strip()} ». "
             "Laisser vide pour ne rien ajouter au prochain envoi."
         ),
+    )
+    # Mémorise le brouillon pour ce dimanche (y compris après édition / boutons).
+    _actu_by_sunday[_date_str_actu] = str(
+        st.session_state.get("adm_email_message_actualite") or ""
     )
 
     def _fill_proposed_actualite() -> None:
@@ -228,14 +285,16 @@ def render_admin_emailing() -> None:
         st.write(_prev_para or "_(aucune mention)_")
     note = str(st.session_state.get("adm_email_message_actualite") or "").strip()
     with st.expander("Dimanche de référence (aperçu + envoi manuel)", expanded=False):
-        # Dimanche cible (par défaut : prochain dimanche)
-        try:
-            today = date.today()
-            next_sun = today + timedelta(days=(6 - today.weekday()) % 7)
-        except Exception:
-            next_sun = date.today()
         d_pick = st.date_input("Dimanche ciblé", value=next_sun, key="adm_email_sunday_pick")
         date_str = d_pick.isoformat()[:10]
+        # Si le dimanche change dans le widget, préparer le seed pour le prochain rerun.
+        if date_str != _date_str_actu and date_str not in _actu_by_sunday:
+            _actu_by_sunday[date_str] = resolve_weekly_actualite_seed(
+                date_dimanche=date_str,
+                runs_rows=_runs_rows,
+                status_note_etpl=str((current or {}).get("status_note") or ""),
+                proposed_fallback=_proposed_actualite_message_for_today(),
+            )
 
         # Identité liturgique (FR = AELF via facade)
         try:

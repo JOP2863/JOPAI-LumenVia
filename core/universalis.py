@@ -188,6 +188,12 @@ def fetch_universalis_mass(
             headers={"User-Agent": _UA, "Accept": "application/javascript, text/*, */*"},
             allow_redirects=True,
         )
+        try:
+            from core.obs_http_usage import noter_hit
+
+            noter_hit("universalis")
+        except Exception:
+            pass
     except requests.RequestException as ex:
         raise UniversalisError(f"HTTP Universalis : {ex}") from ex
 

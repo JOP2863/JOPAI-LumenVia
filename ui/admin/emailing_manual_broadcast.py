@@ -1117,6 +1117,18 @@ def render_emailing_manual_broadcast(
                         started_at=run_started_at,
                         error="" if err == 0 else f"{err} erreur(s) d’envoi",
                     )
+                    try:
+                        from core.emailing import normalize_weekly_actualite_for_editor
+                        from ui.streamlit_caches import invalidate_adm_sheets_fetch_cache
+
+                        invalidate_adm_sheets_fetch_cache()
+                        _by = st.session_state.setdefault("adm_email_actu_by_sunday", {})
+                        if isinstance(_by, dict):
+                            _by[date_str] = normalize_weekly_actualite_for_editor(
+                                mention_for_run
+                            )
+                    except Exception:
+                        pass
                     st.caption(
                         f"Suivi hebdo enregistré dans **RUNS** "
                         f"(dimanche `{date_str}`"

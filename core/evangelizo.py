@@ -585,6 +585,12 @@ def fetch_evangelizo_mass(
             headers={"User-Agent": _UA, "Accept": "application/xml, text/xml, */*"},
             allow_redirects=True,
         )
+        try:
+            from core.obs_http_usage import noter_hit
+
+            noter_hit("evangelizo")
+        except Exception:
+            pass
     except requests.RequestException as ex:
         raise EvangelizoError(f"HTTP Evangelizo : {ex}") from ex
     if r.status_code == 404:

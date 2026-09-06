@@ -159,6 +159,12 @@ def _lumenvia_narrow_nav_from_query() -> bool:
 
 def main() -> None:
     set_page_style()
+    try:
+        from core.obs_runtime import maybe_ecrire_battement
+
+        maybe_ecrire_battement()
+    except Exception:
+        pass
     _apply_lang_query_param()
     if _lumenvia_narrow_nav_from_query():
         st.session_state["lumenvia_narrow_nav"] = True

@@ -163,7 +163,7 @@ def _inject_expander_footer_scroll() -> None:
 
 
 def set_page_style() -> None:
-    _icon = Path("assets/branding/favicon.png")
+    _icon = Path(__file__).resolve().parent.parent / "assets" / "branding" / "favicon.png"
     page_icon: str | Path = str(_icon) if _icon.is_file() else "✨"
     st.set_page_config(page_title="JOPAI LumenVia", layout="centered", page_icon=page_icon)
     _inject_viewport_meta()

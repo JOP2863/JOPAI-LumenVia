@@ -14,3 +14,11 @@ __pycache__/
 .pytest_cache/
 .cache/
 .DS_Store
+# Observabilité runtime (local, hors Git)
+data/gemini_usage.json
+data/gemini_budget.json
+data/nexus_heartbeat.json
+data/nexus_heartbeat.json.tmp
+data/isgc_telemetry.json
+data/http_usage.json
+data/http_usage.json.tmp
