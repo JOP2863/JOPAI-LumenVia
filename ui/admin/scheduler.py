@@ -39,31 +39,13 @@ from ui.streamlit_caches import (
 
 
 def render_admin_scheduler() -> None:
-    st.title("Planificateur d'envoi")
-    st.markdown(
-        """
-<div style="text-align:center;margin-top:0.85rem;margin-bottom:12px;padding-top:4px;color:#0b2745;opacity:0.92;line-height:1.45;">
-<em>Planifie et déclenche des envois (structure générique pour hebdo/quotidien).</em>
-</div>
-        """.strip(),
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Tant que le **déclenchement automatique dans le cloud** n’est pas câblé, rien ne part au créneau tout seul. "
-        "Pour **tester** : tuiles **Emailing** (envoi manuel, jeu d’options plus simple) ou **Exécuter maintenant** dans "
-        "**Déclencher une campagne (manuel)** ci-dessous."
-    )
-    with st.expander("Précision sur les statuts des campagnes", expanded=False):
-        st.markdown(
-            """
-**`enabled`** — la campagne est en service ou non pour la prévision et les interrupteurs dans la liste.  
-**`status`** — statut **de cette ligne** dans Sheets (historique immutable) ; **l’app affiche toujours la ligne la plus récente**
-par identifiant de campagne.
-            """.strip()
-        )
+    from ui.admin_boot import admin_initial_load, admin_initial_load_done
+
+    boot = admin_initial_load("Planificateur — chargement…")
 
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
+        admin_initial_load_done(boot)
         st.warning("Configuration Google Sheets manquante.")
         return
 
@@ -142,6 +124,31 @@ par identifiant de campagne.
         tpl_rows_shared = list(adm_sheets_fetch_cached(sid, "email_templates", 0, sa_json) or [])
     except Exception:
         tpl_rows_shared = []
+
+    admin_initial_load_done(boot)
+
+    st.title("Planificateur d'envoi")
+    st.markdown(
+        """
+<div style="text-align:center;margin-top:0.85rem;margin-bottom:12px;padding-top:4px;color:#0b2745;opacity:0.92;line-height:1.45;">
+<em>Planifie et déclenche des envois (structure générique pour hebdo/quotidien).</em>
+</div>
+        """.strip(),
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Tant que le **déclenchement automatique dans le cloud** n’est pas câblé, rien ne part au créneau tout seul. "
+        "Pour **tester** : tuiles **Emailing** (envoi manuel, jeu d’options plus simple) ou **Exécuter maintenant** dans "
+        "**Déclencher une campagne (manuel)** ci-dessous."
+    )
+    with st.expander("Précision sur les statuts des campagnes", expanded=False):
+        st.markdown(
+            """
+**`enabled`** — la campagne est en service ou non pour la prévision et les interrupteurs dans la liste.  
+**`status`** — statut **de cette ligne** dans Sheets (historique immutable) ; **l’app affiche toujours la ligne la plus récente**
+par identifiant de campagne.
+            """.strip()
+        )
 
     st.subheader("Campagnes")
 

@@ -305,4 +305,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+
+        st.error("Erreur au démarrage de LumenVia (détail ci-dessous pour le support / les logs).")
+        st.code(traceback.format_exc())
+        raise

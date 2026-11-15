@@ -180,15 +180,24 @@ div[class*="st-key-lv_ml_matrix"] [data-testid="stVerticalBlockBorderWrapper"] {
   max-width: 100% !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stHorizontalBlock"] {
-  flex-wrap: wrap !important;
-  gap: 0.25rem !important;
-  align-items: flex-start !important;
+  gap: 0.2rem !important;
   width: 100% !important;
   min-width: 0 !important;
+}
+div[class*="st-key-lv_ml_matrix"] [class*="st-key-lv_ml_row_"] > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+}
+div[class*="st-key-lv_ml_kinds"] [data-testid="stHorizontalBlock"] {
+  flex-wrap: wrap !important;
+  align-items: stretch !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="column"] {
   min-width: 0 !important;
   overflow: visible !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stMarkdown"] {
   margin-bottom: 0 !important;
@@ -207,6 +216,37 @@ div[class*="st-key-lv_ml_matrix"] .lv-ml-kind-lab {
   line-height: 1.15;
   margin: 0 0 0.15rem 0;
 }
+.lv-ml-h {
+  font-weight: 700;
+  color: #8a7340;
+  font-size: 0.62rem;
+  text-align: center;
+  line-height: 1.2;
+  margin: 0 0 0.35rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.lv-ml-kind-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 3.35rem;
+  padding: 0.05rem 0.1rem 0.1rem 0.1rem;
+}
+.lv-ml-kind-slot .lv-ml-kind-lab {
+  margin-bottom: 0.12rem;
+}
+.lv-ml-kind-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 1.35rem;
+}
 div[class*="st-key-lv_ml_matrix"] .lv-ml-cell {
   display: flex;
   flex-direction: column;
@@ -215,6 +255,10 @@ div[class*="st-key-lv_ml_matrix"] .lv-ml-cell {
   gap: 0.05rem;
   min-height: 1.1rem;
   white-space: nowrap;
+}
+div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] > label {
+  justify-content: center !important;
+  width: 100%;
 }
 div[class*="st-key-lv_ml_row"] {
   margin: 0.2rem 0.1rem 0.45rem 0.1rem !important;
@@ -290,6 +334,7 @@ def _render_kind_cell(
     icon: str,
     date_str: str,
     fr_has_text: bool,
+    show_label: bool = True,
 ) -> None:
     """Case média dans un ``st.form`` : pas de rerun à chaque clic."""
     ready = _status_ready(r, kind)
@@ -304,12 +349,13 @@ def _render_kind_cell(
     if ck not in st.session_state:
         st.session_state[ck] = False
     short = _KIND_SHORT_LABELS.get(kind, kind)
-    st.markdown(
-        f'<div class="lv-ml-kind-lab">{html_escape(short)}</div>',
-        unsafe_allow_html=True,
+    label_html = (
+        f'<div class="lv-ml-kind-lab">{html_escape(short)}</div>' if show_label else ""
     )
     st.markdown(
-        f'<div class="lv-ml-cell">{_matrix_cell_html(row=r, kind=kind, icon=icon)}</div>',
+        f'<div class="lv-ml-kind-slot">{label_html}'
+        f'<div class="lv-ml-kind-body lv-ml-cell">{_matrix_cell_html(row=r, kind=kind, icon=icon)}</div>'
+        f"</div>",
         unsafe_allow_html=True,
     )
     st.checkbox(
@@ -333,30 +379,43 @@ def _render_media_status_matrix(
     """
     row_clicked: dict[str, bool] = {}
     compact = _use_compact_top_nav()
+    _row_layout = [1.05, 1, 1, 1, 1, 1.15]
 
     with st.container(key="lv_ml_matrix"):
+        if not compact:
+            hcols = st.columns(_row_layout, gap="small")
+            with hcols[0]:
+                st.markdown('<p class="lv-ml-h">Langue</p>', unsafe_allow_html=True)
+            for i, (kind, _attr, _icon) in enumerate(_MEDIA_KINDS):
+                with hcols[i + 1]:
+                    short = _KIND_SHORT_LABELS.get(kind, kind)
+                    st.markdown(
+                        f'<p class="lv-ml-h">{html_escape(short)}</p>',
+                        unsafe_allow_html=True,
+                    )
+            with hcols[5]:
+                st.markdown('<p class="lv-ml-h">Ligne</p>', unsafe_allow_html=True)
+
         for r in rows:
             mark = " ←" if r.lang == current_lang else ""
             with st.container(key=f"lv_ml_row_{r.lang}"):
-                head_l, head_r = st.columns([2.2, 1.35], gap="small")
-                with head_l:
-                    st.markdown(
-                        f'<div class="lv-ml-lang">{lang_flag_html(r.lang, height=14)}'
-                        f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}</div>",
-                        unsafe_allow_html=True,
-                    )
-                with head_r:
-                    # form_submit_button : un seul aller-retour serveur (pas à chaque case).
-                    row_clicked[r.lang] = bool(
-                        st.form_submit_button(
-                            "Toute la ligne",
-                            key=_row_all_key(date_str, r.lang),
-                            help=f"Basculer les 4 médias pour {r.lang}",
+                if compact:
+                    head_l, head_r = st.columns([2.2, 1.35], gap="small")
+                    with head_l:
+                        st.markdown(
+                            f'<div class="lv-ml-lang">{lang_flag_html(r.lang, height=14)}'
+                            f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}</div>",
+                            unsafe_allow_html=True,
                         )
-                    )
-
-                with st.container(key=f"lv_ml_kinds_{r.lang}"):
-                    if compact:
+                    with head_r:
+                        row_clicked[r.lang] = bool(
+                            st.form_submit_button(
+                                "Toute la ligne",
+                                key=_row_all_key(date_str, r.lang),
+                                help=f"Basculer les 4 médias pour {r.lang}",
+                            )
+                        )
+                    with st.container(key=f"lv_ml_kinds_{r.lang}"):
                         for pair_start in (0, 2):
                             pair = st.columns(2, gap="small")
                             for j, (kind, _attr, icon) in enumerate(
@@ -370,17 +429,34 @@ def _render_media_status_matrix(
                                         date_str=date_str,
                                         fr_has_text=fr_has_text,
                                     )
-                    else:
-                        kind_cols = st.columns(4, gap="small")
-                        for i, (kind, _attr, icon) in enumerate(_MEDIA_KINDS):
-                            with kind_cols[i]:
-                                _render_kind_cell(
-                                    r=r,
-                                    kind=kind,
-                                    icon=icon,
-                                    date_str=date_str,
-                                    fr_has_text=fr_has_text,
-                                )
+                else:
+                    cols = st.columns(_row_layout, gap="small")
+                    with cols[0]:
+                        st.markdown(
+                            f'<div class="lv-ml-lang" style="margin-top:0.65rem;">'
+                            f"{lang_flag_html(r.lang, height=14)}"
+                            f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    for i, (kind, _attr, icon) in enumerate(_MEDIA_KINDS):
+                        with cols[i + 1]:
+                            _render_kind_cell(
+                                r=r,
+                                kind=kind,
+                                icon=icon,
+                                date_str=date_str,
+                                fr_has_text=fr_has_text,
+                                show_label=False,
+                            )
+                    with cols[5]:
+                        row_clicked[r.lang] = bool(
+                            st.form_submit_button(
+                                "Toute la ligne",
+                                key=_row_all_key(date_str, r.lang),
+                                use_container_width=True,
+                                help=f"Basculer les 4 médias pour {r.lang}",
+                            )
+                        )
     return row_clicked
 
 

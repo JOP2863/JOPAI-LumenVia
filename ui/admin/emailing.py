@@ -44,11 +44,28 @@ _TEMP_ACTUALITE_MESSAGE = (
 def render_admin_emailing() -> None:
     import app as ap  # lazy: évite import circulaire avec app.py
 
-    st.title("Emailing — templates & automatisation")
-    st.caption("Édite le contenu de l’e-mail hebdomadaire (vendredi soir).")
+    from core.emailing import (
+        EmailTemplate,
+        PROPOSED_WEEKLY_ACTUALITE_MESSAGE,
+        WEEKLY_ACTUALITE_LEAD,
+        email_template_row_is_live,
+        french_day_month_year,
+        inject_weekly_actualite_into_email_body,
+        normalize_weekly_actualite_for_editor,
+        pick_latest_live_email_template,
+        render_weekly_email_template,
+        resolve_email_nom_du_dimanche,
+        resolve_weekly_actualite_seed,
+        supported_tags,
+    )
+    from ui.admin_boot import admin_initial_load, admin_initial_load_done
+
+    template_key = "weekly_friday_lumenvia"
+    boot = admin_initial_load("Emailing — chargement des données…")
 
     cfg = load_config()
     if not cfg.gcp_service_account or not cfg.gsheet_id:
+        admin_initial_load_done(boot)
         st.warning("Configuration Google Sheets manquante (`gcp_service_account`, `gsheet_id`).")
         return
 
@@ -57,44 +74,12 @@ def render_admin_emailing() -> None:
         sa_email = str(cfg.gcp_service_account.get("client_email") or "").strip()
         sa_json = service_account_json_fingerprint(cfg.gcp_service_account)
     except ValueError as ex:
+        admin_initial_load_done(boot)
         st.error(str(ex))
         return
 
-    try:
-        sh_hint = open_spreadsheet(gs, cfg.gsheet_id, service_account_email=sa_email or None)
-        etpl_tab = _resolve_table_name(sh=sh_hint, table="email_templates")
-    except Exception:
-        etpl_tab = "ETPL"
-
-    template_key = "weekly_friday_lumenvia"
-    st.caption(
-        f"**Onglet Sheets :** `{etpl_tab}` (alias logique `email_templates` → acronyme via **AliasTables**). "
-        "**Templates e-mail :** seule la colonne **`status`** (**Actif** / **Inactif**) détermine quelle ligne est la version "
-        "courante (aperçu, enregistrement, envoi manuel, **et** choix du modèle côté campagne / scheduler). "
-        "La colonne **`active`** sur cette table n’est **pas** utilisée par l’app pour ce choix. "
-        "**Multi-langues :** tu édites le **FR** ; à l’enregistrement, DE/EN/ES/IT/PT sont **recréés** "
-        "(traduction **Vertex**, balises `{{…}}` préservées ; refus si le texte reste en français) — "
-        "ancienne ligne Actif → Inactif, nouvelle Actif."
-    )
-    with st.expander("Paramètres du template (clé/canal/langue)", expanded=False):
-        st.caption(
-            f"Template : `{template_key}` (édition : **fr** · sync auto : de / en / es / it / pt)"
-        )
-
-    from core.emailing import (
-        EmailTemplate,
-        render_weekly_email_template,
-        supported_tags,
-        french_day_month_year,
-        pick_latest_live_email_template,
-        email_template_row_is_live,
-        resolve_email_nom_du_dimanche,
-        inject_weekly_actualite_into_email_body,
-        WEEKLY_ACTUALITE_LEAD,
-        PROPOSED_WEEKLY_ACTUALITE_MESSAGE,
-        normalize_weekly_actualite_for_editor,
-        resolve_weekly_actualite_seed,
-    )
+    # Pas d’``open_spreadsheet`` au boot (évite 1 aller-retour API avant le 1er rendu).
+    etpl_tab = "ETPL"
 
     def _proposed_actualite_message_for_today() -> str:
         try:
@@ -109,6 +94,7 @@ def render_admin_emailing() -> None:
     except Exception as ex:
         from core.sheets_db import describe_gspread_api_error
 
+        admin_initial_load_done(boot)
         msg = describe_gspread_api_error(
             ex,
             spreadsheet_id=cfg.gsheet_id,
@@ -119,8 +105,31 @@ def render_admin_emailing() -> None:
             st.caption(f"Compte de service à ajouter comme **Éditeur** sur le Google Sheet : `{sa_email}`")
         return
 
+    try:
+        _runs_rows = adm_sheets_fetch_cached(cfg.gsheet_id, "scheduler_runs", 0, sa_json)
+    except Exception:
+        _runs_rows = []
+
     lang_fr = ("fr", "fr-fr", "france", "")
     current = pick_latest_live_email_template(rows, template_key=template_key, channel="email", language_in=lang_fr) or {}
+
+    admin_initial_load_done(boot)
+
+    st.title("Emailing — templates & automatisation")
+    st.caption("Édite le contenu de l’e-mail hebdomadaire (vendredi soir).")
+    st.caption(
+        f"**Onglet Sheets :** `{etpl_tab}` (alias logique `email_templates` → acronyme via **AliasTables**). "
+        "**Templates e-mail :** seule la colonne **`status`** (**Actif** / **Inactif**) détermine quelle ligne est la version "
+        "courante (aperçu, enregistrement, envoi manuel, **et** choix du modèle côté campagne / scheduler). "
+        "La colonne **`active`** sur cette table n’est **pas** utilisée par l’app pour ce choix. "
+        "**Multi-langues :** tu édites le **FR** ; à l’enregistrement, DE/EN/ES/IT/PT sont **recréés** "
+        "(traduction **Vertex**, balises `{{…}}` préservées ; refus si le texte reste en français) — "
+        "ancienne ligne Actif → Inactif, nouvelle Actif."
+    )
+    with st.expander("Paramètres du template (clé/canal/langue)", expanded=False):
+        st.caption(
+            f"Template : `{template_key}` (édition : **fr** · sync auto : de / en / es / it / pt)"
+        )
 
     if current:
         _ver = str(current.get("version") or "?").strip()
@@ -186,10 +195,6 @@ def render_admin_emailing() -> None:
 
     # Message d’actualité : RUNS (même dimanche) → ETPL status_note → texte proposé.
     # Brouillons par dimanche en session ; re-seed uniquement au changement de semaine.
-    try:
-        _runs_rows = adm_sheets_fetch_cached(cfg.gsheet_id, "scheduler_runs", 0, sa_json)
-    except Exception:
-        _runs_rows = []
     from core.emailing import latest_weekly_actualite_for_sunday
 
     _actu_by_sunday = st.session_state.setdefault("adm_email_actu_by_sunday", {})

@@ -17,6 +17,8 @@ def _inject_viewport_meta() -> None:
     Streamlit ne pose pas cette balise via ``st.set_page_config`` ; un ``components.html`` minimal exécute un script
     dans le document parent pour que le CSS mobile s’applique (évite le « dézoom » sur téléphone).
     """
+    if st.session_state.get("_lv_injected_viewport"):
+        return
     components.html(
         """
 <script>
@@ -37,10 +39,13 @@ def _inject_viewport_meta() -> None:
         height=0,
         width=0,
     )
+    st.session_state["_lv_injected_viewport"] = True
 
 
 def _inject_expander_footer_scroll() -> None:
     """Ouverture d’un ``st.expander`` : petite correction de scroll pour ne pas perdre le contenu sous le footer fixe."""
+    if st.session_state.get("_lv_injected_exp_footer_scroll"):
+        return
     components.html(
         """
 <script>
@@ -160,6 +165,7 @@ def _inject_expander_footer_scroll() -> None:
         height=0,
         width=0,
     )
+    st.session_state["_lv_injected_exp_footer_scroll"] = True
 
 
 def set_page_style() -> None:
