@@ -317,6 +317,20 @@ body:has([data-testid="stPopoverBody"]) .lv-footer-stack,
 html:has([data-testid="stPopoverBody"]) .lv-footer-stack {
   z-index: 1 !important;
 }
+/* Même problème pour st.dialog / modal (génération Dimanche, etc.) */
+[data-testid="stDialog"],
+[data-testid="stModal"],
+div[role="dialog"] {
+  z-index: 2147483646 !important;
+}
+body:has([data-testid="stDialog"]) .lv-footer-stack,
+html:has([data-testid="stDialog"]) .lv-footer-stack,
+body:has([data-testid="stModal"]) .lv-footer-stack,
+html:has([data-testid="stModal"]) .lv-footer-stack,
+body:has(div[role="dialog"]) .lv-footer-stack,
+html:has(div[role="dialog"]) .lv-footer-stack {
+  z-index: 1 !important;
+}
 
 /* 2. Bouton Primaire (Le bouton "Générer") */
 button[kind="primary"] {

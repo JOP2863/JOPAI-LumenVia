@@ -77,23 +77,28 @@ def _to_para_html_aelf(text: str | None) -> str:
 
 
 def _add_page_numbers(pdf_bytes: bytes) -> bytes:
-    """Ajoute 'page / total' en bas à droite (sauf 1ère et dernière page)."""
+    """Ajoute 'page / total' en bas à droite (sauf 1ère et dernière page).
+
+    pypdf 7 : ``merge_page`` / ``replace_contents`` uniquement sur une page déjà
+    attachée au ``PdfWriter`` (sinon RuntimeError).
+    """
     reader = PdfReader(BytesIO(pdf_bytes))
     total = len(reader.pages)
     writer = PdfWriter()
     for i, page in enumerate(reader.pages, start=1):
+        writer.add_page(page)
+        if not (1 < i < total):
+            continue
         stamp_buf = BytesIO()
         c = rl_canvas.Canvas(stamp_buf, pagesize=A4)
-        if 1 < i < total:
-            # Dans le bandeau bas : texte blanc, aligné à droite (même hauteur que la ligne marque).
-            c.setFillColor(colors.white)
-            c.setFont("Helvetica-Oblique", 6.5)
-            c.drawRightString(A4[0] - 6 * mm, 5.0 * mm, f"{i}/{total}")
+        # Dans le bandeau bas : texte blanc, aligné à droite (même hauteur que la ligne marque).
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Oblique", 6.5)
+        c.drawRightString(A4[0] - 6 * mm, 5.0 * mm, f"{i}/{total}")
         c.showPage()
         c.save()
         stamp_pdf = PdfReader(BytesIO(stamp_buf.getvalue()))
-        page.merge_page(stamp_pdf.pages[0])
-        writer.add_page(page)
+        writer.pages[-1].merge_page(stamp_pdf.pages[0])
     out = BytesIO()
     writer.write(out)
     writer.close()

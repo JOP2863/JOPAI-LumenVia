@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from hashlib import sha256
 from pathlib import Path
@@ -52,14 +54,134 @@ from core.sunday_gemini_tts import (
     tts_spoken_audio_bytes,
     vertex_tts_allowlist_blocked,
 )
-from core.sunday_readings_tts import compose_readings_tts_text, plain_readings_for_tts
+from core.sunday_gen_timing import (
+    format_timing_recap,
+    timing_add,
+    timing_reset,
+    timing_wall_s,
+)
+from core.sunday_readings_tts import (
+    compose_readings_tts_text,
+    compose_synthesis_tts_text,
+    plain_readings_for_tts,
+)
 from core.weekly_email_urls import _latest_illustration_description_from_ilus
 from ui.components import update_loading_overlay
 
+# Sérialise les append Sheets quand FR/DE tournent en parallèle.
+_SHEETS_APPEND_LOCK = threading.Lock()
 
-def _audio_ambiance_sheet_flag() -> str:
+
+def _append_immutable_row_locked(**kwargs):
+    with _SHEETS_APPEND_LOCK:
+        return append_immutable_row(**kwargs)
+
+
+def _audio_ambiance_sheet_flag(*, applied: bool | None = None) -> str:
     """Colonne Sheets ``ambiance`` : 1 si mix bande-son, 0 sinon."""
-    return "1" if last_tts_ambiance() else "0"
+    if applied is None:
+        applied = last_tts_ambiance()
+    return "1" if applied else "0"
+
+
+def _parallel_tts_synth_and_readings(
+    *,
+    cfg: object,
+    vx: object,
+    synth_text: str | None,
+    synth_voice: str | None,
+    readings_text: str | None,
+    readings_voice: str | None,
+    identity: object,
+    pref_langue: str,
+    want_synth: bool,
+    want_readings: bool,
+) -> dict[str, object]:
+    """Lance TTS synthèse et/ou lectures en parallèle (API), résultats locaux (pas de race session)."""
+    out: dict[str, object] = {
+        "synth": None,
+        "synth_err": None,
+        "synth_route": "",
+        "synth_ambiance": False,
+        "synth_s": 0.0,
+        "readings": None,
+        "readings_err": None,
+        "readings_route": "",
+        "readings_ambiance": False,
+        "readings_s": 0.0,
+    }
+    gem_key = resolve_gemini_api_key()
+    sunday_d = _sunday_date_for_voice(identity)
+
+    def _job_synth() -> tuple[tuple[bytes, str, str], str, bool, float]:
+        t0 = time.perf_counter()
+        trip = tts_spoken_audio_bytes(
+            cfg=cfg,
+            text=str(synth_text or ""),
+            voice_name=str(synth_voice or ""),
+            vertex_client=vx,
+            gemini_api_key=gem_key,
+            sunday_date=sunday_d,
+            cible="synthese",
+            pref_langue=pref_langue,
+        )
+        return trip, (last_tts_route() or ""), bool(last_tts_ambiance()), time.perf_counter() - t0
+
+    def _job_readings() -> tuple[tuple[bytes, str, str], str, bool, float]:
+        t0 = time.perf_counter()
+        trip = tts_readings_audio_bytes(
+            cfg=cfg,
+            text=str(readings_text or ""),
+            voice_name=str(readings_voice or ""),
+            vertex_client=vx,
+            gemini_api_key=gem_key,
+            sunday_date=sunday_d,
+            pref_langue=pref_langue,
+        )
+        return trip, (last_tts_route() or ""), bool(last_tts_ambiance()), time.perf_counter() - t0
+
+    run_syn = bool(want_synth and (synth_text or "").strip() and synth_voice)
+    run_read = bool(want_readings and (readings_text or "").strip() and readings_voice)
+
+    if run_syn and run_read:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_syn = pool.submit(_job_synth)
+            f_read = pool.submit(_job_readings)
+            try:
+                trip, route, amb, dt = f_syn.result()
+                out["synth"] = trip
+                out["synth_route"] = route
+                out["synth_ambiance"] = amb
+                out["synth_s"] = round(dt, 3)
+            except Exception as ex:
+                out["synth_err"] = ex
+            try:
+                trip, route, amb, dt = f_read.result()
+                out["readings"] = trip
+                out["readings_route"] = route
+                out["readings_ambiance"] = amb
+                out["readings_s"] = round(dt, 3)
+            except Exception as ex:
+                out["readings_err"] = ex
+    elif run_syn:
+        try:
+            trip, route, amb, dt = _job_synth()
+            out["synth"] = trip
+            out["synth_route"] = route
+            out["synth_ambiance"] = amb
+            out["synth_s"] = round(dt, 3)
+        except Exception as ex:
+            out["synth_err"] = ex
+    elif run_read:
+        try:
+            trip, route, amb, dt = _job_readings()
+            out["readings"] = trip
+            out["readings_route"] = route
+            out["readings_ambiance"] = amb
+            out["readings_s"] = round(dt, 3)
+        except Exception as ex:
+            out["readings_err"] = ex
+    return out
 
 
 def _pdf_illustration_description_localized(
@@ -213,7 +335,7 @@ def _append_pdf_export_row(
     gcs_path: str,
     duration_build_s: float,
 ) -> None:
-    append_immutable_row(
+    _append_immutable_row_locked(
         gspread_client=gs,
         spreadsheet_id=cfg.gsheet_id,
         table="pdf_exports",
@@ -670,9 +792,13 @@ def _run_generate_sunday_flow(
     debug: bool,
     cfg: object,
     pref_langue: str = DEFAULT_PREF_LANGUE,
+    generate_synth_audio: bool = True,
 ) -> dict[str, str | bool]:
     import app as ap
     t_flow = time.perf_counter()
+    # Ne pas écraser un journal multi-langue déjà démarré.
+    if timing_wall_s() is None:
+        timing_reset()
     pref_langue = coerce_liturgy_pref_langue(pref_langue)
     identity, texts = _ensure_texts_for_pref_langue(
         texts=texts, identity=identity, pref_langue=pref_langue
@@ -952,7 +1078,7 @@ def _run_generate_sunday_flow(
     perf["upload_text_s"] = round(time.perf_counter() - ut0, 3)
 
     try:
-        row_gen = append_immutable_row(
+        row_gen = _append_immutable_row_locked(
             gspread_client=gs,
             spreadsheet_id=cfg.gsheet_id,
             table="generations",
@@ -982,6 +1108,12 @@ def _run_generate_sunday_flow(
                 f"({type(exc).__name__}). Vérifie l’onglet GEN / quotas Sheets."
             ),
         )
+    timing_add(
+        lang=pref_langue,
+        step="vertex_texte",
+        seconds=float(perf.get("vertex_text_s") or 0)
+        + float(perf.get("vertex_text_retry_s") or 0),
+    )
 
     voice_syn_res = _resolve_voice_for_identity(
         voix_rows, identity=identity, cible="synthese"
@@ -1012,44 +1144,176 @@ def _run_generate_sunday_flow(
     audio_ext = "wav"
     audio_ok = False
     audio_fail_msg = ""
-    _flow_overlay_step(
-        _overlay,
-        "2/4 — Audio de la synthèse (TTS morcelé)…",
-        hint=(
-            f"Texte déjà dans `{text_path}`. Découpage en morceaux (~1400 car.) — "
-            f"publication dans `Audio/{date_label}/` à la fin de cette sous-étape."
-        ),
-        t0=t_flow,
-        flush=False,
-    )
-    with st.spinner("Synthèse audio (Vertex AI)…"):
-        try:
-            if not (tts_payload or "").strip():
-                raise RuntimeError("Texte TTS synthèse vide après nettoyage.")
-            at0 = time.perf_counter()
-            audio_bytes_norm, audio_mime_norm, audio_ext = tts_spoken_audio_bytes(
-                cfg=cfg,
-                text=tts_payload,
-                voice_name=voice_syn,
-                vertex_client=vx,
-                gemini_api_key=resolve_gemini_api_key(),
-                sunday_date=_sunday_date_for_voice(identity),
-                cible="synthese",
-                pref_langue=pref_langue,
+    audio_path = ""
+    readings_cover_signed: str | None = None
+    voice_read = ""
+    synth_amb = False
+    read_amb = False
+
+    readings_plain = ""
+    readings_tts = ""
+    if generate_readings_audio:
+        texts = _resolve_texts_for_readings_tts(
+            texts=texts,
+            identity=identity,
+            gs=gs,
+            cfg=cfg,
+            zone=zone_key,
+            pref_langue=pref_langue,
+        )
+        readings_plain = plain_readings_for_tts(texts, pref_langue=pref_langue)
+        if readings_plain.strip():
+            voice_read_res = _resolve_voice_for_identity(
+                voix_rows,
+                identity=identity,
+                cible="lectures",
+                exclude_voices=[voice_syn],
             )
-            perf["audio_vertex_s"] = round(time.perf_counter() - at0, 3)
-            audio_route = last_tts_route() or "vertex_tts"
-            if not audio_bytes_norm:
-                raise RuntimeError("Réponse audio synthèse vide.")
-            audio_ok = True
-        except Exception as exc:
-            audio_fail_msg = f"{type(exc).__name__}: {str(exc)[:180]}"
-            if debug:
-                st.exception(exc)
+            voice_read = str(voice_read_res["voice"])
+            perf["voice_lectures"] = voice_read
+            perf["voice_lectures_rule_id"] = (
+                (voice_read_res.get("rule") or {}).get("#ID") or ""
+            )
+            perf["voice_lectures_fallback"] = bool(voice_read_res.get("fallback"))
+            readings_tts = compose_readings_tts_text(
+                body=readings_plain, templates=templates
+            )
+        else:
             st.warning(
-                f"Synthèse texte enregistrée, mais l'audio synthèse a échoué ({audio_fail_msg}). "
-                "Poursuite éventuelle (lectures / PDF) — utilise « Compléter les manquants » pour l’audio."
+                "Audio des lectures ignoré : le texte agrégé des quatre lectures (AELF) est vide — "
+                "vérifie les lectures pour cette date (cache RDC / API AELF)."
             )
+
+    want_syn = bool(generate_synth_audio)
+    want_read = bool(generate_readings_audio and readings_tts.strip())
+    if want_syn or want_read:
+        if want_syn and want_read:
+            ov_msg = "2–3/4 — Audios synthèse + lectures (parallèle)…"
+            ov_hint = (
+                f"TTS synthèse et lectures en parallèle. "
+                f"Sorties : `Audio/{date_label}/` et `AudioLectures/{date_label}/`."
+            )
+        elif want_syn:
+            ov_msg = "2/4 — Audio de la synthèse (TTS morcelé)…"
+            ov_hint = f"Publication dans `Audio/{date_label}/`."
+        else:
+            ov_msg = "3/4 — Audio des lectures AELF (TTS)…"
+            ov_hint = f"Fichier final : `AudioLectures/{date_label}/`."
+        _flow_overlay_step(
+            _overlay, ov_msg, hint=ov_hint, t0=t_flow, flush=True
+        )
+        with st.spinner("LumenVia génère les audios (TTS)…"):
+            tts_out = _parallel_tts_synth_and_readings(
+                cfg=cfg,
+                vx=vx,
+                synth_text=tts_payload if want_syn else None,
+                synth_voice=voice_syn if want_syn else None,
+                readings_text=readings_tts if want_read else None,
+                readings_voice=voice_read if want_read else None,
+                identity=identity,
+                pref_langue=pref_langue,
+                want_synth=want_syn,
+                want_readings=want_read,
+            )
+
+        if want_syn:
+            if tts_out.get("synth_err") is not None:
+                exc = tts_out["synth_err"]
+                audio_fail_msg = f"{type(exc).__name__}: {str(exc)[:180]}"
+                if debug:
+                    st.exception(exc)  # type: ignore[arg-type]
+                st.warning(
+                    f"Synthèse texte enregistrée, mais l'audio synthèse a échoué ({audio_fail_msg}). "
+                    "Poursuite éventuelle (lectures / PDF)."
+                )
+            else:
+                trip = tts_out.get("synth")
+                if isinstance(trip, tuple) and len(trip) == 3:
+                    audio_bytes_norm, audio_mime_norm, audio_ext = trip
+                    if audio_bytes_norm:
+                        audio_ok = True
+                        audio_route = str(tts_out.get("synth_route") or "vertex_tts")
+                        synth_amb = bool(tts_out.get("synth_ambiance"))
+                        perf["audio_vertex_s"] = float(tts_out.get("synth_s") or 0)
+                        timing_add(
+                            lang=pref_langue,
+                            step="tts_synthese",
+                            seconds=float(perf["audio_vertex_s"]),
+                            note=audio_route,
+                        )
+
+        if want_read:
+            if tts_out.get("readings_err") is not None:
+                st.warning(
+                    f"Audio des lectures non publié (synthèse enregistrée quand même) : "
+                    f"{tts_out['readings_err']}"
+                )
+            else:
+                trip_r = tts_out.get("readings")
+                if isinstance(trip_r, tuple) and len(trip_r) == 3:
+                    r_bytes, r_mime, r_ext = trip_r
+                    perf["readings_tts_s"] = float(tts_out.get("readings_s") or 0)
+                    readings_tts_route = str(tts_out.get("readings_route") or "")
+                    read_amb = bool(tts_out.get("readings_ambiance"))
+                    timing_add(
+                        lang=pref_langue,
+                        step="tts_lectures",
+                        seconds=float(perf["readings_tts_s"]),
+                        note=readings_tts_route,
+                    )
+                    day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
+                    readings_path = audio_readings_path(
+                        day_for_path, gen_entity_id, r_ext, pref_langue=pref_langue
+                    )
+                    ru0 = time.perf_counter()
+                    upload_bytes(
+                        gcs=gcs,
+                        bucket_name=cfg.gcs_bucket_name,
+                        path=readings_path,
+                        data=r_bytes,
+                        content_type=r_mime,
+                    )
+                    perf["readings_upload_s"] = round(time.perf_counter() - ru0, 3)
+                    _append_immutable_row_locked(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="audio",
+                        values_by_col={
+                            "entity_id": sha256(
+                                f"audio_lect|{gen_entity_id}|{readings_path}".encode("utf-8")
+                            ).hexdigest()[:24],
+                            "gen_entity_id": row_gen["entity_id"],
+                            "voice": voice_read,
+                            "format": r_ext,
+                            "gcs_path": readings_path,
+                            "kind": "lectures",
+                            "duration_tts_s": _sheet_seconds(perf.get("readings_tts_s")),
+                            "duration_upload_s": _sheet_seconds(
+                                perf.get("readings_upload_s")
+                            ),
+                            "tts_route": readings_tts_route or "",
+                            "ambiance": _audio_ambiance_sheet_flag(applied=read_amb),
+                        },
+                    )
+                    try:
+                        _base_pub_early = ""
+                        try:
+                            s = st.secrets
+                            _base_pub_early = str(
+                                s.get("PUBLIC_APP_URL") or s.get("public_app_url") or ""
+                            ).strip()
+                        except Exception:
+                            pass
+                        readings_cover_signed = pdf_readings_listen_url(
+                            date_str=date_str,
+                            public_app_url=_base_pub_early or None,
+                            pref_langue=pref_langue,
+                            gcs=gcs,
+                            bucket_name=str(cfg.gcs_bucket_name).strip(),
+                            gcs_audio_path=readings_path,
+                        )
+                    except Exception:
+                        readings_cover_signed = None
 
     if audio_ok:
         audio_path = audio_synth_path(
@@ -1066,12 +1330,14 @@ def _run_generate_sunday_flow(
         perf["upload_audio_s"] = round(time.perf_counter() - uat0, 3)
         perf["audio_route"] = audio_route
 
-        append_immutable_row(
+        _append_immutable_row_locked(
             gspread_client=gs,
             spreadsheet_id=cfg.gsheet_id,
             table="audio",
             values_by_col={
-                "entity_id": sha256(f"audio|{gen_entity_id}|{audio_path}".encode("utf-8")).hexdigest()[:24],
+                "entity_id": sha256(
+                    f"audio|{gen_entity_id}|{audio_path}".encode("utf-8")
+                ).hexdigest()[:24],
                 "gen_entity_id": row_gen["entity_id"],
                 "voice": voice_syn,
                 "format": audio_ext,
@@ -1080,7 +1346,7 @@ def _run_generate_sunday_flow(
                 "duration_tts_s": _sheet_seconds(perf.get("audio_vertex_s")),
                 "duration_upload_s": _sheet_seconds(perf.get("upload_audio_s")),
                 "tts_route": audio_route or "",
-                "ambiance": _audio_ambiance_sheet_flag(),
+                "ambiance": _audio_ambiance_sheet_flag(applied=synth_amb),
             },
         )
 
@@ -1092,7 +1358,6 @@ def _run_generate_sunday_flow(
             audio_mime=audio_mime_norm,
         )
     else:
-        audio_path = ""
         persist_sunday_bundle(
             date_str=date_str,
             zone=zone_key,
@@ -1100,118 +1365,6 @@ def _run_generate_sunday_flow(
             audio_bytes=None,
             audio_mime=None,
         )
-
-    readings_cover_signed: str | None = None
-    if generate_readings_audio:
-        texts = _resolve_texts_for_readings_tts(
-            texts=texts, identity=identity, gs=gs, cfg=cfg, zone=zone_key, pref_langue=pref_langue
-        )
-        readings_plain = plain_readings_for_tts(texts, pref_langue=pref_langue)
-        if readings_plain.strip():
-            try:
-                _flow_overlay_step(
-                    _overlay,
-                    "3/4 — Audio des lectures AELF (TTS)…",
-                    hint=(
-                        "Découpage en plusieurs sections — souvent 3–8 min. "
-                        f"Fichier final : `AudioLectures/{date_label}/`. "
-                        "Rafraîchis la console GCS : les dossiers `Audio/` et `Syntheses/` "
-                        "peuvent déjà contenir la synthèse."
-                    ),
-                    t0=t_flow,
-                )
-                with st.spinner("LumenVia génère l’audio des lectures (AELF)…"):
-                    voice_read_res = _resolve_voice_for_identity(
-                        voix_rows,
-                        identity=identity,
-                        cible="lectures",
-                        exclude_voices=[voice_syn],
-                    )
-                    voice_read = str(voice_read_res["voice"])
-                    perf["voice_lectures"] = voice_read
-                    perf["voice_lectures_rule_id"] = ((voice_read_res.get("rule") or {}).get("#ID") or "")
-                    perf["voice_lectures_fallback"] = bool(voice_read_res.get("fallback"))
-                    if debug:
-                        if voice_read_res.get("fallback"):
-                            st.warning(
-                                f"Aucune règle Voix_Audio (lectures) ne matche — fallback **{voice_read}**."
-                            )
-                        else:
-                            st.caption(
-                                f"Voix lectures retenue : **{voice_read}** "
-                                f"(règle `#ID {perf['voice_lectures_rule_id']}`)."
-                            )
-                    readings_tts = compose_readings_tts_text(body=readings_plain, templates=templates)
-                    rt0 = time.perf_counter()
-                    r_bytes, r_mime, r_ext = tts_readings_audio_bytes(
-                        cfg=cfg,
-                        text=readings_tts,
-                        voice_name=voice_read,
-                        vertex_client=vx,
-                        gemini_api_key=resolve_gemini_api_key(),
-                        sunday_date=_sunday_date_for_voice(identity),
-                        pref_langue=pref_langue,
-                    )
-                    perf["readings_tts_s"] = round(time.perf_counter() - rt0, 3)
-                    readings_tts_route = last_tts_route()
-                day_for_path = str(getattr(identity, "date", "") or "").strip()[:10]
-                readings_path = audio_readings_path(
-                    day_for_path, gen_entity_id, r_ext, pref_langue=pref_langue
-                )
-                ru0 = time.perf_counter()
-                upload_bytes(
-                    gcs=gcs,
-                    bucket_name=cfg.gcs_bucket_name,
-                    path=readings_path,
-                    data=r_bytes,
-                    content_type=r_mime,
-                )
-                perf["readings_upload_s"] = round(time.perf_counter() - ru0, 3)
-                append_immutable_row(
-                    gspread_client=gs,
-                    spreadsheet_id=cfg.gsheet_id,
-                    table="audio",
-                    values_by_col={
-                        "entity_id": sha256(f"audio_lect|{gen_entity_id}|{readings_path}".encode("utf-8")).hexdigest()[
-                            :24
-                        ],
-                        "gen_entity_id": row_gen["entity_id"],
-                        "voice": voice_read,
-                        "format": r_ext,
-                        "gcs_path": readings_path,
-                        "kind": "lectures",
-                        "duration_tts_s": _sheet_seconds(perf.get("readings_tts_s")),
-                        "duration_upload_s": _sheet_seconds(perf.get("readings_upload_s")),
-                        "tts_route": readings_tts_route or "",
-                        "ambiance": _audio_ambiance_sheet_flag(),
-                    },
-                )
-                try:
-                    _base_pub_early = ""
-                    try:
-                        s = st.secrets
-                        _base_pub_early = str(
-                            s.get("PUBLIC_APP_URL") or s.get("public_app_url") or ""
-                        ).strip()
-                    except Exception:
-                        pass
-                    readings_cover_signed = pdf_readings_listen_url(
-                        date_str=date_str,
-                        public_app_url=_base_pub_early or None,
-                        pref_langue=pref_langue,
-                        gcs=gcs,
-                        bucket_name=str(cfg.gcs_bucket_name).strip(),
-                        gcs_audio_path=readings_path,
-                    )
-                except Exception:
-                    readings_cover_signed = None
-            except Exception as ex:
-                st.warning(f"Audio des lectures non publié (synthèse enregistrée quand même) : {ex}")
-        else:
-            st.warning(
-                "Audio des lectures ignoré : le texte agrégé des quatre lectures (AELF) est vide — "
-                "vérifie les lectures pour cette date (cache RDC / API AELF)."
-            )
 
     # Optimisation : les downloads de vérification (Cloud → UI) sont coûteux.
     # On ne les fait que si debug est activé.
@@ -1369,6 +1522,11 @@ def _run_generate_sunday_flow(
             # Nettoie l’ancienne clé sans langue (téléchargement sinon introuvable).
             st.session_state.pop(f"liturgy_sunday_pdf_{date_str}", None)
             perf["pdf_auto_s"] = round(time.perf_counter() - tpdf0, 3)
+            timing_add(
+                lang=pref_langue,
+                step="pdf",
+                seconds=float(perf["pdf_auto_s"]),
+            )
         except Exception as e:
             st.warning(f"PDF non généré automatiquement : {e}")
     if debug:
@@ -1389,12 +1547,27 @@ def _run_generate_sunday_flow(
         st.markdown("**Chronométrage (debug)**")
         st.write(perf)
 
-    if audio_ok:
-        parts = [f"Régénération terminée pour {date_label} — texte et audio synthèse publiés."]
+    if (not generate_synth_audio) and (not generate_readings_audio) and (not generate_pdf):
+        parts = [f"Texte FR publié pour {date_label}."]
         level = "success"
+    elif audio_ok or (not generate_synth_audio):
+        if generate_synth_audio and audio_ok:
+            parts = [
+                f"Régénération terminée pour {date_label} - texte et audio synthèse publiés."
+            ]
+            level = "success"
+        elif generate_synth_audio and not audio_ok:
+            parts = [
+                f"Régénération partielle pour {date_label} - texte publié, "
+                f"audio synthèse manquant ({audio_fail_msg or 'erreur TTS'})."
+            ]
+            level = "warning"
+        else:
+            parts = [f"Régénération terminée pour {date_label} - texte publié."]
+            level = "success"
     else:
         parts = [
-            f"Régénération partielle pour {date_label} — texte publié, "
+            f"Régénération partielle pour {date_label} - texte publié, "
             f"audio synthèse manquant ({audio_fail_msg or 'erreur TTS'})."
         ]
         level = "warning"
@@ -1533,10 +1706,11 @@ def _run_publish_lang_from_fr_pivot(
     issues: list[str] = []
 
     if need_text:
+        t_loc0 = time.perf_counter()
         upload_text(
             gcs=gcs, bucket_name=cfg.gcs_bucket_name, path=text_path, text=localized
         )
-        append_immutable_row(
+        _append_immutable_row_locked(
             gspread_client=gs,
             spreadsheet_id=cfg.gsheet_id,
             table="generations",
@@ -1553,6 +1727,11 @@ def _run_publish_lang_from_fr_pivot(
                 "text_gcs_path": text_path,
                 "text_words": len(localized.split()),
             },
+        )
+        timing_add(
+            lang=lg,
+            step="texte_localise",
+            seconds=round(time.perf_counter() - t_loc0, 3),
         )
         done.append(f"texte {lg}")
     else:
@@ -1609,64 +1788,14 @@ def _run_publish_lang_from_fr_pivot(
         ]
     )
 
+    spoken = ""
     if need_synth_audio and localized.strip():
-        try:
-            if _overlay is not None:
-                _flow_overlay_step(
-                    _overlay,
-                    f"LumenVia · {lg} — audio synthèse…",
-                    hint="TTS du script traduit — peut prendre plusieurs minutes.",
-                )
-            from core.sunday_readings_tts import compose_synthesis_tts_text
+        spoken = compose_synthesis_tts_text(body=localized, templates=templates)
 
-            spoken = compose_synthesis_tts_text(body=localized, templates=templates)
-            a_bytes, a_mime, a_ext = tts_spoken_audio_bytes(
-                cfg=cfg,
-                text=spoken,
-                voice_name=voice_syn,
-                vertex_client=vx,
-                gemini_api_key=resolve_gemini_api_key(),
-                sunday_date=_sunday_date_for_voice(identity),
-                cible="synthese",
-                pref_langue=lg,
-            )
-            a_path = audio_synth_path(day, gen_entity_id, a_ext, pref_langue=lg)
-            upload_bytes(
-                gcs=gcs,
-                bucket_name=cfg.gcs_bucket_name,
-                path=a_path,
-                data=a_bytes,
-                content_type=a_mime,
-            )
-            append_immutable_row(
-                gspread_client=gs,
-                spreadsheet_id=cfg.gsheet_id,
-                table="audio",
-                values_by_col={
-                    "entity_id": sha256(
-                        f"audio_syn|{gen_entity_id}|{a_path}".encode("utf-8")
-                    ).hexdigest()[:24],
-                    "gen_entity_id": gen_entity_id,
-                    "voice": voice_syn,
-                    "format": a_ext,
-                    "gcs_path": a_path,
-                    "kind": "synthese",
-                    "tts_route": last_tts_route() or "",
-                    "ambiance": _audio_ambiance_sheet_flag(),
-                },
-            )
-            done.append(f"audio synthèse {lg}")
-        except Exception as ex:
-            issues.append(f"audio synthèse {lg}: {ex}")
-
+    readings_tts = ""
+    voice_read = ""
     if need_readings:
         try:
-            if _overlay is not None:
-                _flow_overlay_step(
-                    _overlay,
-                    f"LumenVia · {lg} — audio lectures…",
-                    hint="TTS du lectionnaire natif — 5–10 min possibles.",
-                )
             texts = _resolve_texts_for_readings_tts(
                 texts=texts,
                 identity=identity,
@@ -1690,54 +1819,145 @@ def _run_publish_lang_from_fr_pivot(
                 readings_tts = compose_readings_tts_text(
                     body=readings_plain, templates=templates
                 )
-                r_bytes, r_mime, r_ext = tts_readings_audio_bytes(
-                    cfg=cfg,
-                    text=readings_tts,
-                    voice_name=voice_read,
-                    vertex_client=vx,
-                    gemini_api_key=resolve_gemini_api_key(),
-                    sunday_date=_sunday_date_for_voice(identity),
-                    pref_langue=lg,
-                )
-                r_path = audio_readings_path(
-                    day, gen_entity_id, r_ext, pref_langue=lg
-                )
-                upload_bytes(
-                    gcs=gcs,
-                    bucket_name=cfg.gcs_bucket_name,
-                    path=r_path,
-                    data=r_bytes,
-                    content_type=r_mime,
-                )
-                append_immutable_row(
-                    gspread_client=gs,
-                    spreadsheet_id=cfg.gsheet_id,
-                    table="audio",
-                    values_by_col={
-                        "entity_id": sha256(
-                            f"audio_lect|{gen_entity_id}|{r_path}".encode("utf-8")
-                        ).hexdigest()[:24],
-                        "gen_entity_id": gen_entity_id,
-                        "voice": voice_read,
-                        "format": r_ext,
-                        "gcs_path": r_path,
-                        "kind": "lectures",
-                        "tts_route": last_tts_route() or "",
-                        "ambiance": _audio_ambiance_sheet_flag(),
-                    },
-                )
-                done.append(f"audio lectures {lg}")
         except Exception as ex:
-            issues.append(f"audio lectures {lg}: {ex}")
+            issues.append(f"lectures {lg}: {ex}")
+
+    want_syn = bool(need_synth_audio and spoken.strip())
+    want_read = bool(need_readings and readings_tts.strip() and voice_read)
+    if want_syn or want_read:
+        if _overlay is not None:
+            if want_syn and want_read:
+                _flow_overlay_step(
+                    _overlay,
+                    f"LumenVia · {lg} - audios synthèse + lectures (parallèle)…",
+                    hint="TTS synthèse et lectures en parallèle.",
+                )
+            elif want_syn:
+                _flow_overlay_step(
+                    _overlay,
+                    f"LumenVia · {lg} - audio synthèse…",
+                    hint="TTS du script traduit.",
+                )
+            else:
+                _flow_overlay_step(
+                    _overlay,
+                    f"LumenVia · {lg} - audio lectures…",
+                    hint="TTS du lectionnaire natif.",
+                )
+        tts_out = _parallel_tts_synth_and_readings(
+            cfg=cfg,
+            vx=vx,
+            synth_text=spoken if want_syn else None,
+            synth_voice=voice_syn if want_syn else None,
+            readings_text=readings_tts if want_read else None,
+            readings_voice=voice_read if want_read else None,
+            identity=identity,
+            pref_langue=lg,
+            want_synth=want_syn,
+            want_readings=want_read,
+        )
+        if want_syn:
+            if tts_out.get("synth_err") is not None:
+                issues.append(f"audio synthèse {lg}: {tts_out['synth_err']}")
+            else:
+                trip = tts_out.get("synth")
+                if isinstance(trip, tuple) and len(trip) == 3:
+                    a_bytes, a_mime, a_ext = trip
+                    timing_add(
+                        lang=lg,
+                        step="tts_synthese",
+                        seconds=float(tts_out.get("synth_s") or 0),
+                        note=str(tts_out.get("synth_route") or ""),
+                    )
+                    a_path = audio_synth_path(
+                        day, gen_entity_id, a_ext, pref_langue=lg
+                    )
+                    upload_bytes(
+                        gcs=gcs,
+                        bucket_name=cfg.gcs_bucket_name,
+                        path=a_path,
+                        data=a_bytes,
+                        content_type=a_mime,
+                    )
+                    _append_immutable_row_locked(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="audio",
+                        values_by_col={
+                            "entity_id": sha256(
+                                f"audio_syn|{gen_entity_id}|{a_path}".encode("utf-8")
+                            ).hexdigest()[:24],
+                            "gen_entity_id": gen_entity_id,
+                            "voice": voice_syn,
+                            "format": a_ext,
+                            "gcs_path": a_path,
+                            "kind": "synthese",
+                            "duration_tts_s": _sheet_seconds(
+                                float(tts_out.get("synth_s") or 0)
+                            ),
+                            "tts_route": str(tts_out.get("synth_route") or ""),
+                            "ambiance": _audio_ambiance_sheet_flag(
+                                applied=bool(tts_out.get("synth_ambiance"))
+                            ),
+                        },
+                    )
+                    done.append(f"audio synthèse {lg}")
+        if want_read:
+            if tts_out.get("readings_err") is not None:
+                issues.append(f"audio lectures {lg}: {tts_out['readings_err']}")
+            else:
+                trip_r = tts_out.get("readings")
+                if isinstance(trip_r, tuple) and len(trip_r) == 3:
+                    r_bytes, r_mime, r_ext = trip_r
+                    timing_add(
+                        lang=lg,
+                        step="tts_lectures",
+                        seconds=float(tts_out.get("readings_s") or 0),
+                        note=str(tts_out.get("readings_route") or ""),
+                    )
+                    r_path = audio_readings_path(
+                        day, gen_entity_id, r_ext, pref_langue=lg
+                    )
+                    upload_bytes(
+                        gcs=gcs,
+                        bucket_name=cfg.gcs_bucket_name,
+                        path=r_path,
+                        data=r_bytes,
+                        content_type=r_mime,
+                    )
+                    _append_immutable_row_locked(
+                        gspread_client=gs,
+                        spreadsheet_id=cfg.gsheet_id,
+                        table="audio",
+                        values_by_col={
+                            "entity_id": sha256(
+                                f"audio_lect|{gen_entity_id}|{r_path}".encode("utf-8")
+                            ).hexdigest()[:24],
+                            "gen_entity_id": gen_entity_id,
+                            "voice": voice_read,
+                            "format": r_ext,
+                            "gcs_path": r_path,
+                            "kind": "lectures",
+                            "duration_tts_s": _sheet_seconds(
+                                float(tts_out.get("readings_s") or 0)
+                            ),
+                            "tts_route": str(tts_out.get("readings_route") or ""),
+                            "ambiance": _audio_ambiance_sheet_flag(
+                                applied=bool(tts_out.get("readings_ambiance"))
+                            ),
+                        },
+                    )
+                    done.append(f"audio lectures {lg}")
 
     if need_pdf:
         try:
             if _overlay is not None:
                 _flow_overlay_step(
                     _overlay,
-                    f"LumenVia · {lg} — fascicule PDF…",
+                    f"LumenVia · {lg} - fascicule PDF…",
                     hint="Assemblage lectures natives + synthèse localisée.",
                 )
+            tpdf0 = time.perf_counter()
             bucket = str(cfg.gcs_bucket_name).strip()
             img_b = None
             try:
@@ -1873,6 +2093,7 @@ def _run_publish_lang_from_fr_pivot(
                 data=pdf_b,
                 content_type="application/pdf",
             )
+            pdf_s = round(time.perf_counter() - tpdf0, 3)
             _append_pdf_export_row(
                 gs=gs,
                 cfg=cfg,
@@ -1880,9 +2101,13 @@ def _run_publish_lang_from_fr_pivot(
                 zone=zone,
                 gen_entity_id=gen_entity_id,
                 gcs_path=fasc_path,
-                duration_build_s=0,
+                duration_build_s=pdf_s,
             )
-            st.session_state[f"liturgy_sunday_pdf_{day}_{lg}"] = pdf_b
+            try:
+                st.session_state[f"liturgy_sunday_pdf_{day}_{lg}"] = pdf_b
+            except Exception:
+                pass
+            timing_add(lang=lg, step="pdf", seconds=pdf_s)
             done.append(f"PDF {lg}")
         except Exception as ex:
             issues.append(f"PDF {lg}: {ex}")
@@ -2054,9 +2279,11 @@ def _run_multilang_from_cell_selection(
     Génération granulaire depuis le tableau (paires langue × média).
 
     ``force_kinds`` : paires déjà publiées à régénérer (ex. retester la bande-son).
+    Pipeline : texte FR (Vertex) si besoin, puis langues en parallèle (max 2).
     """
     from core.readings_cache_loader import rdc_zone_for_pref_langue
 
+    timing_reset()
     day = str(getattr(identity, "date", "") or "").strip()[:10]
     force_set = {
         (coerce_liturgy_pref_langue(a), str(b)) for a, b in (force_kinds or set())
@@ -2080,18 +2307,18 @@ def _run_multilang_from_cell_selection(
         or (lg == "FR" and ("synth_text" in kinds))
         for lg, kinds in by_sel.items()
     )
-    fr_kinds = by_sel.get("FR", set())
     force_fr_text = ("FR", "synth_text") in force_set
 
+    # 1) Texte FR seul si pivot manquant / forcé (médias ensuite en parallèle avec les autres langues).
     if needs_fr_pivot and (not fr_text.strip() or force_fr_text):
         if _overlay is not None:
             _flow_overlay_step(
                 _overlay,
-                "LumenVia · FR — rédaction synthèse (Vertex)…",
+                "LumenVia · FR - rédaction synthèse (Vertex)…",
                 hint=(
-                    "Pivot français — régénération."
+                    "Pivot français - régénération (médias ensuite en parallèle)."
                     if force_fr_text
-                    else "Pivot français requis."
+                    else "Pivot français requis avant localisation / audios."
                 ),
             )
         total_words = sum(
@@ -2103,8 +2330,6 @@ def _run_multilang_from_cell_selection(
                 "evangile",
             )
         )
-        gen_fr_pdf = "pdf" in fr_kinds
-        gen_fr_readings = "readings_audio" in fr_kinds
         fr_flow = _run_generate_sunday_flow(
             _overlay=_overlay or st.empty(),
             identity=identity,
@@ -2114,57 +2339,39 @@ def _run_multilang_from_cell_selection(
             pct=int(pct),
             include_takeaways=include_takeaways,
             include_catechese_bridge=include_catechese_bridge,
-            generate_pdf=gen_fr_pdf,
-            generate_readings_audio=gen_fr_readings,
+            generate_pdf=False,
+            generate_readings_audio=False,
+            generate_synth_audio=False,
             debug=False,
             cfg=cfg,
             pref_langue="FR",
         )
-        messages.append(str(fr_flow.get("message") or "FR généré."))
+        messages.append(str(fr_flow.get("message") or "FR texte généré."))
         if fr_flow.get("level") == "error":
-            return {
-                "level": "error",
-                "message": "Échec pivot FR — " + str(fr_flow.get("message") or ""),
-            }
+            recap = format_timing_recap()
+            msg = "Échec pivot FR - " + str(fr_flow.get("message") or "")
+            if recap:
+                msg = msg + "\n\n" + recap
+            return {"level": "error", "message": msg}
         fr_text, _fr_eid = _load_fr_master_synthesis_text(
             gs=gs, gcs=gcs, cfg=cfg, date_str=day
         )
-        # Le flux Vertex produit texte + audio synthèse (+ PDF/lectures si demandés).
-        fr_kinds.discard("synth_text")
-        fr_kinds.discard("synth_audio")
-        if gen_fr_pdf:
-            fr_kinds.discard("pdf")
-        if gen_fr_readings:
-            fr_kinds.discard("readings_audio")
-        if not fr_kinds:
-            by_sel.pop("FR", None)
-        else:
-            by_sel["FR"] = fr_kinds
+        if "FR" in by_sel:
+            by_sel["FR"].discard("synth_text")
+            if not by_sel["FR"]:
+                by_sel.pop("FR", None)
 
     order = [lg for lg in ("FR", "DE", "EN", "ES", "IT", "PT") if lg in by_sel]
     for extra in by_sel:
         if extra not in order:
             order.append(extra)
 
-    for i, lg in enumerate(order, start=1):
+    def _publish_one(lg: str, *, overlay: object | None) -> dict[str, str]:
         kinds = by_sel.get(lg) or set()
         if not kinds:
-            continue
-        if _overlay is not None:
-            _kind_lbl = {
-                "synth_text": "synthèse texte",
-                "synth_audio": "audio synthèse",
-                "readings_audio": "audio lectures",
-                "pdf": "PDF",
-            }
-            labels = [_kind_lbl.get(k, k) for k in sorted(kinds)]
-            _flow_overlay_step(
-                _overlay,
-                f"LumenVia · {lg} ({i}/{len(order)}) — {' · '.join(labels)}…",
-                hint="Progression détaillée : localisation / TTS / PDF selon la sélection.",
-            )
+            return {"level": "info", "message": f"{lg} : rien à faire."}
         force_lg = any((lg, k) in force_set for k in kinds)
-        res = _run_publish_lang_from_fr_pivot(
+        return _run_publish_lang_from_fr_pivot(
             cfg=cfg,
             gs=gs,
             gcs=gcs,
@@ -2178,13 +2385,58 @@ def _run_multilang_from_cell_selection(
             generate_pdf="pdf" in kinds,
             include_catechese_pdf=include_catechese_pdf,
             force=force_lg,
-            _overlay=_overlay,
+            # Pas d'overlay depuis un thread worker (Streamlit non thread-safe).
+            _overlay=overlay,
         )
-        messages.append(str(res.get("message") or lg))
+
+    if not order:
+        recap = format_timing_recap()
+        msg = "\n".join(messages) if messages else "Rien à publier."
+        if recap:
+            msg = msg + "\n\n" + recap
+        return {"level": "success" if messages else "info", "message": msg}
+
+    if _overlay is not None:
+        _flow_overlay_step(
+            _overlay,
+            f"LumenVia · publication {' + '.join(order)}…",
+            hint=(
+                "Langues en parallèle (max 2) ; TTS synthèse/lectures aussi en parallèle "
+                "dans chaque langue."
+                if len(order) > 1
+                else "TTS synthèse et lectures en parallèle si les deux sont cochés."
+            ),
+        )
+
+    # 2) Médias par langue : jusqu'à 2 langues en parallèle (ex. FR + DE).
+    if len(order) == 1:
+        res = _publish_one(order[0], overlay=_overlay)
+        messages.append(str(res.get("message") or order[0]))
         lv = str(res.get("level") or "info")
         if lv == "error":
             worst = "error"
         elif lv == "warning" and worst == "success":
             worst = "warning"
+    else:
+        with ThreadPoolExecutor(max_workers=min(2, len(order))) as pool:
+            futs = {
+                pool.submit(_publish_one, lg, overlay=None): lg for lg in order
+            }
+            for fut in as_completed(futs):
+                lg = futs[fut]
+                try:
+                    res = fut.result()
+                except Exception as ex:
+                    res = {"level": "error", "message": f"{lg} : {ex}"}
+                messages.append(str(res.get("message") or lg))
+                lv = str(res.get("level") or "info")
+                if lv == "error":
+                    worst = "error"
+                elif lv == "warning" and worst == "success":
+                    worst = "warning"
 
-    return {"level": worst, "message": "\n".join(messages)}
+    recap = format_timing_recap()
+    body = "\n".join(messages)
+    if recap:
+        body = body + "\n\n" + recap
+    return {"level": worst, "message": body}

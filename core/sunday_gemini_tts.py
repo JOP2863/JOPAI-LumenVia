@@ -52,6 +52,34 @@ _CATECHESE_TTS_PAUSE_MS = 900
 # Sous ce seuil, un morceau isolé pousse Gemini TTS à inventer du texte.
 _MIN_TTS_CHUNK_CHARS = 100
 
+# Parallélisme des morceaux TTS (3 par défaut ; secrets ``TTS_CHUNK_WORKERS`` 1–3).
+_DEFAULT_TTS_CHUNK_WORKERS = 3
+_MAX_TTS_CHUNK_WORKERS = 3
+
+
+def resolve_tts_chunk_workers() -> int:
+    """Nombre de workers pour les chunks TTS (1–3). Secrets : ``TTS_CHUNK_WORKERS``."""
+    raw: object = None
+    try:
+        import streamlit as st  # type: ignore
+
+        raw = st.secrets.get("TTS_CHUNK_WORKERS")
+        if raw is None and isinstance(st.secrets.get("tts"), dict):
+            raw = (st.secrets.get("tts") or {}).get("chunk_workers")
+    except Exception:
+        raw = None
+    try:
+        n = int(str(raw if raw is not None else _DEFAULT_TTS_CHUNK_WORKERS).strip() or _DEFAULT_TTS_CHUNK_WORKERS)
+    except Exception:
+        n = _DEFAULT_TTS_CHUNK_WORKERS
+    return max(1, min(_MAX_TTS_CHUNK_WORKERS, n))
+
+
+def _tts_chunk_workers_for(chunks: list[str]) -> int:
+    if len(chunks) <= 2:
+        return 1
+    return max(1, min(resolve_tts_chunk_workers(), len(chunks)))
+
 
 def coalesce_short_tts_chunks(
     chunks: list[str],
@@ -352,7 +380,7 @@ def _tts_chunks_to_wav(
                 last_err = ex
         raise last_err or RuntimeError("TTS Gemini échoué")
 
-    workers = 1 if len(chunks) <= 2 else max(1, min(2, len(chunks)))
+    workers = _tts_chunk_workers_for(chunks)
     with ThreadPoolExecutor(max_workers=workers) as ex2:
         futs = [ex2.submit(_tts_job, i, ch) for i, ch in enumerate(chunks)]
         for fut in as_completed(futs):
@@ -360,6 +388,21 @@ def _tts_chunks_to_wav(
                 i, b = fut.result()
                 wav_parts_by_i[i] = b
             except Exception as ex:
+                # Repli séquentiel si saturation quota (429) en parallèle.
+                err_l = str(ex).lower()
+                if workers > 1 and (
+                    "429" in err_l or "quota" in err_l or "rate" in err_l
+                ):
+                    wav_parts_by_i.clear()
+                    tts_errors.clear()
+                    for j, ch2 in enumerate(chunks):
+                        try:
+                            jj, bb = _tts_job(j, ch2)
+                            wav_parts_by_i[jj] = bb
+                        except Exception as ex2:
+                            tts_errors.append(str(ex2))
+                            break
+                    break
                 tts_errors.append(str(ex))
 
     if tts_errors or len(wav_parts_by_i) != len(chunks):
@@ -624,7 +667,7 @@ def _tts_vertex_chunks_to_wav(
             b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
         return i, b
 
-    workers = 1 if len(chunks) <= 2 else max(1, min(2, len(chunks)))
+    workers = _tts_chunk_workers_for(chunks)
     with ThreadPoolExecutor(max_workers=workers) as ex2:
         futs = [ex2.submit(_vertex_job, i, ch) for i, ch in enumerate(chunks)]
         for fut in as_completed(futs):
@@ -632,6 +675,20 @@ def _tts_vertex_chunks_to_wav(
                 i, b = fut.result()
                 wav_parts_by_i[i] = b
             except Exception as ex:
+                err_l = str(ex).lower()
+                if workers > 1 and (
+                    "429" in err_l or "quota" in err_l or "rate" in err_l
+                ):
+                    wav_parts_by_i.clear()
+                    tts_errors.clear()
+                    for j, ch2 in enumerate(chunks):
+                        try:
+                            jj, bb = _vertex_job(j, ch2)
+                            wav_parts_by_i[jj] = bb
+                        except Exception as ex2:
+                            tts_errors.append(str(ex2))
+                            break
+                    break
                 tts_errors.append(str(ex))
 
     if tts_errors or len(wav_parts_by_i) != len(chunks):

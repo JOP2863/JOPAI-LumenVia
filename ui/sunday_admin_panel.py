@@ -10,6 +10,7 @@ from core.liturgy_day import coerce_liturgy_pref_langue, supported_liturgy_langs
 from core.sunday_media_status import LangMediaStatus
 from core.sunday_view_locale import lang_flag_html
 from ui.components import loading_overlay
+from ui.navigation import _use_compact_top_nav
 from ui.streamlit_caches import (
     invalidate_sunday_media_status_cache,
     service_account_json_fingerprint,
@@ -37,8 +38,20 @@ def _cell_key(date_str: str, lang: str, kind: str) -> str:
     return f"adm_ml_cell_{date_str}_{lang}_{kind}"
 
 
+def _row_all_key(date_str: str, lang: str) -> str:
+    return f"adm_ml_row_all_{date_str}_{lang}"
+
+
 def _status_ready(row: LangMediaStatus, kind: str) -> bool:
     return bool(getattr(row, kind, False))
+
+
+def _row_has_any_media(row: LangMediaStatus) -> bool:
+    return any(_status_ready(row, kind) for kind, _attr, _icon in _MEDIA_KINDS)
+
+
+def _week_has_any_media(rows: list[LangMediaStatus]) -> bool:
+    return any(_row_has_any_media(r) for r in rows)
 
 
 def _status_url(row: LangMediaStatus, kind: str) -> str | None:
@@ -83,6 +96,13 @@ def _ready_cell_html(
     parts.append("</span>")
     return "".join(parts)
 
+
+_KIND_SHORT_LABELS = {
+    "synth_text": "Synthèse",
+    "synth_audio": "Aud. synth.",
+    "readings_audio": "Aud. lect.",
+    "pdf": "PDF",
+}
 
 _MEDIA_STATUS_TABLE_CSS = """
 <style>
@@ -135,15 +155,17 @@ _MEDIA_STATUS_TABLE_CSS = """
   color: #9a8b6e;
   font-size: 0.75rem;
 }
-/* Matrice widgets : pleine largeur, sans scroller (ni X ni Y). */
+/* Cartes langue : pleine largeur, pas de scroll horizontal. */
 div[class*="st-key-lv_ml_matrix"] {
-  overflow: visible !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
   max-width: 100%;
   margin: 0 0 0.55rem 0;
-  padding: 0.35rem 0.35rem 0.65rem 0.35rem;
+  padding: 0.25rem 0.2rem 0.45rem 0.2rem;
   border: 1px solid rgba(212, 175, 55, 0.35);
   border-radius: 10px;
   background: rgba(255, 253, 246, 0.65);
+  box-sizing: border-box;
 }
 div[class*="st-key-lv_ml_matrix"] > div {
   min-width: 0 !important;
@@ -155,11 +177,12 @@ div[class*="st-key-lv_ml_matrix"] [data-testid="stVerticalBlock"],
 div[class*="st-key-lv_ml_matrix"] [data-testid="stVerticalBlockBorderWrapper"] {
   overflow: visible !important;
   max-height: none !important;
+  max-width: 100% !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stHorizontalBlock"] {
-  flex-wrap: nowrap !important;
-  gap: 0.2rem !important;
-  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 0.25rem !important;
+  align-items: flex-start !important;
   width: 100% !important;
   min-width: 0 !important;
 }
@@ -170,41 +193,62 @@ div[class*="st-key-lv_ml_matrix"] [data-testid="column"] {
 div[class*="st-key-lv_ml_matrix"] [data-testid="stMarkdown"] {
   margin-bottom: 0 !important;
 }
-div[class*="st-key-lv_ml_matrix"] .lv-ml-head {
+div[class*="st-key-lv_ml_matrix"] .lv-ml-lang {
   font-weight: 700;
   color: #6b5918;
-  font-size: 0.68rem;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+div[class*="st-key-lv_ml_matrix"] .lv-ml-kind-lab {
+  font-weight: 700;
+  color: #6b5918;
+  font-size: 0.62rem;
   text-align: center;
   line-height: 1.15;
-  white-space: nowrap;
-}
-div[class*="st-key-lv_ml_matrix"] .lv-ml-head-lang {
-  text-align: left;
-  padding-left: 0.1rem;
+  margin: 0 0 0.15rem 0;
 }
 div[class*="st-key-lv_ml_matrix"] .lv-ml-cell {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  gap: 0.1rem;
-  min-height: 1.25rem;
+  justify-content: center;
+  gap: 0.05rem;
+  min-height: 1.1rem;
   white-space: nowrap;
+}
+div[class*="st-key-lv_ml_row"] {
+  margin: 0.2rem 0.1rem 0.45rem 0.1rem !important;
+  padding: 0.35rem 0.4rem 0.45rem 0.4rem !important;
+  border: 1px solid rgba(212, 175, 55, 0.28) !important;
+  border-radius: 8px !important;
+  background: rgba(255, 255, 255, 0.45) !important;
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] {
   min-height: 0 !important;
   margin: 0 !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] label {
-  gap: 0 !important;
-  justify-content: center !important;
-  min-height: 1.1rem !important;
-}
-div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] p {
-  display: none !important;
+  gap: 0.25rem !important;
+  justify-content: flex-start !important;
+  min-height: 1.35rem !important;
 }
 div[class*="st-key-lv_ml_matrix"] [data-testid="stCaptionContainer"] {
   margin-top: 0.15rem !important;
+}
+/* Téléphone : 2×2 pour les 4 médias (lisibles sans scroll X). */
+@media (max-width: 640px) {
+  div[class*="st-key-lv_ml_kinds"] [data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+    flex: 1 1 46% !important;
+    min-width: 46% !important;
+    max-width: 50% !important;
+  }
+  div[class*="st-key-lv_ml_matrix"] .lv-ml-kind-lab {
+    font-size: 0.7rem;
+    white-space: normal;
+  }
 }
 </style>
 """
@@ -227,6 +271,55 @@ def _matrix_cell_html(
     return '<span class="lv-ml-miss">—</span>'
 
 
+def _row_keys(date_str: str, lang: str) -> list[str]:
+    return [_cell_key(date_str, lang, kind) for kind, _attr, _icon in _MEDIA_KINDS]
+
+
+def _toggle_row_keys(date_str: str, lang: str) -> None:
+    """Bascule les 4 médias d’une langue (après submit form)."""
+    keys = _row_keys(date_str, lang)
+    want = not all(bool(st.session_state.get(k, False)) for k in keys)
+    for k in keys:
+        st.session_state[k] = want
+
+
+def _render_kind_cell(
+    *,
+    r: LangMediaStatus,
+    kind: str,
+    icon: str,
+    date_str: str,
+    fr_has_text: bool,
+) -> None:
+    """Case média dans un ``st.form`` : pas de rerun à chaque clic."""
+    ready = _status_ready(r, kind)
+    help_txt = _KIND_LABELS.get(kind, kind)
+    if ready:
+        help_txt += " - cocher pour régénérer"
+    else:
+        help_txt += " - cocher pour produire"
+        if not fr_has_text and r.lang != "FR" and kind in _KINDS_NEED_FR_PIVOT:
+            help_txt += " (nécessitera la synthèse FR pivot)"
+    ck = _cell_key(date_str, r.lang, kind)
+    if ck not in st.session_state:
+        st.session_state[ck] = False
+    short = _KIND_SHORT_LABELS.get(kind, kind)
+    st.markdown(
+        f'<div class="lv-ml-kind-lab">{html_escape(short)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="lv-ml-cell">{_matrix_cell_html(row=r, kind=kind, icon=icon)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.checkbox(
+        "↺" if ready else "+",
+        key=ck,
+        help=help_txt,
+        label_visibility="collapsed",
+    )
+
+
 def _render_media_status_matrix(
     *,
     rows: list[LangMediaStatus],
@@ -234,69 +327,73 @@ def _render_media_status_matrix(
     date_str: str,
     fr_has_text: bool,
 ) -> dict[str, bool]:
-    """Matrice médias : statut + case à cocher dans chaque cellule.
+    """Cartes par langue dans le form courant.
 
-    Retourne ``{cell_key: cochée}`` (valeur widget, fiable dans un fragment).
+    Retourne ``{lang: True}`` si le bouton « Toute la ligne » de cette langue a été soumis.
     """
-    headers = ("Langue", "Synthèse", "Audio synthèse", "Audio lectures", "PDF")
-    col_weights = [1.05, 1.0, 1.15, 1.15, 0.95]
-    checked: dict[str, bool] = {}
+    row_clicked: dict[str, bool] = {}
+    compact = _use_compact_top_nav()
 
     with st.container(key="lv_ml_matrix"):
-        head = st.columns(col_weights, gap="small")
-        for i, title in enumerate(headers):
-            cls = "lv-ml-head lv-ml-head-lang" if i == 0 else "lv-ml-head"
-            with head[i]:
-                st.markdown(
-                    f'<div class="{cls}">{html_escape(title)}</div>',
-                    unsafe_allow_html=True,
-                )
-
         for r in rows:
-            cols = st.columns(col_weights, gap="small")
             mark = " ←" if r.lang == current_lang else ""
-            with cols[0]:
-                st.markdown(
-                    f'{lang_flag_html(r.lang, height=14)}'
-                    f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}",
-                    unsafe_allow_html=True,
-                )
-            for i, (kind, _attr, icon) in enumerate(_MEDIA_KINDS):
-                ready = _status_ready(r, kind)
-                help_txt = _KIND_LABELS.get(kind, kind)
-                if ready:
-                    help_txt += " — cocher pour régénérer"
-                else:
-                    help_txt += " — cocher pour produire"
-                    if (
-                        not fr_has_text
-                        and r.lang != "FR"
-                        and kind in _KINDS_NEED_FR_PIVOT
-                    ):
-                        help_txt += " (nécessitera la synthèse FR pivot)"
-                ck = _cell_key(date_str, r.lang, kind)
-                if ck not in st.session_state:
-                    st.session_state[ck] = False
-                with cols[i + 1]:
-                    status_col, check_col = st.columns([4, 1], gap="small")
-                    with status_col:
-                        st.markdown(
-                            f'<div class="lv-ml-cell">'
-                            f"{_matrix_cell_html(row=r, kind=kind, icon=icon)}"
-                            f"</div>",
-                            unsafe_allow_html=True,
+            with st.container(key=f"lv_ml_row_{r.lang}"):
+                head_l, head_r = st.columns([2.2, 1.35], gap="small")
+                with head_l:
+                    st.markdown(
+                        f'<div class="lv-ml-lang">{lang_flag_html(r.lang, height=14)}'
+                        f"<strong>{html_escape(r.lang)}</strong>{html_escape(mark)}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with head_r:
+                    # form_submit_button : un seul aller-retour serveur (pas à chaque case).
+                    row_clicked[r.lang] = bool(
+                        st.form_submit_button(
+                            "Toute la ligne",
+                            key=_row_all_key(date_str, r.lang),
+                            help=f"Basculer les 4 médias pour {r.lang}",
                         )
-                    with check_col:
-                        # Pas de value= (sinon reset à False à chaque rerun du fragment).
-                        checked[ck] = bool(
-                            st.checkbox(
-                                "↺" if ready else "+",
-                                key=ck,
-                                help=help_txt,
-                                label_visibility="collapsed",
-                            )
-                        )
-    return checked
+                    )
+
+                with st.container(key=f"lv_ml_kinds_{r.lang}"):
+                    if compact:
+                        for pair_start in (0, 2):
+                            pair = st.columns(2, gap="small")
+                            for j, (kind, _attr, icon) in enumerate(
+                                _MEDIA_KINDS[pair_start : pair_start + 2]
+                            ):
+                                with pair[j]:
+                                    _render_kind_cell(
+                                        r=r,
+                                        kind=kind,
+                                        icon=icon,
+                                        date_str=date_str,
+                                        fr_has_text=fr_has_text,
+                                    )
+                    else:
+                        kind_cols = st.columns(4, gap="small")
+                        for i, (kind, _attr, icon) in enumerate(_MEDIA_KINDS):
+                            with kind_cols[i]:
+                                _render_kind_cell(
+                                    r=r,
+                                    kind=kind,
+                                    icon=icon,
+                                    date_str=date_str,
+                                    fr_has_text=fr_has_text,
+                                )
+    return row_clicked
+
+
+def _media_rows_session_key(date_str: str) -> str:
+    return f"_adm_ml_rows_snap_{date_str}"
+
+
+def _get_media_rows(*, cfg: object, date_str: str, force: bool = False) -> list[LangMediaStatus]:
+    """Statut médias : snapshot session (évite fingerprint/cache lookup à chaque interaction)."""
+    sk = _media_rows_session_key(date_str)
+    if force or sk not in st.session_state:
+        st.session_state[sk] = _load_media_rows(cfg=cfg, date_str=date_str)
+    return list(st.session_state[sk])
 
 
 def _voice_info_for_cell(row: LangMediaStatus, kind: str) -> str | None:
@@ -558,6 +655,7 @@ def _sunday_multilang_admin_fragment(
                 if level in ("success", "warning", "info"):
                     st.session_state[f"_adm_ml_deselect_all_{date_str}"] = True
                     invalidate_sunday_media_status_cache()
+                    st.session_state.pop(_media_rows_session_key(date_str), None)
                     _clear_sunday_preview_bundle_cache()
                 st.session_state.pop(_plan_key, None)
             finally:
@@ -579,16 +677,18 @@ def _sunday_multilang_admin_fragment(
 
     st.markdown("##### Médias par langue")
     st.caption(
-        "Dans chaque case : ✅ / picto = déjà publié (lien) · cocher = **produire** ou **régénérer**. "
-        "**?** = voix TTS · **🎶** = bande-son. "
-        "Règle d’or : synthèse **FR** puis localisation · lectures audio = lectionnaire natif."
+        "Les cases se cochent **sans recharger** (formulaire Streamlit). "
+        "**Toute la ligne** bascule les 4 médias d’une langue. "
+        "✅ / picto = déjà publié · cocher = produire ou régénérer. "
+        "Semaine vide : ligne **FR** cochée par défaut."
     )
     st.markdown(_MEDIA_STATUS_TABLE_CSS, unsafe_allow_html=True)
+
     if gs is None or not getattr(cfg, "gsheet_id", None):
-        st.warning("Sheets indisponible — statut multi-langues impossible.")
+        st.warning("Sheets indisponible - statut multi-langues impossible.")
         return
 
-    rows = _load_media_rows(cfg=cfg, date_str=date_str)
+    rows = _get_media_rows(cfg=cfg, date_str=date_str)
     by_lang = {r.lang: r for r in rows}
     fr_row = by_lang.get("FR")
     fr_has_text = bool(fr_row and fr_row.synth_text)
@@ -598,132 +698,144 @@ def _sunday_multilang_admin_fragment(
         for r in rows
         for kind, _attr, _icon in _MEDIA_KINDS
     ]
-    missing_keys = [
-        _cell_key(date_str, r.lang, kind)
+    n_missing = sum(
+        1
         for r in rows
         for kind, _attr, _icon in _MEDIA_KINDS
         if not _status_ready(r, kind)
-    ]
+    )
+    _fr_default_key = f"_adm_ml_fr_defaulted_{date_str}"
+    # Semaine vide : cocher toute la ligne FR une seule fois (session / date).
+    if (
+        not _week_has_any_media(rows)
+        and not st.session_state.get(_fr_default_key)
+        and not st.session_state.get(f"_adm_ml_deselect_all_{date_str}")
+    ):
+        for kind, _attr, _icon in _MEDIA_KINDS:
+            st.session_state[_cell_key(date_str, "FR", kind)] = True
+        st.session_state[_fr_default_key] = True
+
     if st.session_state.pop(f"_adm_ml_select_all_{date_str}", False):
         for k in all_keys:
             st.session_state[k] = True
     if st.session_state.pop(f"_adm_ml_deselect_all_{date_str}", False):
         for k in all_keys:
             st.session_state[k] = False
+        st.session_state[_fr_default_key] = True
 
-    checked = _render_media_status_matrix(
-        rows=rows,
-        current_lang=current_lang,
-        date_str=date_str,
-        fr_has_text=fr_has_text,
-    )
+    plan_pending = list(st.session_state.get(_plan_key) or [])
+    form_disabled = bool(plan_pending)
 
-    selected, force_kinds, auto_notes, _auto_fr = collect_table_selection(
-        rows=rows, date_str=date_str, checked=checked
-    )
-    if auto_notes:
-        for note in auto_notes:
-            st.info(note, icon="ℹ️")
-
-    n_sel = len(selected)
-    n_force = len(force_kinds)
-    n_missing = len(missing_keys)
-    if n_sel:
-        parts = [f"**{n_sel}** média(s) sélectionné(s)"]
-        if n_force:
-            parts.append(f"dont **{n_force}** en régénération")
+    with st.form(key=f"adm_ml_form_{date_str}", border=False, clear_on_submit=False):
+        row_clicked = _render_media_status_matrix(
+            rows=rows,
+            current_lang=current_lang,
+            date_str=date_str,
+            fr_has_text=fr_has_text,
+        )
         if n_missing:
-            parts.append(f"· {n_missing} encore manquant(s) au total")
-        st.caption(" — ".join(parts) + ".")
-    elif n_missing:
-        st.caption(f"Aucun média sélectionné · **{n_missing}** manquant(s).")
-    else:
-        st.caption("Tous publiés — coche une case du tableau pour régénérer.")
-
-    @st.dialog("Confirmer la génération")
-    def _confirm_dialog() -> None:
-        plan = list(st.session_state.get(_plan_key) or [])
-        st.markdown(f"Dimanche **{date_str}** — éléments à produire / régénérer :")
-        if not plan:
-            st.info("Aucune sélection.")
+            st.caption(
+                f"**{n_missing}** média(s) manquant(s) · coche puis **Lancer la sélection** "
+                "(pas de rechargement à chaque case)."
+            )
         else:
-            st.markdown("\n".join(plan))
-        c_ok, c_no = st.columns(2)
-        with c_ok:
-            if st.button(
-                "Lancer",
-                type="primary",
-                key=f"adm_ml_table_dlg_ok_{date_str}",
-                disabled=not plan,
-            ):
-                st.session_state[_snap_key] = list(
-                    st.session_state.get(_snap_key) or selected
-                )
-                st.session_state[_run_key] = True
-                # scope=app : ferme le st.dialog (un rerun fragment le laisse ouvert).
-                st.rerun(scope="app")
-        with c_no:
-            if st.button("Annuler", key=f"adm_ml_table_dlg_no_{date_str}"):
-                st.session_state.pop(_plan_key, None)
-                st.session_state.pop(_snap_key, None)
-                st.session_state.pop(f"_adm_ml_table_force_{date_str}", None)
-                st.rerun(scope="app")
+            st.caption("Tous publiés - coche pour régénérer, puis lance.")
 
-    b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
-    with b_sel:
-        if st.button(
-            "Tout sélectionner",
-            key=f"adm_ml_table_sel_all_{date_str}",
-            disabled=not all_keys,
-            use_container_width=True,
-        ):
-            st.session_state[f"_adm_ml_select_all_{date_str}"] = True
+        b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
+        with b_sel:
+            do_sel = st.form_submit_button(
+                "Tout sélectionner",
+                disabled=not all_keys or form_disabled,
+                use_container_width=True,
+            )
+        with b_desel:
+            do_desel = st.form_submit_button(
+                "Tout désélectionner",
+                disabled=not all_keys or form_disabled,
+                use_container_width=True,
+            )
+        with b_gen:
+            do_gen = st.form_submit_button(
+                "Lancer la sélection",
+                type="primary",
+                disabled=gcs is None or form_disabled,
+                use_container_width=True,
+                help=(
+                    "GCS indisponible."
+                    if gcs is None
+                    else (
+                        "Confirme ou annule ci-dessous."
+                        if plan_pending
+                        else "Envoie la sélection cochée (confirmation ensuite)."
+                    )
+                ),
+            )
+        with b_refresh:
+            do_refresh = st.form_submit_button(
+                "↻ Statut",
+                disabled=form_disabled,
+                use_container_width=True,
+                help="Relire GCS/Sheets (ignore le cache)",
+            )
+
+    # Traitement des submits (valeurs des cases déjà poussées dans session_state).
+    for lang, clicked in row_clicked.items():
+        if clicked:
+            _toggle_row_keys(date_str, lang)
             st.rerun(scope="fragment")
-    with b_desel:
-        if st.button(
-            "Tout désélectionner",
-            key=f"adm_ml_table_desel_all_{date_str}",
-            disabled=not all_keys,
-            use_container_width=True,
-        ):
-            st.session_state[f"_adm_ml_deselect_all_{date_str}"] = True
-            st.rerun(scope="fragment")
-    with b_gen:
-        gen_disabled = gcs is None or not selected
-        if st.button(
-            "Lancer la sélection",
-            type="primary",
-            key=f"adm_ml_table_gen_{date_str}",
-            disabled=gen_disabled,
-            use_container_width=True,
-            help=(
-                "GCS indisponible."
-                if gcs is None
-                else (
-                    "Coche au moins un média dans le tableau."
-                    if not selected
-                    else "Produire ou régénérer les cases cochées."
-                )
-            ),
-        ):
-            if gcs is None:
-                st.error("GCS indisponible.")
+    if do_sel:
+        st.session_state[f"_adm_ml_select_all_{date_str}"] = True
+        st.rerun(scope="fragment")
+    if do_desel:
+        st.session_state[f"_adm_ml_deselect_all_{date_str}"] = True
+        st.rerun(scope="fragment")
+    if do_refresh:
+        invalidate_sunday_media_status_cache()
+        st.session_state.pop(_media_rows_session_key(date_str), None)
+        st.rerun(scope="fragment")
+    if do_gen:
+        if gcs is None:
+            st.error("GCS indisponible.")
+        else:
+            selected, force_kinds, auto_notes, _auto_fr = collect_table_selection(
+                rows=rows, date_str=date_str
+            )
+            if not selected:
+                st.warning("Coche au moins un média avant de lancer.")
             else:
+                for note in auto_notes:
+                    st.info(note, icon="ℹ️")
                 st.session_state[_plan_key] = plan_from_table_selection(
                     rows=rows, selected=selected, force_kinds=force_kinds
                 )
                 st.session_state[_snap_key] = list(selected)
                 st.session_state[f"_adm_ml_table_force_{date_str}"] = list(force_kinds)
-                _confirm_dialog()
-    with b_refresh:
-        if st.button(
-            "↻ Statut",
-            key=f"adm_ml_table_refresh_{date_str}",
-            help="Relire GCS/Sheets (ignore le cache ~75 s)",
-            use_container_width=True,
-        ):
-            invalidate_sunday_media_status_cache()
-            st.rerun(scope="fragment")
+                st.rerun(scope="fragment")
+
+    # Confirmation inline sous le formulaire (fiable sur téléphone).
+    if plan_pending:
+        st.markdown(f"**Confirmer** · dimanche **{date_str}**")
+        st.markdown("\n".join(str(x) for x in plan_pending))
+        c_ok, c_no = st.columns(2)
+        with c_ok:
+            if st.button(
+                "Confirmer la génération",
+                type="primary",
+                key=f"adm_ml_table_confirm_ok_{date_str}",
+                use_container_width=True,
+            ):
+                st.session_state[_run_key] = True
+                st.rerun(scope="app")
+        with c_no:
+            if st.button(
+                "Annuler",
+                key=f"adm_ml_table_confirm_no_{date_str}",
+                use_container_width=True,
+            ):
+                st.session_state.pop(_plan_key, None)
+                st.session_state.pop(_snap_key, None)
+                st.session_state.pop(f"_adm_ml_table_force_{date_str}", None)
+                st.rerun(scope="fragment")
 
     with st.expander("Options de rédaction FR (si pivot à créer)", expanded=False):
         st.caption("Utilisées uniquement lorsque la synthèse française doit être rédigée (Vertex).")

@@ -275,45 +275,58 @@ def build_lv_newsletter_email_html(*, subject0: str, values0: dict[str, str], in
     fb_url0 = ap.lumenvia_feedback_survey_abs_url(origin0, recipient_email=email0 or None, lang=_lg_mail)
 
     def _newsletter_cta_href(bb0: str, right: str) -> str:
-        """URL du bouton pill pour une ligne « … 👉 libellé » (corps newsletter)."""
-        href = ""
-        if url_pdf0 and re.search(
-            r"(?i)\bpdf\b|synth[èe]se.*pdf|zusammenfassung.*pdf|summary.*pdf|"
-            r"s[ií]ntesis.*pdf|sintesi.*pdf|s[ií]ntese.*pdf",
-            bb0,
-        ):
-            href = url_pdf0
-        elif url_audio_readings0 and re.search(
-            r"(?i)parole.*audio|lectures|textes\s+bibliques|[ée]critures|"
-            r"das\s+wort|lesungen|readings|biblical|la\s+palabra|lecturas|"
-            r"la\s+parola|letture|leituras|textos\s+b[íi]blicos|escrituras",
-            bb0,
-        ):
-            href = url_audio_readings0
-        elif url_audio0 and re.search(
-            r"(?i)audio|essentiel|wesentliche|essentials?|s[ií]ntesis|sintesi|"
-            r"zusammenfassung|[ée]couter|h[öo]ren|listen|essencial|s[ií]ntese|"
-            r"escutar|ouvir",
-            bb0,
-        ) and not re.search(
-            r"(?i)lectures|lesungen|readings|lecturas|letture|leituras|"
-            r"parole.*\(lectures\)|das\s+wort|la\s+palabra|la\s+parola|"
-            r"textes\s+bibliques|textos\s+b[íi]blicos|escrituras",
-            bb0,
-        ):
-            href = url_audio0
-        elif url_illu0 and re.search(
-            r"(?i)image|illustration|bild|ilustraci[oó]n|illustrazione|ilustra[cç][aã]o", bb0
-        ):
-            href = url_illu0
-        if not href and fb_url0 and re.search(
+        """URL du bouton pill pour une ligne « … 👉 libellé » (corps newsletter).
+
+        L’intention média est détectée d’abord : si le PDF est attendu mais absent,
+        on ne retombe pas sur un audio (évite « bouton PDF → lectures.mp4 »).
+        """
+        blob = f"{bb0}\n{right}"
+        is_pdf = bool(
+            re.search(
+                r"(?i)\bpdf\b|synth[èe]se.*pdf|zusammenfassung.*pdf|summary.*pdf|"
+                r"s[ií]ntesis.*pdf|sintesi.*pdf|s[ií]ntese.*pdf|"
+                r"pdf-?\s*zusammenfassung|zusammenfassung.*herunter",
+                blob,
+            )
+        )
+        is_readings = bool(
+            re.search(
+                r"(?i)parole.*audio|lectures|textes\s+bibliques|[ée]critures|"
+                r"das\s+wort|lesungen|readings|biblical|la\s+palabra|lecturas|"
+                r"la\s+parola|letture|leituras|textos\s+b[íi]blicos|escrituras",
+                blob,
+            )
+        )
+        is_audio = bool(
+            re.search(
+                r"(?i)audio|essentiel|wesentliche|essentials?|s[ií]ntesis|sintesi|"
+                r"zusammenfassung|[ée]couter|h[öo]ren|listen|essencial|s[ií]ntese|"
+                r"escutar|ouvir",
+                blob,
+            )
+        ) and not is_readings and not is_pdf
+        is_illu = bool(
+            re.search(
+                r"(?i)image|illustration|bild|ilustraci[oó]n|illustrazione|ilustra[cç][aã]o",
+                blob,
+            )
+        )
+        if is_pdf:
+            return url_pdf0
+        if is_readings:
+            return url_audio_readings0
+        if is_audio:
+            return url_audio0
+        if is_illu:
+            return url_illu0
+        if fb_url0 and re.search(
             r"(?i)donner\s+mon\s+avis|avis\s+sur\s+cette\s+exp[eé]rience|"
             r"donner\s+votre\s+avis|feedback|meinung|opinion|opini[oó]n|parere|"
             r"opini[aã]o",
             right,
         ):
-            href = fb_url0
-        return href
+            return fb_url0
+        return ""
 
     _cta_button_labels: list[str] = []
     for _k, _ch in segments:
