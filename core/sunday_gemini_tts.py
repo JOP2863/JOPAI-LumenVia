@@ -51,6 +51,10 @@ _SECTION_INTRO_PAUSE_MS = 750
 _CATECHESE_TTS_PAUSE_MS = 900
 # Sous ce seuil, un morceau isolé pousse Gemini TTS à inventer du texte.
 _MIN_TTS_CHUNK_CHARS = 100
+# Découpage évangile long : un peu plus large = moins de césures au milieu des dialogues.
+_LITURGY_READINGS_MAX_CHARS = 1550
+# Dépassement autorisé pour fondre une queue < min_chars (évite hallucinations / reprises).
+_TTS_CHUNK_HARD_MAX_OVERFLOW = 380
 
 # Parallélisme des morceaux TTS (3 par défaut ; secrets ``TTS_CHUNK_WORKERS`` 1–3).
 _DEFAULT_TTS_CHUNK_WORKERS = 3
@@ -100,10 +104,118 @@ def coalesce_short_tts_chunks(
             out[-1] = f"{prev} {ch}".strip()
         else:
             out.append(ch)
-    if len(out) >= 2 and len(out[-1]) < min_chars and len(out[-2]) + 1 + len(out[-1]) <= max_chars:
-        out[-2] = f"{out[-2]} {out[-1]}".strip()
-        out.pop()
+    hard_max = max_chars + _TTS_CHUNK_HARD_MAX_OVERFLOW
+    if len(out) >= 2 and len(out[-1]) < min_chars:
+        merged = f"{out[-2]} {out[-1]}".strip()
+        if len(merged) <= max_chars:
+            out[-2] = merged
+            out.pop()
+        elif len(merged) <= hard_max:
+            out[-2] = merged
+            out.pop()
     return out
+
+
+def _rebalance_short_tail_chunks(
+    chunks: list[str],
+    *,
+    min_chars: int = _MIN_TTS_CHUNK_CHARS,
+    max_chars: int = 1400,
+) -> list[str]:
+    """
+    Évite une dernière bouchée (< ``min_chars``) isolée : fusion ou recul de césure d’un mot.
+    """
+    if len(chunks) < 2:
+        return list(chunks)
+    out = list(chunks)
+    hard_max = max_chars + _TTS_CHUNK_HARD_MAX_OVERFLOW
+    guard = 0
+    while len(out) >= 2 and len(out[-1]) < min_chars and guard < 48:
+        guard += 1
+        prev, tail = out[-2].strip(), out[-1].strip()
+        merged = f"{prev} {tail}".strip()
+        if len(merged) <= hard_max:
+            out[-2] = merged
+            out.pop()
+            break
+        if len(tail) < 40 and len(merged) <= int(hard_max * 1.12):
+            out[-2] = merged
+            out.pop()
+            break
+        if " " not in prev or len(prev) <= min_chars + 8:
+            break
+        head, moved = prev.rsplit(" ", 1)
+        if len(head) < min_chars:
+            break
+        new_tail = f"{moved} {tail}".strip()
+        if len(new_tail) < min_chars or len(new_tail) > max_chars + 64:
+            break
+        out[-2] = head
+        out[-1] = new_tail
+    return out
+
+
+_BAD_DIT_COLON_TAIL = re.compile(r"dit\s*:\s*[\"'«]?\s*$", re.IGNORECASE)
+
+
+def _merge_dit_colon_boundaries(chunks: list[str]) -> list[str]:
+    """Ne pas couper juste avant la réplique qui suit un « … dit : » (hallucinations TTS)."""
+    if len(chunks) < 2:
+        return list(chunks)
+    out: list[str] = []
+    i = 0
+    while i < len(chunks):
+        ch = chunks[i].strip()
+        if i + 1 < len(chunks) and _BAD_DIT_COLON_TAIL.search(ch):
+            out.append(f"{ch} {chunks[i + 1].strip()}".strip())
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return out
+
+
+def _coalesce_any_short_chunks(
+    chunks: list[str],
+    *,
+    min_chars: int = _MIN_TTS_CHUNK_CHARS,
+    max_chars: int = 1400,
+) -> list[str]:
+    """Fusionne tout morceau < ``min_chars`` (milieu ou fin), dans la limite ``hard_max``."""
+    if not chunks:
+        return []
+    hard_max = max_chars + _TTS_CHUNK_HARD_MAX_OVERFLOW
+    out = list(chunks)
+    for _ in range(len(chunks) * 2):
+        idx = next((i for i, c in enumerate(out) if len(c.strip()) < min_chars), None)
+        if idx is None:
+            break
+        merged = False
+        if idx > 0:
+            m = f"{out[idx - 1]} {out[idx]}".strip()
+            if len(m) <= hard_max:
+                out[idx - 1 : idx + 1] = [m]
+                merged = True
+        if not merged and idx + 1 < len(out):
+            m = f"{out[idx]} {out[idx + 1]}".strip()
+            if len(m) <= hard_max:
+                out[idx : idx + 2] = [m]
+                merged = True
+        if not merged:
+            break
+    return out
+
+
+def finalize_tts_chunks(
+    chunks: list[str],
+    *,
+    min_chars: int = _MIN_TTS_CHUNK_CHARS,
+    max_chars: int = 1400,
+) -> list[str]:
+    merged = coalesce_short_tts_chunks(chunks, min_chars=min_chars, max_chars=max_chars)
+    merged = _merge_dit_colon_boundaries(merged)
+    merged = _coalesce_any_short_chunks(merged, min_chars=min_chars, max_chars=max_chars)
+    return _rebalance_short_tail_chunks(merged, min_chars=min_chars, max_chars=max_chars)
 
 
 def _split_by_size(text: str, *, max_chars: int) -> list[str]:
@@ -182,7 +294,7 @@ def _liturgy_section_tts_pieces(
     else:
         body_chunks = body_chunks[1:]
     first = f"{announcement} {first_body}".strip()
-    return coalesce_short_tts_chunks([first, *body_chunks], max_chars=max_chars)
+    return finalize_tts_chunks([first, *body_chunks], max_chars=max_chars)
 
 
 def _liturgy_readings_tts_section_chunk_specs(
@@ -300,7 +412,7 @@ def chunk_text_for_tts(text: str, *, max_chars: int = 1400) -> list[str]:
             final.append(c)
         else:
             final.extend(_split_by_size(c, max_chars=max_chars))
-    return coalesce_short_tts_chunks(final, max_chars=max_chars)
+    return finalize_tts_chunks(final, max_chars=max_chars)
 
 
 def _synthesis_tts_section_chunk_specs(
@@ -348,6 +460,63 @@ def _synthesis_catechese_tts_section_chunks(spoken: str, *, max_chars: int) -> l
     return [pieces for pieces, _pause in specs if pieces]
 
 
+def _run_indexed_tts_parallel(
+    chunks: list[str],
+    job: object,
+    *,
+    quota_retry: bool = True,
+) -> dict[int, bytes]:
+    """Exécute des jobs ``(i, chunk) -> (i, wav)`` ; repli séquentiel si quota (sans course)."""
+    workers = _tts_chunk_workers_for(chunks)
+    if workers <= 1:
+        out: dict[int, bytes] = {}
+        for i, ch in enumerate(chunks):
+            ii, bb = job(i, ch)  # type: ignore[misc, operator]
+            out[ii] = bb
+        return out
+
+    wav_parts_by_i: dict[int, bytes] = {}
+    tts_errors: list[str] = []
+    need_sequential = False
+
+    with ThreadPoolExecutor(max_workers=workers) as ex2:
+        futs = [ex2.submit(job, i, ch) for i, ch in enumerate(chunks)]
+        for fut in as_completed(futs):
+            try:
+                if need_sequential:
+                    fut.result()
+                    continue
+                i, b = fut.result()
+                wav_parts_by_i[i] = b
+            except Exception as ex:
+                err_l = str(ex).lower()
+                if quota_retry and workers > 1 and (
+                    "429" in err_l or "quota" in err_l or "rate" in err_l
+                ):
+                    need_sequential = True
+                    wav_parts_by_i.clear()
+                    tts_errors.clear()
+                else:
+                    tts_errors.append(str(ex))
+
+    if need_sequential and not tts_errors:
+        wav_parts_by_i = {}
+        for j, ch2 in enumerate(chunks):
+            try:
+                jj, bb = job(j, ch2)  # type: ignore[misc, operator]
+                wav_parts_by_i[jj] = bb
+            except Exception as ex2:
+                tts_errors.append(str(ex2))
+                break
+
+    if tts_errors or len(wav_parts_by_i) != len(chunks):
+        raise RuntimeError(
+            "TTS incomplet : "
+            + (tts_errors[0][:200] if tts_errors else "morceaux manquants")
+        )
+    return wav_parts_by_i
+
+
 def _tts_chunks_to_wav(
     *,
     tts_api: GeminiTtsApiClient,
@@ -356,9 +525,6 @@ def _tts_chunks_to_wav(
     french_accent: str | None = None,
     pref_langue: object | None = None,
 ) -> bytes:
-    wav_parts_by_i: dict[int, bytes] = {}
-    tts_errors: list[str] = []
-
     def _tts_job(i: int, ch: str) -> tuple[int, bytes]:
         last_err: Exception | None = None
         for model in _GEMINI_API_TTS_MODELS:
@@ -380,37 +546,7 @@ def _tts_chunks_to_wav(
                 last_err = ex
         raise last_err or RuntimeError("TTS Gemini échoué")
 
-    workers = _tts_chunk_workers_for(chunks)
-    with ThreadPoolExecutor(max_workers=workers) as ex2:
-        futs = [ex2.submit(_tts_job, i, ch) for i, ch in enumerate(chunks)]
-        for fut in as_completed(futs):
-            try:
-                i, b = fut.result()
-                wav_parts_by_i[i] = b
-            except Exception as ex:
-                # Repli séquentiel si saturation quota (429) en parallèle.
-                err_l = str(ex).lower()
-                if workers > 1 and (
-                    "429" in err_l or "quota" in err_l or "rate" in err_l
-                ):
-                    wav_parts_by_i.clear()
-                    tts_errors.clear()
-                    for j, ch2 in enumerate(chunks):
-                        try:
-                            jj, bb = _tts_job(j, ch2)
-                            wav_parts_by_i[jj] = bb
-                        except Exception as ex2:
-                            tts_errors.append(str(ex2))
-                            break
-                    break
-                tts_errors.append(str(ex))
-
-    if tts_errors or len(wav_parts_by_i) != len(chunks):
-        raise RuntimeError(
-            "TTS incomplet : "
-            + (tts_errors[0][:200] if tts_errors else "morceaux manquants")
-        )
-
+    wav_parts_by_i = _run_indexed_tts_parallel(chunks, _tts_job)
     wav_parts = [wav_parts_by_i[i] for i in range(len(chunks))]
     return join_wav_bytes(wav_parts)
 
@@ -648,9 +784,6 @@ def _tts_vertex_chunks_to_wav(
             b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
         return b
 
-    wav_parts_by_i: dict[int, bytes] = {}
-    tts_errors: list[str] = []
-
     def _vertex_job(i: int, ch: str) -> tuple[int, bytes]:
         audio = vertex_client.generate_audio_auto(
             preferred_models=list(_VERTEX_TTS_MODELS),
@@ -667,36 +800,7 @@ def _tts_vertex_chunks_to_wav(
             b, mt, _ = normalize_audio_bytes(audio_bytes=b, mime_type=mt)
         return i, b
 
-    workers = _tts_chunk_workers_for(chunks)
-    with ThreadPoolExecutor(max_workers=workers) as ex2:
-        futs = [ex2.submit(_vertex_job, i, ch) for i, ch in enumerate(chunks)]
-        for fut in as_completed(futs):
-            try:
-                i, b = fut.result()
-                wav_parts_by_i[i] = b
-            except Exception as ex:
-                err_l = str(ex).lower()
-                if workers > 1 and (
-                    "429" in err_l or "quota" in err_l or "rate" in err_l
-                ):
-                    wav_parts_by_i.clear()
-                    tts_errors.clear()
-                    for j, ch2 in enumerate(chunks):
-                        try:
-                            jj, bb = _vertex_job(j, ch2)
-                            wav_parts_by_i[jj] = bb
-                        except Exception as ex2:
-                            tts_errors.append(str(ex2))
-                            break
-                    break
-                tts_errors.append(str(ex))
-
-    if tts_errors or len(wav_parts_by_i) != len(chunks):
-        raise RuntimeError(
-            "TTS Vertex incomplet : "
-            + (tts_errors[0][:200] if tts_errors else "morceaux manquants")
-        )
-
+    wav_parts_by_i = _run_indexed_tts_parallel(chunks, _vertex_job)
     wav_parts = [wav_parts_by_i[i] for i in range(len(chunks))]
     return join_wav_bytes(wav_parts)
 
@@ -712,7 +816,7 @@ def _tts_chunked_bytes_from_spoken(
 ) -> bytes:
     if is_liturgy_readings_tts_text(spoken):
         section_specs = _liturgy_readings_tts_section_chunk_specs(
-            spoken, max_chars=1400, pref_langue=pref_langue
+            spoken, max_chars=_LITURGY_READINGS_MAX_CHARS, pref_langue=pref_langue
         )
         if not section_specs:
             raise ValueError("Texte liturgique vide")

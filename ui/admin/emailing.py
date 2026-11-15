@@ -41,6 +41,29 @@ _TEMP_ACTUALITE_MESSAGE = (
 )
 
 
+@st.dialog("Dernier message d’actualité utilisé", width="large")
+def _adm_email_last_actualite_dialog(*, body: str, preview: str) -> None:
+    """Corps court ; aperçu avec le préfixe hebdo « Cette semaine, … »."""
+    st.caption(
+        "Référence seulement : dernier envoi (RUNS), sinon note du template Actif (ETPL), "
+        "sinon le texte proposé par défaut. Le champ d’édition en page reste vide tant que vous ne saisissez rien."
+    )
+    st.markdown("**Texte (sans préfixe automatique)**")
+    st.text_area(
+        "Corps",
+        value=body,
+        height=160,
+        disabled=True,
+        label_visibility="collapsed",
+        key="adm_email_last_actu_body_dlg",
+    )
+    if preview.strip():
+        st.markdown("**Comme à l’envoi (avec préfixe)**")
+        st.markdown(preview.replace("\n", "  \n"))
+    if st.button("Fermer", key="adm_email_last_actu_dlg_close", use_container_width=True):
+        st.session_state.pop("adm_email_show_last_actualite", None)
+
+
 def render_admin_emailing() -> None:
     import app as ap  # lazy: évite import circulaire avec app.py
 
@@ -55,8 +78,9 @@ def render_admin_emailing() -> None:
         pick_latest_live_email_template,
         render_weekly_email_template,
         resolve_email_nom_du_dimanche,
-        resolve_weekly_actualite_seed,
+        resolve_last_used_weekly_actualite,
         supported_tags,
+        format_weekly_actualite_paragraph,
     )
     from ui.admin_boot import admin_initial_load, admin_initial_load_done
 
@@ -193,42 +217,19 @@ def render_admin_emailing() -> None:
             _sunday_for_actu = next_sun
     _date_str_actu = _sunday_for_actu.isoformat()[:10]
 
-    # Message d’actualité : RUNS (même dimanche) → ETPL status_note → texte proposé.
-    # Brouillons par dimanche en session ; re-seed uniquement au changement de semaine.
-    from core.emailing import latest_weekly_actualite_for_sunday
+    _last_used_actualite = resolve_last_used_weekly_actualite(
+        runs_rows=_runs_rows,
+        status_note_etpl=str((current or {}).get("status_note") or ""),
+        proposed_fallback=_proposed_actualite_message_for_today(),
+    )
 
+    # Brouillons par dimanche : vide par défaut (pas de préremplissage RUNS/ETPL dans l’éditeur).
     _actu_by_sunday = st.session_state.setdefault("adm_email_actu_by_sunday", {})
     if not isinstance(_actu_by_sunday, dict):
         _actu_by_sunday = {}
         st.session_state["adm_email_actu_by_sunday"] = _actu_by_sunday
-    if _date_str_actu not in _actu_by_sunday:
-        _from_runs = latest_weekly_actualite_for_sunday(
-            _runs_rows, date_dimanche=_date_str_actu
-        )
-        _from_etpl = normalize_weekly_actualite_for_editor(
-            str((current or {}).get("status_note") or "")
-        )
-        _existing = normalize_weekly_actualite_for_editor(
-            str(st.session_state.get("adm_email_message_actualite") or "")
-        )
-        if _from_runs:
-            _actu_by_sunday[_date_str_actu] = _from_runs
-        elif (
-            _existing
-            and st.session_state.get("adm_email_actu_for_sunday") is None
-        ):
-            # Brouillon déjà en session (ex. avant reload de page) : ne pas l’écraser
-            # par le texte proposé si aucun RUNS pour ce dimanche.
-            _actu_by_sunday[_date_str_actu] = _existing
-        elif _from_etpl:
-            _actu_by_sunday[_date_str_actu] = _from_etpl
-        else:
-            _actu_by_sunday[_date_str_actu] = resolve_weekly_actualite_seed(
-                date_dimanche=_date_str_actu,
-                runs_rows=_runs_rows,
-                status_note_etpl="",
-                proposed_fallback=_proposed_actualite_message_for_today(),
-            )
+    _actu_by_sunday.setdefault(_date_str_actu, "")
+
     if st.session_state.get("adm_email_actu_for_sunday") != _date_str_actu:
         st.session_state["adm_email_message_actualite"] = str(
             _actu_by_sunday.get(_date_str_actu) or ""
@@ -243,21 +244,20 @@ def render_admin_emailing() -> None:
     st.divider()
     st.markdown("##### Mention de début d’e-mail (chaque semaine)")
     st.caption(
-        "Texte affiché **juste après le bonjour**. À adapter chaque vendredi avant l’envoi. "
-        "**Éditable ici** ; à l’enregistrement / sync, il est **traduit** dans ETPL (`status_note`) "
-        "pour DE/EN/ES/IT/PT — l’envoi utilise la version de la langue du destinataire. "
-        "À l’envoi (y compris test), une ligne **RUNS** garde la mention pour ce dimanche : "
-        "la prochaine génération pour la **même semaine** la recharge (puis ETPL, puis texte proposé). "
-        "Les e-mails DE/EN/ES/IT/PT **traduisent à l’envoi** ce texte FR (pas l’ancien `status_note` ETPL)."
+        "Texte affiché **juste après le bonjour**. **Vide par défaut** chaque semaine — à compléter "
+        "uniquement si besoin. À l’enregistrement / sync, traduit dans ETPL (`status_note`) pour "
+        "DE/EN/ES/IT/PT. Les e-mails hors FR **traduisent à l’envoi** le texte FR saisi ici."
     )
+    if "adm_email_message_actualite" not in st.session_state:
+        st.session_state["adm_email_message_actualite"] = ""
     st.text_area(
         "Message d’actualité pour les destinataires (optionnel)",
         height=140,
         key="adm_email_message_actualite",
-        placeholder="Ex. : ouverture des inscriptions au parcours…",
+        placeholder="Laisser vide pour ne rien ajouter — ou saisir une actualité pour ce dimanche.",
         help=(
-            f"Préfixe automatique : « {WEEKLY_ACTUALITE_LEAD.strip()} ». "
-            "Laisser vide pour ne rien ajouter au prochain envoi."
+            f"Préfixe automatique à l’envoi : « {WEEKLY_ACTUALITE_LEAD.strip()} ». "
+            "Utilise « Voir le dernier message utilisé » pour vous rappeler le texte de la fois précédente."
         ),
     )
     # Mémorise le brouillon pour ce dimanche (y compris après édition / boutons).
@@ -272,7 +272,14 @@ def render_admin_emailing() -> None:
     def _clear_actualite() -> None:
         st.session_state["adm_email_message_actualite"] = ""
 
-    c_prop, c_clear = st.columns(2)
+    c_last, c_prop, c_clear = st.columns([1.15, 1.1, 0.85])
+    with c_last:
+        if st.button(
+            "Voir le dernier message utilisé",
+            key="adm_email_btn_last_actualite",
+            help="Popup : dernière mention en RUNS, sinon template Actif, sinon texte proposé.",
+        ):
+            st.session_state["adm_email_show_last_actualite"] = True
     with c_prop:
         st.button(
             "Remplir avec le texte proposé (nouveautés)",
@@ -282,9 +289,14 @@ def render_admin_emailing() -> None:
         )
     with c_clear:
         st.button("Vider la mention", key="adm_email_actu_clear", on_click=_clear_actualite)
-    with st.expander("Aperçu du paragraphe injecté", expanded=False):
-        from core.emailing import format_weekly_actualite_paragraph
 
+    if st.session_state.get("adm_email_show_last_actualite"):
+        _preview_last = format_weekly_actualite_paragraph(_last_used_actualite)
+        _adm_email_last_actualite_dialog(
+            body=_last_used_actualite,
+            preview=_preview_last,
+        )
+    with st.expander("Aperçu du paragraphe injecté", expanded=False):
         _prev_para = format_weekly_actualite_paragraph(
             str(st.session_state.get("adm_email_message_actualite") or "")
         )
@@ -295,12 +307,7 @@ def render_admin_emailing() -> None:
         date_str = d_pick.isoformat()[:10]
         # Si le dimanche change dans le widget, préparer le seed pour le prochain rerun.
         if date_str != _date_str_actu and date_str not in _actu_by_sunday:
-            _actu_by_sunday[date_str] = resolve_weekly_actualite_seed(
-                date_dimanche=date_str,
-                runs_rows=_runs_rows,
-                status_note_etpl=str((current or {}).get("status_note") or ""),
-                proposed_fallback=_proposed_actualite_message_for_today(),
-            )
+            _actu_by_sunday[date_str] = ""
 
         # Identité liturgique (FR = AELF via facade)
         try:

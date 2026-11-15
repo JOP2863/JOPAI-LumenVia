@@ -535,6 +535,58 @@ def latest_weekly_actualite_for_sunday(
     return best[1] if best else ""
 
 
+def latest_weekly_actualite_from_runs(
+    runs_rows: list[dict] | None,
+    *,
+    campaign_key: str = "weekly_friday_lumenvia",
+) -> str:
+    """Dernière mention ``message_actualite`` en RUNS (tous dimanches confondus)."""
+    if not runs_rows:
+        return ""
+    camp = str(campaign_key or "").strip()
+    best: tuple[str, str] | None = None
+    for rr in runs_rows:
+        if camp and str(rr.get("campaign_key") or "").strip() not in ("", camp):
+            continue
+        mention = normalize_weekly_actualite_for_editor(
+            str(rr.get("message_actualite") or "")
+        )
+        if not mention:
+            continue
+        stamp = (
+            str(rr.get("finished_at") or "").strip()
+            or str(rr.get("started_at") or "").strip()
+            or str(rr.get("created_at") or "").strip()
+        )
+        if best is None or stamp >= best[0]:
+            best = (stamp, mention)
+    return best[1] if best else ""
+
+
+def resolve_last_used_weekly_actualite(
+    *,
+    runs_rows: list[dict] | None,
+    status_note_etpl: str = "",
+    proposed_fallback: str = "",
+    campaign_key: str = "weekly_friday_lumenvia",
+) -> str:
+    """
+    Dernière mention réellement utilisée (référence UI) :
+    RUNS (dernier envoi) → ETPL ``status_note`` → texte proposé.
+    """
+    from_runs = latest_weekly_actualite_from_runs(
+        runs_rows, campaign_key=campaign_key
+    )
+    if from_runs:
+        return from_runs
+    from_etpl = normalize_weekly_actualite_for_editor(status_note_etpl)
+    if from_etpl:
+        return from_etpl
+    return normalize_weekly_actualite_for_editor(
+        proposed_fallback or PROPOSED_WEEKLY_ACTUALITE_MESSAGE
+    )
+
+
 def resolve_weekly_actualite_seed(
     *,
     date_dimanche: str,

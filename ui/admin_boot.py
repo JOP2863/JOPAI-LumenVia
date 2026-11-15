@@ -25,7 +25,7 @@ _BOOT_CSS = """
 """
 
 
-def admin_initial_load(*, message: str = "Chargement…") -> object:
+def admin_initial_load(message: str = "Chargement…") -> object:
     """Placeholder plein écran jusqu’à ``admin_initial_load_done`` (évite l’effet morceau par morceau)."""
     slot = st.empty()
     slot.markdown(
