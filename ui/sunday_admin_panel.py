@@ -265,6 +265,80 @@ div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] > label {
   justify-content: center !important;
   width: 100%;
 }
+/* Mobile réel : hint posé par Python (UA), pas seulement media-query viewport. */
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) {
+  overflow-x: hidden !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) [data-testid="column"] {
+  display: block !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  flex: 1 1 auto !important;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) .lv-ml-mobile-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  line-height: 1.35;
+  max-width: 100%;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) .lv-ml-mobile-kind .lv-ml-kind-lab {
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) .lv-ml-mobile-kind .lv-ml-cell {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) .lv-ml-mobile-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  max-width: 100%;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) .lv-ml-mobile-kind-row {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0.12rem 0 !important;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint)
+  div[class*="st-key-lv_ml_mkind_"] [data-testid="stHorizontalBlock"] {
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  width: 100% !important;
+  gap: 0.35rem !important;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint)
+  div[class*="st-key-lv_ml_mkind_"] [data-testid="column"]:first-child {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint)
+  div[class*="st-key-lv_ml_mkind_"] [data-testid="column"]:last-child {
+  flex: 0 0 2.75rem !important;
+  max-width: 2.75rem !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+div[class*="st-key-lv_ml_matrix"]:has(.lv-ml-matrix-compact-hint) [data-testid="stCheckbox"] label {
+  justify-content: center !important;
+  margin: 0 auto !important;
+  min-height: 2rem !important;
+}
+.lv-ml-form-actions-compact [data-testid="stFormSubmitButton"] button {
+  min-height: 2.65rem !important;
+}
+span.lv-ml-matrix-compact-hint {
+  display: none !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
 div[class*="st-key-lv_ml_row"] {
   margin: 0.2rem 0.1rem 0.45rem 0.1rem !important;
   padding: 0.35rem 0.4rem 0.45rem 0.4rem !important;
@@ -287,55 +361,13 @@ div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] label {
 div[class*="st-key-lv_ml_matrix"] [data-testid="stCaptionContainer"] {
   margin-top: 0.15rem !important;
 }
-/* Téléphone : 2×2, en-tête langue + bouton sur une ligne. */
-@media (max-width: 640px) {
+/* Viewport étroit (complément du hint UA). */
+@media (max-width: 720px) {
+  div[class*="st-key-lv_ml_matrix"] {
+    overflow-x: hidden !important;
+  }
   div[class*="st-key-lv_ml_row_"] {
     padding: 0.4rem 0.35rem 0.5rem 0.35rem !important;
-  }
-  div[class*="st-key-lv_ml_row_"] [data-testid="stHorizontalBlock"] {
-    flex-wrap: nowrap !important;
-    align-items: center !important;
-    gap: 0.35rem !important;
-  }
-  div[class*="st-key-lv_ml_row_"] .lv-ml-mobile-head {
-    margin: 0 0 0.4rem 0;
-    width: 100%;
-  }
-  div[class*="st-key-lv_ml_kinds_"] [data-testid="stHorizontalBlock"] {
-    flex-wrap: nowrap !important;
-    width: 100% !important;
-    align-items: stretch !important;
-  }
-  div[class*="st-key-lv_ml_kinds_"] [data-testid="column"] {
-    flex: 1 1 50% !important;
-    max-width: 50% !important;
-    min-width: 0 !important;
-    align-items: center !important;
-  }
-  div[class*="st-key-lv_ml_matrix"] .lv-ml-kind-slot {
-    min-height: 2.85rem;
-    padding: 0.1rem 0.15rem;
-  }
-  div[class*="st-key-lv_ml_matrix"] .lv-ml-kind-lab {
-    font-size: 0.68rem;
-    white-space: normal;
-  }
-  div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] {
-    width: 100% !important;
-    display: flex !important;
-    justify-content: center !important;
-  }
-  div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] > label,
-  div[class*="st-key-lv_ml_matrix"] [data-testid="stCheckbox"] label {
-    justify-content: center !important;
-    width: auto !important;
-    margin: 0 auto !important;
-  }
-  div[class*="st-key-lv_ml_matrix"] [data-testid="stFormSubmitButton"] button {
-    white-space: normal !important;
-    line-height: 1.25 !important;
-    font-size: 0.78rem !important;
-    padding: 0.35rem 0.45rem !important;
   }
 }
 </style>
@@ -402,6 +434,73 @@ def _render_kind_cell(
     )
 
 
+def _render_kind_row_mobile(
+    *,
+    r: LangMediaStatus,
+    kind: str,
+    icon: str,
+    date_str: str,
+    fr_has_text: bool,
+) -> None:
+    """Une ligne par média : libellé + statut à gauche, case à droite (pile verticale sur téléphone)."""
+    ready = _status_ready(r, kind)
+    help_txt = _KIND_LABELS.get(kind, kind)
+    if ready:
+        help_txt += " - cocher pour régénérer"
+    else:
+        help_txt += " - cocher pour produire"
+        if not fr_has_text and r.lang != "FR" and kind in _KINDS_NEED_FR_PIVOT:
+            help_txt += " (nécessitera la synthèse FR pivot)"
+    ck = _cell_key(date_str, r.lang, kind)
+    if ck not in st.session_state:
+        st.session_state[ck] = False
+    short = _KIND_SHORT_LABELS.get(kind, kind)
+    cell_html = _matrix_cell_html(row=r, kind=kind, icon=icon)
+    with st.container(key=f"lv_ml_mkind_{r.lang}_{kind}"):
+        left, right = st.columns(
+            [6.5, 1],
+            gap="small",
+            vertical_alignment="center",
+        )
+        with left:
+            st.markdown(
+                f'<div class="lv-ml-mobile-kind">'
+                f'<span class="lv-ml-kind-lab">{html_escape(short)}</span>'
+                f'<span class="lv-ml-cell">{cell_html}</span>'
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        with right:
+            st.checkbox(
+                "↺" if ready else "+",
+                key=ck,
+                help=help_txt,
+                label_visibility="collapsed",
+            )
+
+
+def _media_matrix_compact_mode() -> bool:
+    """Layout pile (téléphone) : UA, menu dépliant, simulateur admin, Client Hint mobile."""
+    if _use_compact_top_nav():
+        st.session_state["lv_ml_force_compact"] = True
+        return True
+    if bool(st.session_state.get("admin_phone_preview")):
+        return True
+    try:
+        hdrs = getattr(st.context, "headers", None) or {}
+        ch = str(
+            hdrs.get("sec-ch-ua-mobile")
+            or hdrs.get("Sec-CH-UA-Mobile")
+            or hdrs.get("sec-ch-ua-mobile")
+            or ""
+        ).strip()
+        if ch in ("?1", "?1;"):
+            return True
+    except Exception:
+        pass
+    return bool(st.session_state.get("lv_ml_force_compact"))
+
+
 def _render_media_status_matrix(
     *,
     rows: list[LangMediaStatus],
@@ -414,10 +513,15 @@ def _render_media_status_matrix(
     Retourne ``{lang: True}`` si le bouton « Toute la ligne » de cette langue a été soumis.
     """
     row_clicked: dict[str, bool] = {}
-    compact = _use_compact_top_nav()
+    compact = _media_matrix_compact_mode()
     _row_layout = [1.05, 1, 1, 1, 1, 1.15]
 
     with st.container(key="lv_ml_matrix"):
+        if compact:
+            st.markdown(
+                '<span class="lv-ml-matrix-compact-hint" aria-hidden="true"></span>',
+                unsafe_allow_html=True,
+            )
         if not compact:
             hcols = st.columns(_row_layout, gap="small")
             with hcols[0]:
@@ -437,7 +541,7 @@ def _render_media_status_matrix(
             with st.container(key=f"lv_ml_row_{r.lang}"):
                 if compact:
                     head_l, head_r = st.columns(
-                        [1.55, 1],
+                        [1.35, 1],
                         gap="small",
                         vertical_alignment="center",
                     )
@@ -457,20 +561,14 @@ def _render_media_status_matrix(
                                 help=f"Basculer les 4 médias pour {r.lang}",
                             )
                         )
-                    with st.container(key=f"lv_ml_kinds_{r.lang}"):
-                        for pair_start in (0, 2):
-                            pair = st.columns(2, gap="small")
-                            for j, (kind, _attr, icon) in enumerate(
-                                _MEDIA_KINDS[pair_start : pair_start + 2]
-                            ):
-                                with pair[j]:
-                                    _render_kind_cell(
-                                        r=r,
-                                        kind=kind,
-                                        icon=icon,
-                                        date_str=date_str,
-                                        fr_has_text=fr_has_text,
-                                    )
+                    for kind, _attr, icon in _MEDIA_KINDS:
+                        _render_kind_row_mobile(
+                            r=r,
+                            kind=kind,
+                            icon=icon,
+                            date_str=date_str,
+                            fr_has_text=fr_has_text,
+                        )
                 else:
                     cols = st.columns(_row_layout, gap="small")
                     with cols[0]:
@@ -850,6 +948,7 @@ def _sunday_multilang_admin_fragment(
 
     plan_pending = list(st.session_state.get(_plan_key) or [])
     form_disabled = bool(plan_pending)
+    compact_ml = _media_matrix_compact_mode()
 
     with st.form(key=f"adm_ml_form_{date_str}", border=False, clear_on_submit=False):
         row_clicked = _render_media_status_matrix(
@@ -866,42 +965,92 @@ def _sunday_multilang_admin_fragment(
         else:
             st.caption("Tous publiés - coche pour régénérer, puis lance.")
 
-        b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
-        with b_sel:
-            do_sel = st.form_submit_button(
-                "Tout sélectionner",
-                disabled=not all_keys or form_disabled,
-                use_container_width=True,
+        do_sel = do_desel = do_gen = do_refresh = False
+        if compact_ml:
+            st.markdown(
+                '<div class="lv-ml-form-actions-compact">',
+                unsafe_allow_html=True,
             )
-        with b_desel:
-            do_desel = st.form_submit_button(
-                "Tout désélectionner",
-                disabled=not all_keys or form_disabled,
-                use_container_width=True,
+            do_gen = bool(
+                st.form_submit_button(
+                    "Lancer la sélection",
+                    type="primary",
+                    disabled=gcs is None or form_disabled,
+                    use_container_width=True,
+                    help=(
+                        "GCS indisponible."
+                        if gcs is None
+                        else (
+                            "Confirme ou annule ci-dessous."
+                            if plan_pending
+                            else "Envoie la sélection cochée (confirmation ensuite)."
+                        )
+                    ),
+                )
             )
-        with b_gen:
-            do_gen = st.form_submit_button(
-                "Lancer la sélection",
-                type="primary",
-                disabled=gcs is None or form_disabled,
-                use_container_width=True,
-                help=(
-                    "GCS indisponible."
-                    if gcs is None
-                    else (
-                        "Confirme ou annule ci-dessous."
-                        if plan_pending
-                        else "Envoie la sélection cochée (confirmation ensuite)."
+            b_sel, b_desel = st.columns(2, gap="small")
+            with b_sel:
+                do_sel = bool(
+                    st.form_submit_button(
+                        "Tout sélectionner",
+                        disabled=not all_keys or form_disabled,
+                        use_container_width=True,
                     )
-                ),
+                )
+            with b_desel:
+                do_desel = bool(
+                    st.form_submit_button(
+                        "Tout désélectionner",
+                        disabled=not all_keys or form_disabled,
+                        use_container_width=True,
+                    )
+                )
+            do_refresh = bool(
+                st.form_submit_button(
+                    "↻ Statut",
+                    disabled=form_disabled,
+                    use_container_width=True,
+                    help="Relire GCS/Sheets (ignore le cache)",
+                )
             )
-        with b_refresh:
-            do_refresh = st.form_submit_button(
-                "↻ Statut",
-                disabled=form_disabled,
-                use_container_width=True,
-                help="Relire GCS/Sheets (ignore le cache)",
-            )
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            b_sel, b_desel, b_gen, b_refresh = st.columns([1, 1, 1.2, 0.85])
+            with b_sel:
+                do_sel = st.form_submit_button(
+                    "Tout sélectionner",
+                    disabled=not all_keys or form_disabled,
+                    use_container_width=True,
+                )
+            with b_desel:
+                do_desel = st.form_submit_button(
+                    "Tout désélectionner",
+                    disabled=not all_keys or form_disabled,
+                    use_container_width=True,
+                )
+            with b_gen:
+                do_gen = st.form_submit_button(
+                    "Lancer la sélection",
+                    type="primary",
+                    disabled=gcs is None or form_disabled,
+                    use_container_width=True,
+                    help=(
+                        "GCS indisponible."
+                        if gcs is None
+                        else (
+                            "Confirme ou annule ci-dessous."
+                            if plan_pending
+                            else "Envoie la sélection cochée (confirmation ensuite)."
+                        )
+                    ),
+                )
+            with b_refresh:
+                do_refresh = st.form_submit_button(
+                    "↻ Statut",
+                    disabled=form_disabled,
+                    use_container_width=True,
+                    help="Relire GCS/Sheets (ignore le cache)",
+                )
 
     # « Toute la ligne » : cible calculée au submit (valeurs des cases déjà en session).
     for lang, clicked in row_clicked.items():
